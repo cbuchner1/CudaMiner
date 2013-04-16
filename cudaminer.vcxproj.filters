@@ -1,0 +1,104 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{2450a9c7-a97a-49e1-ba19-c8dbc5a4e3e7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\jansson">
+      <UniqueIdentifier>{17b56151-79ec-4a32-bac3-9d94ae7f68fe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\gettimeofday">
+      <UniqueIdentifier>{c53ce808-c5c5-4c6c-99a2-3947090c62f1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\getopt">
+      <UniqueIdentifier>{5a45c1bf-81d2-4bc6-97b5-714e34f51a82}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{431cec61-9376-4de9-aae9-04c4250652e7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\compat">
+      <UniqueIdentifier>{cc8bb259-5332-4a45-ba81-f4840a55b604}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\compat\getopt">
+      <UniqueIdentifier>{89362bd8-4690-4f0c-a4f7-6b2fa67a1f34}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\compat\sys">
+      <UniqueIdentifier>{6c3cd392-b6b8-424c-87d2-10e33dbd4b41}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="cuda-miner.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="scrypt.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sha2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="util.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\jansson\dump.c">
+      <Filter>Source Files\jansson</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\jansson\hashtable.c">
+      <Filter>Source Files\jansson</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\jansson\load.c">
+      <Filter>Source Files\jansson</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\jansson\strbuffer.c">
+      <Filter>Source Files\jansson</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\jansson\utf.c">
+      <Filter>Source Files\jansson</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\jansson\value.c">
+      <Filter>Source Files\jansson</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\getopt\getopt_long.c">
+      <Filter>Source Files\getopt</Filter>
+    </ClCompile>
+    <ClCompile Include="compat\gettimeofday.c">
+      <Filter>Source Files\gettimeofday</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="compat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cudaminer-config.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="elist.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="miner.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="compat\sys\time.h">
+      <Filter>Header Files\compat\sys</Filter>
+    </ClInclude>
+    <ClInclude Include="compat\unistd.h">
+      <Filter>Header Files\compat</Filter>
+    </ClInclude>
+    <ClInclude Include="compat\inttypes.h">
+      <Filter>Header Files\compat</Filter>
+    </ClInclude>
+    <ClInclude Include="compat\getopt\getopt.h">
+      <Filter>Header Files\compat\getopt</Filter>
+    </ClInclude>
+    <ClInclude Include="compat\stdbool.h">
+      <Filter>Header Files\compat</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="titan_kernel.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+    <CudaCompile Include="salsa_kernel.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+  </ItemGroup>
+</Project>
