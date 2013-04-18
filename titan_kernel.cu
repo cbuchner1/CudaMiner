@@ -30,7 +30,10 @@ typedef unsigned int uint32_t;
 #define checkCudaErrors(x) x
 #define getLastCudaError(x)
 
-__constant__ uint32_t* c_V[1024];
+// from salsa_kernel.cu
+extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
+
+__constant__ const uint32_t* __restrict__ c_V[1024];
 
 #define ROTL(a, b) __funnelshift_l( a, a, b );
 
@@ -77,7 +80,7 @@ static __device__ void xor_salsa8(uint32_t *B, const uint32_t *C)
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void
-scrypt_core_kernel_spinlock_titan(uint32_t *g_idata, uint32_t *g_odata, int *mutex)
+scrypt_core_kernel_spinlock_titanA(uint32_t *g_idata, int *mutex)
 {
     __shared__ uint32_t X[WU_PER_WARP][16+1]; // +1 to resolve bank conflicts
 
@@ -90,8 +93,7 @@ scrypt_core_kernel_spinlock_titan(uint32_t *g_idata, uint32_t *g_odata, int *mut
     // add block specific offsets
     int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_idata += 32 * offset + halfwarpThread;
-    g_odata += 32 * offset + halfwarpThread;
-    uint32_t *V = c_V[offset/WU_PER_WARP] + halfwarpThread;
+    uint32_t *V = (uint32_t *) c_V[offset/WU_PER_WARP] + halfwarpThread;
 
     // registers to store an entire work unit
     uint32_t B[16], C[16];
@@ -109,11 +111,11 @@ scrypt_core_kernel_spinlock_titan(uint32_t *g_idata, uint32_t *g_odata, int *mut
 #pragma unroll 16
     for (int idx=0; idx < 16; idx++) C[idx] = X[warpThread][idx];
 
-    if (warpThread == 0) unlock(mutex, blockIdx.x);
-    xor_salsa8(B, C); xor_salsa8(C, B);
-    if (warpThread == 0) lock(mutex, blockIdx.x);
-
     for (int i = 1; i < 1024; i++) {
+
+        if (warpThread == 0) unlock(mutex, blockIdx.x);
+        xor_salsa8(B, C); xor_salsa8(C, B);
+        if (warpThread == 0) lock(mutex, blockIdx.x);
 
 #pragma unroll 16
         for (int idx=0; idx < 16; ++idx) X[warpThread][idx] = B[idx];
@@ -126,11 +128,45 @@ scrypt_core_kernel_spinlock_titan(uint32_t *g_idata, uint32_t *g_odata, int *mut
 #pragma unroll 1
         for (int wu=0; wu < 16; wu++)
             V[SCRATCH*(2*wu+halfwarpOffset) + i*32 + 16] = X[2*wu+halfwarpOffset][halfwarpThread];
-
-        if (warpThread == 0) unlock(mutex, blockIdx.x);
-        xor_salsa8(B, C); xor_salsa8(C, B);
-        if (warpThread == 0) lock(mutex, blockIdx.x);
     }
+    if (warpThread == 0) unlock(mutex, blockIdx.x);
+}
+
+__global__ void
+scrypt_core_kernel_spinlock_titanB(uint32_t *g_odata, int *mutex)
+{
+    __shared__ uint32_t X[WU_PER_WARP][16+1]; // +1 to resolve bank conflicts
+
+    int warpIdx         = threadIdx.x / warpSize;
+    int warpThread      = threadIdx.x % warpSize;
+    int halfwarpOffset  = warpThread/16;
+    int halfwarpThread  = warpThread%16;
+    int WARPS_PER_BLOCK = blockDim.x / warpSize;
+
+    // add block specific offsets
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_odata += 32 * offset + halfwarpThread;
+    const uint32_t* __restrict__ V = c_V[offset/WU_PER_WARP] + halfwarpThread;
+
+    // registers to store an entire work unit
+    uint32_t B[16], C[16];
+
+    if (warpThread == 0) lock(mutex, blockIdx.x);
+#pragma unroll 16
+    for (int wu=0; wu < 16; wu++)
+        X[2*wu+halfwarpOffset][halfwarpThread] = V[SCRATCH*(2*wu+halfwarpOffset) + 1023*32];
+#pragma unroll 16
+    for (int idx=0; idx < 16; idx++) B[idx] = X[warpThread][idx];
+
+#pragma unroll 16
+    for (int wu=0; wu < 16; wu++)
+        X[2*wu+halfwarpOffset][halfwarpThread] = V[SCRATCH*(2*wu+halfwarpOffset) + 1023*32 + 16];
+#pragma unroll 16
+    for (int idx=0; idx < 16; idx++) C[idx] = X[warpThread][idx];
+
+    if (warpThread == 0) unlock(mutex, blockIdx.x);
+    xor_salsa8(B, C); xor_salsa8(C, B);
+    if (warpThread == 0) lock(mutex, blockIdx.x);
 
     for (int i = 0; i < 1024; i++) {
 
@@ -179,7 +215,7 @@ scrypt_core_kernel_spinlock_titan(uint32_t *g_idata, uint32_t *g_odata, int *mut
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernel_titan(uint32_t *g_idata, uint32_t *g_odata)
+scrypt_core_kernel_titanA(uint32_t *g_idata)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1]; // +1 to resolve bank conflicts
 
@@ -191,8 +227,7 @@ scrypt_core_kernel_titan(uint32_t *g_idata, uint32_t *g_odata)
     // add block specific offsets
     int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_idata += 32 * offset + halfwarpThread;
-    g_odata += 32 * offset + halfwarpThread;
-    uint32_t *V = c_V[offset/WU_PER_WARP] + halfwarpThread;
+    uint32_t *V = (uint32_t *) c_V[offset/WU_PER_WARP] + halfwarpThread;
 
     // registers to store an entire work unit
     uint32_t B[16], C[16];
@@ -209,9 +244,9 @@ scrypt_core_kernel_titan(uint32_t *g_idata, uint32_t *g_odata)
 #pragma unroll 16
     for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
 
-    xor_salsa8(B, C); xor_salsa8(C, B);
-
     for (int i = 1; i < 1024; i++) {
+
+        xor_salsa8(B, C); xor_salsa8(C, B);
 
 #pragma unroll 16
         for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
@@ -224,9 +259,47 @@ scrypt_core_kernel_titan(uint32_t *g_idata, uint32_t *g_odata)
 #pragma unroll 1
         for (int wu=0; wu < 16; wu++)
             V[SCRATCH*(2*wu+halfwarpOffset) + i*32 + 16] = X[warpIdx][2*wu+halfwarpOffset][halfwarpThread];
-
-        xor_salsa8(B, C); xor_salsa8(C, B);
     }
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+//! Scrypt core kernel
+//! Version for Geforce Titan, low register count (<=64), low shared mem use.
+//! @param g_idata  input data in global memory
+//! @param g_odata  output data in global memory
+////////////////////////////////////////////////////////////////////////////////
+template <int WARPS_PER_BLOCK> __global__ void
+scrypt_core_kernel_titanB(uint32_t *g_odata)
+{
+    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1]; // +1 to resolve bank conflicts
+
+    int warpIdx        = threadIdx.x / warpSize;
+    int warpThread     = threadIdx.x % warpSize;
+    int halfwarpOffset = warpThread/16;
+    int halfwarpThread = warpThread%16;
+
+    // add block specific offsets
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_odata += 32 * offset + halfwarpThread;
+    const uint32_t* __restrict__ V = c_V[offset/WU_PER_WARP] + halfwarpThread;
+
+    // registers to store an entire work unit
+    uint32_t B[16], C[16];
+
+#pragma unroll 16
+    for (int wu=0; wu < 16; wu++)
+        X[warpIdx][2*wu+halfwarpOffset][halfwarpThread] = V[SCRATCH*(2*wu+halfwarpOffset) + 1023*32];
+#pragma unroll 16
+    for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
+
+#pragma unroll 16
+    for (int wu=0; wu < 16; wu++)
+        X[warpIdx][2*wu+halfwarpOffset][halfwarpThread] = V[SCRATCH*(2*wu+halfwarpOffset) + 1023*32 + 16];
+#pragma unroll 16
+    for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
+
+    xor_salsa8(B, C); xor_salsa8(C, B);
 
     for (int i = 0; i < 1024; i++) {
 
@@ -270,26 +343,55 @@ void set_titan_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
-bool run_titan_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special)
+bool run_titan_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark)
 {
     bool success = true;
 
     // clear CUDA's error variable
     cudaGetLastError();
 
-    // execute the kernel
+    // First phase: Sequential writes to scratchpad.
+
     if (special)
-        scrypt_core_kernel_spinlock_titan<<< grid, threads, 0, stream >>>(d_idata, d_odata, mutex);
+        scrypt_core_kernel_spinlock_titanA<<< grid, threads, 0, stream >>>(d_idata, mutex);
     else
         switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernel_titan<1><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
-            case 2: scrypt_core_kernel_titan<2><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
-            case 3: scrypt_core_kernel_titan<3><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
-            case 4: scrypt_core_kernel_titan<4><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
-            case 5: scrypt_core_kernel_titan<5><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
-            case 6: scrypt_core_kernel_titan<6><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
-            case 7: scrypt_core_kernel_titan<7><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
-            case 8: scrypt_core_kernel_titan<8><<< grid, threads, 0, stream >>>(d_idata, d_odata); break;
+            case 1: scrypt_core_kernel_titanA<1><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 2: scrypt_core_kernel_titanA<2><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 3: scrypt_core_kernel_titanA<3><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 4: scrypt_core_kernel_titanA<4><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 5: scrypt_core_kernel_titanA<5><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 6: scrypt_core_kernel_titanA<6><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 7: scrypt_core_kernel_titanA<7><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 8: scrypt_core_kernel_titanA<8><<< grid, threads, 0, stream >>>(d_idata); break;
+            default: success = false; break;
+        }
+
+    // Optional millisecond sleep in between kernels
+
+    if (!benchmark && interactive) {
+        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
+#ifdef WIN32
+        Sleep(1);
+#else
+        usleep(1000);
+#endif
+    }
+
+    // Second phase: Random read access from scratchpad.
+
+    if (special)
+        scrypt_core_kernel_spinlock_titanB<<< grid, threads, 0, stream >>>(d_odata, mutex);
+    else
+        switch (WARPS_PER_BLOCK) {
+            case 1: scrypt_core_kernel_titanB<1><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 2: scrypt_core_kernel_titanB<2><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 3: scrypt_core_kernel_titanB<3><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 4: scrypt_core_kernel_titanB<4><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 5: scrypt_core_kernel_titanB<5><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 6: scrypt_core_kernel_titanB<6><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 7: scrypt_core_kernel_titanB<7><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 8: scrypt_core_kernel_titanB<8><<< grid, threads, 0, stream >>>(d_odata); break;
             default: success = false; break;
         }
 

@@ -1,5 +1,5 @@
 
-CudaMiner release April 13th 2013 - alpha release
+CudaMiner release April 17th 2013 - alpha release
 -------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
@@ -12,7 +12,7 @@ Some numbers from my testing:
 GTX 260:    44  kHash/sec  (OpenCL: 20)
 GTX 640:    39  kHash/sec
 GTX 460:   101  kHash/sec
-GTX 560Ti: 134  kHash/sec
+GTX 560Ti: 140  kHash/sec
 GTX 660Ti: 156  kHash/sec  (OpenCL: 60-70)
 
 Your nVidia cards will now suck a little less for mining! This tool
@@ -38,10 +38,14 @@ Additional command line options are:
 --interactive    [-i] list of flags (0 or 1) to enable interactive
                  desktop performance on individual cards. Use this
                  to remove lag at the cost of some hashing performance.
+                 Do not use large launch configs for devices that shall
+                 run in interactive mode - it's best to use autotune!
 
---texture-cache  [-C] list of flags (0 or 1) to enable use of the 
+--texture-cache  [-C] list of flags (0 or 1 or 2) to enable use of the 
                  texture cache for reading from the scrypt scratchpad.
-                 This is very experimental and may hurt performance.
+                 1 uses a 1D cache, whereas 2 uses a 2D texture layout.
+                 This is very experimental and may hurt performance
+                 on some cards.
 
 --single-memory  [-m] list of flags (0 or 1) to make the devices
                  allocate their scrypt scratchpad in a single,
@@ -51,19 +55,19 @@ Additional command line options are:
 
 >>> Example command line options, advanced use <<<
 
-cudaminer.exe -d 0,1,2 -i 1,0,0 -l auto,S27x3,28x4 -C 0,0,1
+cudaminer.exe -d 0,1,2 -i 1,0,0 -l auto,S27x3,28x4 -C 0,2,1
 -o http://ltc.kattare.com:9332 -O myworker.1:mypass
 
-I tells cudaminer to use devices 0,1 and 2. Because I have the monitor
-attached to device 0, I set that device to run in interactive mode and
-to be fully responsive for desktop use while mining.
+I tell cudaminer to use devices 0,1 and 2. Because I have the monitor
+attached to device 0, I set that device to run in interactive mode so
+it is fully responsive for desktop use while mining.
 
-Device 1 will use kernel launch configuration S27x3, device 2 uses 28x4,
-but device 0 performs autotune for interactive mode because I explicitly
-set it to auto.
+Device 0 performs autotune for interactive mode because I explicitly
+set it to auto. Device 1 will use kernel launch configuration S27x3 and
+device 2 uses 28x4.
 
-I turn on the use of the texture cache for Device 1, and off for the
-other devices.
+I turn on the use of the texture cache to 2D for device 1, 1D for device
+2 and off for the other devices.
 
 The given -o/-O settings mine on Burnside's pool, on which I happen to have
 an account.
@@ -88,6 +92,21 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+- the April 17th release fixes the texture cache feature (yay!) but
+  the even Kepler cards currently see no real benefits yet (boo!).
+
+  Ctrl-C will now also interrupt the autotuning loop, and pressing
+  Ctrl-C a second time will always result in a hard exit.
+
+  The Titan kernel was refactored into a write-to-scratchpad phase and
+  into a read-from-scratchpad case using const __restrict__ pointers,
+  which makes the Titan automatically use the 48kb texture cache in each
+  SMX during the read phase. No need to use the -C flag with Titan.
+
+  CPU utilization seems lower than in previous releases, especially in
+  interactive mode. In fact I barely see cudaminer.exe consuming CPU
+  resources all ;)
 
 - the April 14th release lowers the CPU use dramatically. I also fixed the
   Windows specific driver crash on CTRL-C problem. You still should not
@@ -175,9 +194,8 @@ Prefix  | Non-Titan          | Titan
 >>> TODO <<<
 
 Usability Improvements:
-- fix Linux (and Windows?) 64bit compilation
-- cleaner shutdown on CTRL-C
 - add reasonable error checking for CUDA API calls
+- fix Linux (and Windows?) 64bit compilation
 - add Stratum support
 - add failover support
 

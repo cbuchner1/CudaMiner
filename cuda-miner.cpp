@@ -55,7 +55,7 @@ extern bool autotune;
 bool abort_flag = false;
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2013-04-14"
+#define PROGRAM_VERSION		"2013-04-17"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -1118,34 +1118,37 @@ void signal_handler(int sig)
 }
 #else
 BOOL CtrlHandler( DWORD fdwCtrlType ) 
-{ 
+{
+  bool result = (abort_flag == false);
   switch( fdwCtrlType ) 
   { 
     case CTRL_C_EVENT: 
-      fprintf(stderr, "Ctrl-C\n" );
+      if (result) fprintf(stderr, "Ctrl-C\n" );
       abort_flag = true; restart_threads(); workio_abort();
-      return( TRUE );
+      return( result );
 
     case CTRL_CLOSE_EVENT: 
-      fprintf(stderr, "Ctrl-Close\n" );
+      if (result) fprintf(stderr, "Ctrl-Close\n" );
       abort_flag = true; restart_threads(); workio_abort();
-      return( TRUE ); 
+      sleep(1);
+      return( result ); 
  
     case CTRL_BREAK_EVENT: 
-      fprintf(stderr, "Ctrl-Break\n" );
+      if (result) fprintf(stderr, "Ctrl-Break\n" );
       abort_flag = true; restart_threads(); workio_abort();
-      return( TRUE ); 
+      return( result ); 
  
     case CTRL_LOGOFF_EVENT: 
-      fprintf(stderr, "Ctrl-Logoff\n" );
+      if (result) fprintf(stderr, "Ctrl-Logoff\n" );
       abort_flag = true; restart_threads(); workio_abort();
-      return( TRUE ); 
+      return( result ); 
  
     case CTRL_SHUTDOWN_EVENT: 
-      fprintf(stderr, "Ctrl-Shutdown\n" );
+      if (result) fprintf(stderr, "Ctrl-Shutdown\n" );
       abort_flag = true; restart_threads(); workio_abort();
-      return( TRUE ); 
+      return( result ); 
   }
+  return ( FALSE );
 }
  #endif
 
