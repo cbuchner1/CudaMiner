@@ -55,7 +55,7 @@ extern bool autotune;
 bool abort_flag = false;
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2013-04-17"
+#define PROGRAM_VERSION		"2013-04-22"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 

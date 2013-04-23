@@ -385,7 +385,7 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 	}
 
 #if JANSSON_VERSION_HEX >= 0x020000
-	val = json_loads(all_data.buf, 0, &err);
+	val = json_loads((const char*)all_data.buf, 0, &err);
 #else
 	val = json_loads((const char*)all_data.buf, &err);
 #endif

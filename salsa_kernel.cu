@@ -6,10 +6,12 @@
 #include "device_launch_parameters.h"
 #include <cuda.h>
 
-#include <stdio.h>
+typedef unsigned int uint32_t; // define this as 32 bit type derived from int
+
 #ifdef WIN32
 #include <windows.h>
 #endif
+#include <stdio.h>
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -17,14 +19,38 @@
 #include <map>
 #include <algorithm>
 
-#include "miner.h"
+#include <stdbool.h>
+
+extern void applog(int prio, const char *fmt, ...);
+#ifdef HAVE_SYSLOG_H
+#include <syslog.h> 
+#else
+enum {
+        LOG_ERR,
+        LOG_WARNING,
+        LOG_INFO,   
+        LOG_DEBUG,  
+};
+#endif
 
 #ifndef WIN32
 #define _strdup(x) strdup(x)
 #define _stricmp(x,y) strcasecmp(x,y)
 #endif
 
-typedef unsigned int uint32_t;
+#if WIN32
+#ifdef _WIN64
+#define _64BIT_ALIGN 1
+#else
+#define _64BIT_ALIGN 0
+#endif
+#else
+#if __x86_64__
+#define _64BIT_ALIGN 1
+#else
+#define _64BIT_ALIGN 0
+#endif
+#endif
 
 // Define work unit size
 #define WU_PER_WARP 32
@@ -34,6 +60,7 @@ typedef unsigned int uint32_t;
 
 // from cuda-miner.cpp
 extern bool abort_flag;
+extern bool opt_debug;
 
 // from titan_kernel.cu compilation unit
 extern void set_titan_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
@@ -50,10 +77,10 @@ bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id,
 __constant__ uint32_t* c_V[1024];
 
 // using texture references for the "tex" variants of the B kernels
-texture<ulong2, 1, cudaReadModeElementType> texRef1D_2_V;
-texture<ulong2, 2, cudaReadModeElementType> texRef2D_2_V;
-texture<ulong4, 1, cudaReadModeElementType> texRef1D_4_V;
-texture<ulong4, 2, cudaReadModeElementType> texRef2D_4_V;
+texture<uint2, 1, cudaReadModeElementType> texRef1D_2_V;
+texture<uint2, 2, cudaReadModeElementType> texRef2D_2_V;
+texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
+texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
@@ -149,14 +176,14 @@ static __host__ __device__ void xor_salsa8_special(uint32_t * const B, const uin
     B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
 }
 
-static __host__ __device__ ulong2& operator^=(ulong2& left, const ulong2& right)
+static __host__ __device__ uint2& operator^=(uint2& left, const uint2& right)
 {
     left.x ^= right.x;
     left.y ^= right.y;
     return left;
 }
 
-static __host__ __device__ ulong4& operator^=(ulong4& left, const ulong4& right)
+static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
     left.x ^= right.x;
     left.y ^= right.y;
@@ -173,7 +200,7 @@ static __host__ __device__ ulong4& operator^=(ulong4& left, const ulong4& right)
 template <int WARPS_PER_BLOCK> __global__ void
 scrypt_core_kernel_specialA(uint32_t *g_idata)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1]; // +1 to resolve bank conflicts
+    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx    = threadIdx.x / warpSize;
     volatile int warpThread = threadIdx.x % warpSize;
@@ -190,11 +217,11 @@ scrypt_core_kernel_specialA(uint32_t *g_idata)
     {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&X[warpIdx][wu+Y][Z])) = *((ulong2*)(&g_idata[32*(wu+Y)+Z]));
+            *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&g_idata[32*(wu+Y)+Z]));
 
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&V[SCRATCH*(wu+Y) + 0*32 + Z])) = *((ulong2*)(&X[warpIdx][wu+Y][Z]));
+            *((uint2*)(&V[SCRATCH*(wu+Y) + 0*32 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
 
         for (int i = 1; i < 1024; i++)
         {
@@ -203,7 +230,7 @@ scrypt_core_kernel_specialA(uint32_t *g_idata)
 
 #pragma unroll 16
             for (int wu=0; wu < 32; wu+=2)
-                *((ulong2*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((ulong2*)(&X[warpIdx][wu+Y][Z]));
+                *((uint2*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
         }
     }
 }
@@ -211,7 +238,7 @@ scrypt_core_kernel_specialA(uint32_t *g_idata)
 template <int WARPS_PER_BLOCK> __global__ void
 scrypt_core_kernel_specialB(uint32_t *g_odata)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1]; // +1 to resolve bank conflicts
+    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx    = threadIdx.x / warpSize;
     volatile int warpThread = threadIdx.x % warpSize;
@@ -228,7 +255,7 @@ scrypt_core_kernel_specialB(uint32_t *g_odata)
     {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&X[warpIdx][wu+Y][Z])) = *((ulong2*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
+            *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
 
         xor_salsa8_special(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
         xor_salsa8_special(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
@@ -237,7 +264,7 @@ scrypt_core_kernel_specialB(uint32_t *g_odata)
         {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&X[warpIdx][wu+Y][Z])) ^= *((ulong2*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
+            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= *((uint2*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
 
             xor_salsa8_special(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
             xor_salsa8_special(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
@@ -245,14 +272,14 @@ scrypt_core_kernel_specialB(uint32_t *g_odata)
 
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&g_odata[32*(wu+Y)+Z])) = *((ulong2*)(&X[warpIdx][wu+Y][Z]));
+            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
     }
 }
 
 template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
 scrypt_core_kernel_specialB_tex(uint32_t *g_odata)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1]; // +1 to resolve bank conflicts
+    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx    = threadIdx.x / warpSize;
     volatile int warpThread = threadIdx.x % warpSize;
@@ -269,7 +296,7 @@ scrypt_core_kernel_specialB_tex(uint32_t *g_odata)
     {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
+            *((uint2*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 1023*32 + Z)/2) :
                         tex2D(texRef2D_2_V, 0.5f + (32*1023 + Z)/2, 0.5f + (offset+wu+Y)));
 
@@ -280,7 +307,7 @@ scrypt_core_kernel_specialB_tex(uint32_t *g_odata)
         {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
+            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2) :
                         tex2D(texRef2D_2_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2, 0.5f + (offset+wu+Y)));
 
@@ -290,7 +317,7 @@ scrypt_core_kernel_specialB_tex(uint32_t *g_odata)
 
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((ulong2*)(&g_odata[32*(wu+Y)+Z])) = *((ulong2*)(&X[warpIdx][wu+Y][Z]));
+            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
     }
 }
 
@@ -302,7 +329,7 @@ scrypt_core_kernel_specialB_tex(uint32_t *g_odata)
 template <int WARPS_PER_BLOCK> __global__ void
 scrypt_core_kernelA(uint32_t *g_idata)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1]; // +1 to resolve bank conflicts
+    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx        = threadIdx.x / warpSize;
     volatile int warpThread     = threadIdx.x % warpSize;
@@ -321,13 +348,13 @@ scrypt_core_kernelA(uint32_t *g_idata)
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&V[SCRATCH*(wu+Y)+Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z])) = *((ulong4*)(&g_idata[32*(wu+Y)+Z]));
+        *((uint4*)(&V[SCRATCH*(wu+Y)+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&g_idata[32*(wu+Y)+Z]));
 #pragma unroll 16
     for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&V[SCRATCH*(wu+Y)+16+Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z])) = *((ulong4*)(&g_idata[32*(wu+Y)+16+Z]));
+        *((uint4*)(&V[SCRATCH*(wu+Y)+16+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&g_idata[32*(wu+Y)+16+Z]));
 #pragma unroll 16
     for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
 
@@ -339,20 +366,20 @@ scrypt_core_kernelA(uint32_t *g_idata)
         for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulong4*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z]));
+            *((uint4*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
 
 #pragma unroll 16
         for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulong4*)(&V[SCRATCH*(wu+Y) + i*32 + 16 + Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z]));
+            *((uint4*)(&V[SCRATCH*(wu+Y) + i*32 + 16 + Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
     }
 }
 
 template <int WARPS_PER_BLOCK> __global__ void
 scrypt_core_kernelB(uint32_t *g_odata)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1]; // +1 to resolve bank conflicts
+    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx        = threadIdx.x / warpSize;
     volatile int warpThread     = threadIdx.x % warpSize;
@@ -371,13 +398,13 @@ scrypt_core_kernelB(uint32_t *g_odata)
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&X[warpIdx][wu+Y][Z])) = *((ulong4*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
+        *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
 #pragma unroll 16
     for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&X[warpIdx][wu+Y][Z])) = *((ulong4*)(&V[SCRATCH*(wu+Y) + 1023*32 + 16+Z]));
+        *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&V[SCRATCH*(wu+Y) + 1023*32 + 16+Z]));
 #pragma unroll 16
     for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
 
@@ -391,7 +418,7 @@ scrypt_core_kernelB(uint32_t *g_odata)
         for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulong4*)(&X[warpIdx][wu+Y][Z])) ^= *((ulong4*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
+            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= *((uint4*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
 #pragma unroll 16
         for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
 
@@ -399,7 +426,7 @@ scrypt_core_kernelB(uint32_t *g_odata)
         for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulong4*)(&X[warpIdx][wu+Y][Z])) ^= *((ulong4*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + 16 + Z]));
+            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= *((uint4*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + 16 + Z]));
 #pragma unroll 16
         for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
 
@@ -410,19 +437,19 @@ scrypt_core_kernelB(uint32_t *g_odata)
     for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&g_odata[32*(wu+Y)+Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z]));
+        *((uint4*)(&g_odata[32*(wu+Y)+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
 
 #pragma unroll 16
     for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&g_odata[32*(wu+Y)+16+Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z]));
+        *((uint4*)(&g_odata[32*(wu+Y)+16+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
 }
 
 template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
 scrypt_core_kernelB_tex(uint32_t *g_odata)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1]; // +1 to resolve bank conflicts
+    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx        = threadIdx.x / warpSize;
     volatile int warpThread     = threadIdx.x % warpSize;
@@ -440,7 +467,7 @@ scrypt_core_kernelB_tex(uint32_t *g_odata)
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
+        *((uint4*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
                     tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 1023*32 + Z)/4) :
                     tex2D(texRef2D_4_V, 0.5f + (32*1023 + Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
@@ -448,7 +475,7 @@ scrypt_core_kernelB_tex(uint32_t *g_odata)
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
+        *((uint4*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
                     tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 1023*32 + 16+Z)/4) :
                     tex2D(texRef2D_4_V, 0.5f + (32*1023 + 16+Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
@@ -464,7 +491,7 @@ scrypt_core_kernelB_tex(uint32_t *g_odata)
         for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulong4*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
+            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z)/4) :
                         tex2D(texRef2D_4_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
@@ -474,7 +501,7 @@ scrypt_core_kernelB_tex(uint32_t *g_odata)
         for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulong4*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
+            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + 16+Z)/4) :
                         tex2D(texRef2D_4_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + 16+Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
@@ -487,13 +514,13 @@ scrypt_core_kernelB_tex(uint32_t *g_odata)
     for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&g_odata[32*(wu+Y)+Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z]));
+        *((uint4*)(&g_odata[32*(wu+Y)+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
 
 #pragma unroll 16
     for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
-        *((ulong4*)(&g_odata[32*(wu+Y)+16+Z])) = *((ulong4*)(&X[warpIdx][wu+Y][Z]));
+        *((uint4*)(&g_odata[32*(wu+Y)+16+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
 }
 
 extern "C" int cuda_num_devices()
@@ -722,13 +749,13 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
                         !special && (optimal_blocks * WARPS_PER_BLOCK) > MW_1D_4   )
                         applog(LOG_INFO, "GPU #%d: Given launch config '%s' exceeds limits for 1D cache.", device_map[thr_id], device_config[thr_id]);
                 }
-                cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<ulong2>();
+                cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
                 texRef1D_2_V.normalized = 0;
                 texRef1D_2_V.filterMode = cudaFilterModePoint;
                 texRef1D_2_V.addressMode[0] = cudaAddressModeClamp;
                 checkCudaErrors(cudaBindTexture(NULL, &texRef1D_2_V, d_V, &channelDesc2, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D_2) * sizeof(uint32_t)));
 
-                cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<ulong4>();
+                cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                 texRef1D_4_V.normalized = 0;
                 texRef1D_4_V.filterMode = cudaFilterModePoint;
                 texRef1D_4_V.addressMode[0] = cudaAddressModeClamp;
@@ -738,14 +765,14 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
             {
                 // bind pitch linear memory to a 2D texture reference
 
-                cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<ulong2>();
+                cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
                 texRef2D_2_V.normalized = 0;
                 texRef2D_2_V.filterMode = cudaFilterModePoint;
                 texRef2D_2_V.addressMode[0] = cudaAddressModeClamp;
                 texRef2D_2_V.addressMode[1] = cudaAddressModeClamp;
                 checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_2_V, d_V, &channelDesc2, SCRATCH/2, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t) ));
 
-                cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<ulong4>();
+                cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                 texRef2D_4_V.normalized = 0;
                 texRef2D_4_V.filterMode = cudaFilterModePoint;
                 texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;
@@ -1031,13 +1058,13 @@ skip:           ;
                 {
                     // bind linear memory to a 1D texture reference
 
-                    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<ulong2>();
+                    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
                     texRef1D_2_V.normalized = 0;
                     texRef1D_2_V.filterMode = cudaFilterModePoint;
                     texRef1D_2_V.addressMode[0] = cudaAddressModeClamp;
                     checkCudaErrors(cudaBindTexture(NULL, &texRef1D_2_V, d_V, &channelDesc2, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
 
-                    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<ulong4>();
+                    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                     texRef1D_4_V.normalized = 0;
                     texRef1D_4_V.filterMode = cudaFilterModePoint;
                     texRef1D_4_V.addressMode[0] = cudaAddressModeClamp;
@@ -1047,14 +1074,14 @@ skip:           ;
                 {
                     // bind pitch linear memory to a 2D texture reference
 
-                    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<ulong2>();
+                    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
                     texRef2D_2_V.normalized = 0;
                     texRef2D_2_V.filterMode = cudaFilterModePoint;
                     texRef2D_2_V.addressMode[0] = cudaAddressModeClamp;
                     texRef2D_2_V.addressMode[1] = cudaAddressModeClamp;
                     checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_2_V, d_V, &channelDesc2, SCRATCH/2, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t) ));
 
-                    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<ulong4>();
+                    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                     texRef2D_4_V.normalized = 0;
                     texRef2D_4_V.filterMode = cudaFilterModePoint;
                     texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;

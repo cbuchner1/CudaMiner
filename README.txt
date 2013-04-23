@@ -1,5 +1,5 @@
 
-CudaMiner release April 17th 2013 - alpha release
+CudaMiner release April 22th 2013 - alpha release
 -------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
@@ -14,6 +14,9 @@ GTX 640:    39  kHash/sec
 GTX 460:   101  kHash/sec
 GTX 560Ti: 140  kHash/sec
 GTX 660Ti: 156  kHash/sec  (OpenCL: 60-70)
+
+NOTE: Compute 1.0 through 1.3 devices seem to run faster on Windows XP
+or Linux.
 
 Your nVidia cards will now suck a little less for mining! This tool
 will automatically use all nVidia GPUs found in your system, but the
@@ -92,6 +95,9 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+- the April 22th release fixes Linux 64 bit compilation and reintroduces
+  memory access optimizations in the Titan kernel.
 
 - the April 17th release fixes the texture cache feature (yay!) but
   the even Kepler cards currently see no real benefits yet (boo!).
@@ -195,14 +201,12 @@ Prefix  | Non-Titan          | Titan
 
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
-- fix Linux (and Windows?) 64bit compilation
 - add Stratum support
 - add failover support
 
 Further Optimization:
 - consider use of some inline assembly in CUDA
 - investigate benefits of a LOOKUP_GAP implementation
-- feature parity on the Titan kernels (optimization, texture cache)
 
 
 ***************************************************************
