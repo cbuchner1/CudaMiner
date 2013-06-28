@@ -56,7 +56,7 @@ PROGRAMS = $(bin_PROGRAMS)
 am_cudaminer_OBJECTS = cudaminer-cuda-miner.$(OBJEXT) \
 	cudaminer-util.$(OBJEXT) cudaminer-sha2.$(OBJEXT) \
 	cudaminer-scrypt.$(OBJEXT) salsa_kernel.$(OBJEXT) \
-	titan_kernel.$(OBJEXT)
+	spinlock_kernel.$(OBJEXT) titan_kernel.$(OBJEXT)
 cudaminer_OBJECTS = $(am_cudaminer_OBJECTS)
 cudaminer_DEPENDENCIES =
 cudaminer_LINK = $(CXXLD) $(AM_CXXFLAGS) $(CXXFLAGS) \
@@ -266,6 +266,7 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 			  sha2.cpp \
 			  scrypt.cpp \
 			  salsa_kernel.cu \
+			  spinlock_kernel.cu \
 			  titan_kernel.cu
 
 cudaminer_LDFLAGS = $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
@@ -905,6 +906,9 @@ uninstall-am: uninstall-binPROGRAMS
 
 .cu.o:
 	$(NVCC) @CFLAGS@ -arch=compute_10 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+
+spinlock_kernel.o: spinlock_kernel.cu
+	$(NVCC) @CFLAGS@ -arch=compute_11 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
 	$(NVCC) @CFLAGS@ -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<

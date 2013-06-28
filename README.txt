@@ -1,5 +1,5 @@
 
-CudaMiner release April 22th 2013 - alpha release
+CudaMiner release April 30th 2013 - alpha release
 -------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
@@ -13,7 +13,7 @@ GTX 260:    44  kHash/sec  (OpenCL: 20)
 GTX 640:    39  kHash/sec
 GTX 460:   101  kHash/sec
 GTX 560Ti: 140  kHash/sec
-GTX 660Ti: 156  kHash/sec  (OpenCL: 60-70)
+GTX 660Ti: 176  kHash/sec  (OpenCL: 60-70)
 
 NOTE: Compute 1.0 through 1.3 devices seem to run faster on Windows XP
 or Linux.
@@ -95,6 +95,17 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+- the April 30th release fixes a minor problem in the CPU SHA-256
+  parallelization that might have lead to inflated CPU use.
+
+  Modified the CUDA API command issue order to get 99-100%
+  utilization out of my Kepler card on Windows.
+
+  The old "S" kernels have been replaced with kernels that seem
+  to slightly improve performance on Kepler cards. Just prepend
+  your previous Kepler launch config (e.g. 28x8) with an S prefix
+  to see if you get any performance gains. Works for me! ;)
 
 - the April 22th release fixes Linux 64 bit compilation and reintroduces
   memory access optimizations in the Titan kernel.
@@ -193,8 +204,8 @@ Prefix  | Non-Titan          | Titan
  <none> | low shared memory  | default kernel
         | optimized kernel   | with funnel shifter
         |                    |
-   S    | special kernel     | spinlock kernel
-        | for older GPUs     | with funnel shifter
+   S    | spinlock kernel    | spinlock kernel
+        | for Kepler GPUs    | with funnel shifter
 
 
 >>> TODO <<<

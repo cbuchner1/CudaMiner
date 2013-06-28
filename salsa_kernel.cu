@@ -66,6 +66,13 @@ extern bool opt_debug;
 extern void set_titan_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
 extern bool run_titan_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark);
 
+extern void set_spinlock_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
+extern bool run_spinlock_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark, int texture_cache);
+extern bool spinlock_bindtexture_1D(uint32_t *d_V, size_t size);
+extern bool spinlock_bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch);
+extern bool spinlock_unbindtexture_1D();
+extern bool spinlock_unbindtexture_2D();
+
 // and a forward declaration from this unit
 void set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
 bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark, int texture_cache);
@@ -77,8 +84,6 @@ bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id,
 __constant__ uint32_t* c_V[1024];
 
 // using texture references for the "tex" variants of the B kernels
-texture<uint2, 1, cudaReadModeElementType> texRef1D_2_V;
-texture<uint2, 2, cudaReadModeElementType> texRef2D_2_V;
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
 texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
@@ -149,40 +154,6 @@ static __host__ __device__ void xor_salsa8(uint32_t * const B, const uint32_t * 
     B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
 }
 
-static __host__ __device__ void xor_salsa8_special(uint32_t * const B, const uint32_t * const C)
-{
-    // the "volatile" puts data into registers right away
-    volatile uint32_t x0 = (B[ 0] ^= C[ 0]), x1 = (B[ 1] ^= C[ 1]), x2 = (B[ 2] ^= C[ 2]), x3 = (B[ 3] ^= C[ 3]);
-    volatile uint32_t x4 = (B[ 4] ^= C[ 4]), x5 = (B[ 5] ^= C[ 5]), x6 = (B[ 6] ^= C[ 6]), x7 = (B[ 7] ^= C[ 7]);
-    volatile uint32_t x8 = (B[ 8] ^= C[ 8]), x9 = (B[ 9] ^= C[ 9]), xa = (B[10] ^= C[10]), xb = (B[11] ^= C[11]);
-    volatile uint32_t xc = (B[12] ^= C[12]), xd = (B[13] ^= C[13]), xe = (B[14] ^= C[14]), xf = (B[15] ^= C[15]);
-
-    for (int i = 0; i < 4; ++i)
-    {
-        /* Operate on columns. */
-        x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-        x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-        xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-        x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-        
-        /* Operate on rows. */
-        x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-        x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-        x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-        x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-    }
-
-    B[ 0] += x0; B[ 1] += x1; B[ 2] += x2; B[ 3] += x3; B[ 4] += x4; B[ 5] += x5; B[ 6] += x6; B[ 7] += x7;
-    B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
-}
-
-static __host__ __device__ uint2& operator^=(uint2& left, const uint2& right)
-{
-    left.x ^= right.x;
-    left.y ^= right.y;
-    return left;
-}
-
 static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
     left.x ^= right.x;
@@ -190,135 +161,6 @@ static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
     left.z ^= right.z;
     left.w ^= right.w;
     return left;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Scrypt core kernel with higher shared memory use (faster on older devices)
-//! @param g_idata  input data in global memory
-//! @param g_odata  output data in global memory
-////////////////////////////////////////////////////////////////////////////////
-template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernel_specialA(uint32_t *g_idata)
-{
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
-
-    volatile int warpIdx    = threadIdx.x / warpSize;
-    volatile int warpThread = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_idata += 32      * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/16;
-    volatile unsigned int Z = 2*(warpThread%16);
-
-    {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&g_idata[32*(wu+Y)+Z]));
-
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&V[SCRATCH*(wu+Y) + 0*32 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-
-        for (int i = 1; i < 1024; i++)
-        {
-            xor_salsa8_special(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-            xor_salsa8_special(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
-
-#pragma unroll 16
-            for (int wu=0; wu < 32; wu+=2)
-                *((uint2*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-        }
-    }
-}
-
-template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernel_specialB(uint32_t *g_odata)
-{
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
-
-    volatile int warpIdx    = threadIdx.x / warpSize;
-    volatile int warpThread = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32      * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/16;
-    volatile unsigned int Z = 2*(warpThread%16);
-
-    {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
-
-        xor_salsa8_special(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-        xor_salsa8_special(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
-
-        for (int i = 0; i < 1024; i++)
-        {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= *((uint2*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
-
-            xor_salsa8_special(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-            xor_salsa8_special(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
-        }
-
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-    }
-}
-
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
-scrypt_core_kernel_specialB_tex(uint32_t *g_odata)
-{
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
-
-    volatile int warpIdx    = threadIdx.x / warpSize;
-    volatile int warpThread = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32      * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/16;
-    volatile unsigned int Z = 2*(warpThread%16);
-
-    {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 1023*32 + Z)/2) :
-                        tex2D(texRef2D_2_V, 0.5f + (32*1023 + Z)/2, 0.5f + (offset+wu+Y)));
-
-        xor_salsa8_special(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-        xor_salsa8_special(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
-
-        for (int i = 0; i < 1024; i++)
-        {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2) :
-                        tex2D(texRef2D_2_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2, 0.5f + (offset+wu+Y)));
-
-            xor_salsa8_special(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-            xor_salsa8_special(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
-        }
-
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -602,10 +444,10 @@ extern "C" int cuda_throughput(int thr_id)
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_odata[1][thr_id] = tmp;
 
         int *tmp3;
-        checkCudaErrors(cudaMalloc((void **) &tmp3, sizeof(int)*GRID_BLOCKS)); context_mutex[0][thr_id] = tmp3;
-        checkCudaErrors(cudaMalloc((void **) &tmp3, sizeof(int)*GRID_BLOCKS)); context_mutex[1][thr_id] = tmp3;
-        checkCudaErrors(cudaMemset(context_mutex[0][thr_id], 0, sizeof(int)*GRID_BLOCKS));
-        checkCudaErrors(cudaMemset(context_mutex[1][thr_id], 0, sizeof(int)*GRID_BLOCKS));
+        checkCudaErrors(cudaMalloc((void **) &tmp3, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK)); context_mutex[0][thr_id] = tmp3;
+        checkCudaErrors(cudaMalloc((void **) &tmp3, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK)); context_mutex[1][thr_id] = tmp3;
+        checkCudaErrors(cudaMemset(context_mutex[0][thr_id], 0, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK));
+        checkCudaErrors(cudaMemset(context_mutex[1][thr_id], 0, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK));
 
         // allocate pinned host memory
         checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[0][thr_id] = tmp;
@@ -709,8 +551,7 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
            (device_singlememory[thr_id] != 0) ? 1 : 0 );
 
     // compute highest MAXWARPS numbers for "special" and regular kernels allowing cudaBindTexture to succeed
-    int MW_1D_2 = 134217728 / (SCRATCH * WU_PER_WARP / 2);
-    int MW_1D_4 = 134217728 / (SCRATCH * WU_PER_WARP / 4);
+    int MW_1D = 134217728 / (SCRATCH * WU_PER_WARP / 4);
 
     uint32_t *d_V = NULL;
     if (device_singlememory[thr_id])
@@ -745,32 +586,20 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
 
                 if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, special))
                 {
-                    if ( special && (optimal_blocks * WARPS_PER_BLOCK) > MW_1D_2 ||
-                        !special && (optimal_blocks * WARPS_PER_BLOCK) > MW_1D_4   )
+                    if ( optimal_blocks * WARPS_PER_BLOCK > MW_1D )
                         applog(LOG_INFO, "GPU #%d: Given launch config '%s' exceeds limits for 1D cache.", device_map[thr_id], device_config[thr_id]);
                 }
-                cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
-                texRef1D_2_V.normalized = 0;
-                texRef1D_2_V.filterMode = cudaFilterModePoint;
-                texRef1D_2_V.addressMode[0] = cudaAddressModeClamp;
-                checkCudaErrors(cudaBindTexture(NULL, &texRef1D_2_V, d_V, &channelDesc2, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D_2) * sizeof(uint32_t)));
-
                 cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                 texRef1D_4_V.normalized = 0;
                 texRef1D_4_V.filterMode = cudaFilterModePoint;
                 texRef1D_4_V.addressMode[0] = cudaAddressModeClamp;
-                checkCudaErrors(cudaBindTexture(NULL, &texRef1D_4_V, d_V, &channelDesc4, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D_4) * sizeof(uint32_t)));
+                checkCudaErrors(cudaBindTexture(NULL, &texRef1D_4_V, d_V, &channelDesc4, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D) * sizeof(uint32_t)));
+
+                spinlock_bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D) * sizeof(uint32_t));
             }
             else if (device_texturecache[thr_id] == 2)
             {
                 // bind pitch linear memory to a 2D texture reference
-
-                cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
-                texRef2D_2_V.normalized = 0;
-                texRef2D_2_V.filterMode = cudaFilterModePoint;
-                texRef2D_2_V.addressMode[0] = cudaAddressModeClamp;
-                texRef2D_2_V.addressMode[1] = cudaAddressModeClamp;
-                checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_2_V, d_V, &channelDesc2, SCRATCH/2, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t) ));
 
                 cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                 texRef2D_4_V.normalized = 0;
@@ -778,6 +607,8 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
                 texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;
                 texRef2D_4_V.addressMode[1] = cudaAddressModeClamp;
                 checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_4_V, d_V, &channelDesc4, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t)));
+
+                spinlock_bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
             }
         }
     }
@@ -809,7 +640,10 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
         MAXWARPS[thr_id] = warp;
     }
     if (titan) set_titan_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-    else set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+    else {
+        set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+        set_spinlock_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+    }
 
     if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, special))
     {
@@ -845,13 +679,18 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
             int best_wpb = 0;
             bool best_special = false;
 
+            // if the device supports global atomics (compute 1.1 or greater), we
+            // can try autotuning also for the "special" kernel which makes use of
+            // spinlocks to reduce shared memory even further.
+            int max_k = (props.major > 1 || props.minor >= 1) ? 1 : 0;
+
             // auto-tuning loop
-            for (int k=0; !abort_flag && k <= 1; ++k)
+            for (int k=0; !abort_flag && k <= max_k; ++k)
             {
                 special = (bool)k;
 
                 // compute highest MAXWARPS number that we can support based on texture cache mode
-                int MW = (device_texturecache[thr_id] == 1) ? std::min(MAXWARPS[thr_id],(special ? MW_1D_2 : MW_1D_4)) : MAXWARPS[thr_id];
+                int MW = (device_texturecache[thr_id] == 1) ? std::min(MAXWARPS[thr_id],MW_1D) : MAXWARPS[thr_id];
 
                 for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
                 {
@@ -875,7 +714,8 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
                             while (repeat < 3)  // average up to 3 measurements for better exactness
                             {
                                 if (titan) r=run_titan_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, special, device_interactive[thr_id], true);
-                                     else r=run_normal_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, special, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                else if (special) r=run_spinlock_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, special, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                else r=run_normal_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, special, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
@@ -1040,12 +880,12 @@ skip:           ;
             if (device_texturecache[thr_id] == 1)
             {
                 checkCudaErrors(cudaUnbindTexture(texRef1D_4_V));
-                checkCudaErrors(cudaUnbindTexture(texRef1D_2_V));
+                spinlock_unbindtexture_1D();
             }
             else if (device_texturecache[thr_id] == 2)
             {
                 checkCudaErrors(cudaUnbindTexture(texRef2D_4_V));
-                checkCudaErrors(cudaUnbindTexture(texRef2D_2_V));
+                spinlock_unbindtexture_2D();
             }
             checkCudaErrors(cudaFree(d_V)); d_V = NULL;
 
@@ -1058,28 +898,17 @@ skip:           ;
                 {
                     // bind linear memory to a 1D texture reference
 
-                    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
-                    texRef1D_2_V.normalized = 0;
-                    texRef1D_2_V.filterMode = cudaFilterModePoint;
-                    texRef1D_2_V.addressMode[0] = cudaAddressModeClamp;
-                    checkCudaErrors(cudaBindTexture(NULL, &texRef1D_2_V, d_V, &channelDesc2, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
-
                     cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                     texRef1D_4_V.normalized = 0;
                     texRef1D_4_V.filterMode = cudaFilterModePoint;
                     texRef1D_4_V.addressMode[0] = cudaAddressModeClamp;
                     checkCudaErrors(cudaBindTexture(NULL, &texRef1D_4_V, d_V, &channelDesc4, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
+
+                    spinlock_bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t));
                 }
                 else if (device_texturecache[thr_id] == 2)
                 {
                     // bind pitch linear memory to a 2D texture reference
-
-                    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
-                    texRef2D_2_V.normalized = 0;
-                    texRef2D_2_V.filterMode = cudaFilterModePoint;
-                    texRef2D_2_V.addressMode[0] = cudaAddressModeClamp;
-                    texRef2D_2_V.addressMode[1] = cudaAddressModeClamp;
-                    checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_2_V, d_V, &channelDesc2, SCRATCH/2, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t) ));
 
                     cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
                     texRef2D_4_V.normalized = 0;
@@ -1087,11 +916,16 @@ skip:           ;
                     texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;
                     texRef2D_4_V.addressMode[1] = cudaAddressModeClamp;
                     checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_4_V, d_V, &channelDesc4, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t)));
+
+                    spinlock_bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
                 }
 
                 // update pointers to scratch buffer in constant memory after reallocation
                 if (titan) set_titan_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-                else set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+                else {
+                    set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+                    set_spinlock_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+                }
             }
         }
     }
@@ -1172,6 +1006,7 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, bool flush)
 
     if (context_titan[thr_id])
           run_titan_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], context_special[thr_id], device_interactive[thr_id], false);
+    else if (context_special[thr_id]) run_spinlock_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], context_special[thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
     else run_normal_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], context_special[thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
 
     // record the serialization event in the current stream
@@ -1219,19 +1054,7 @@ bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id,
 
     // First phase: Sequential writes to scratchpad.
 
-    if (special)
-        switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernel_specialA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 2: scrypt_core_kernel_specialA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 3: scrypt_core_kernel_specialA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 4: scrypt_core_kernel_specialA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 5: scrypt_core_kernel_specialA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 6: scrypt_core_kernel_specialA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 7: scrypt_core_kernel_specialA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 8: scrypt_core_kernel_specialA<8><<< grid, threads, 0, stream >>>(d_idata); break;
-            default: success = false; break;
-        }
-    else
+    if (!special)
         switch (WARPS_PER_BLOCK) {
             case 1: scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
             case 2: scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
@@ -1261,19 +1084,8 @@ bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id,
     {
         if (texture_cache == 1)
         {
-            if (special)
+            if (!special)
                 switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernel_specialB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 2: scrypt_core_kernel_specialB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 3: scrypt_core_kernel_specialB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 4: scrypt_core_kernel_specialB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 5: scrypt_core_kernel_specialB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 6: scrypt_core_kernel_specialB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 7: scrypt_core_kernel_specialB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 8: scrypt_core_kernel_specialB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    default: success = false; break;
-                }
-            else switch (WARPS_PER_BLOCK) {
                     case 1: scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
                     case 2: scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
                     case 3: scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
@@ -1287,19 +1099,8 @@ bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id,
         }
         else if (texture_cache == 2)
         {
-            if (special)
+            if (!special)
                 switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernel_specialB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 2: scrypt_core_kernel_specialB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 3: scrypt_core_kernel_specialB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
- //                   case 4: scrypt_core_kernel_specialB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
- //                   case 5: scrypt_core_kernel_specialB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
- //                   case 6: scrypt_core_kernel_specialB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
- //                   case 7: scrypt_core_kernel_specialB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
- //                   case 8: scrypt_core_kernel_specialB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    default: success = false; break;
-                }
-            else switch (WARPS_PER_BLOCK) {
                     case 1: scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
                     case 2: scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
                     case 3: scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
@@ -1314,19 +1115,8 @@ bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id,
     }
     else
     {
-        if (special)
+        if (!special)
             switch (WARPS_PER_BLOCK) {
-                case 1: scrypt_core_kernel_specialB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: scrypt_core_kernel_specialB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: scrypt_core_kernel_specialB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 4: scrypt_core_kernel_specialB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 5: scrypt_core_kernel_specialB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 6: scrypt_core_kernel_specialB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 7: scrypt_core_kernel_specialB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 8: scrypt_core_kernel_specialB<8><<< grid, threads, 0, stream >>>(d_odata); break;
-                default: success = false; break;
-            }
-        else switch (WARPS_PER_BLOCK) {
                 case 1: scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
                 case 2: scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
                 case 3: scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;

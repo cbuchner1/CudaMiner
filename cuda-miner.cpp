@@ -55,7 +55,7 @@ extern bool autotune;
 bool abort_flag = false;
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2013-04-22"
+#define PROGRAM_VERSION		"2013-04-30"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -139,7 +139,7 @@ static json_t *opt_config;
 static const bool opt_time = true;
 static enum sha256_algos opt_algo = ALGO_SCRYPT;
 static int opt_n_threads;
-static int num_processors;
+int num_processors;
 static int num_gpus;
 static char *rpc_url;
 static char *rpc_userpass;

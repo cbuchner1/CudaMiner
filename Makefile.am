@@ -21,6 +21,7 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  sha2.cpp \
 			  scrypt.cpp \
 			  salsa_kernel.cu \
+			  spinlock_kernel.cu \
 			  titan_kernel.cu
 
 cudaminer_LDFLAGS	= $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
@@ -29,6 +30,9 @@ cudaminer_CPPFLAGS	= -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@
 
 .cu.o:
 	$(NVCC) @CFLAGS@ -arch=compute_10 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+
+spinlock_kernel.o: spinlock_kernel.cu
+	$(NVCC) @CFLAGS@ -arch=compute_11 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
 	$(NVCC) @CFLAGS@ -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
