@@ -18,11 +18,8 @@
 #include "utf.h"
 #include "util.h"
 
-#ifndef WIN32
-#define _strdup(x) strdup(x)
-#endif
 
-static __inline void json_init(json_t *json, json_type type)
+static inline void json_init(json_t *json, json_type type)
 {
     json->type = type;
     json->refcount = 1;
@@ -660,7 +657,7 @@ json_t *json_string_nocheck(const char *value)
         return NULL;
     json_init(&string->json, JSON_STRING);
 
-    string->value = _strdup(value);
+    string->value = strdup(value);
     if(!string->value) {
         free(string);
         return NULL;
@@ -690,7 +687,7 @@ int json_string_set_nocheck(json_t *json, const char *value)
     char *dup;
     json_string_t *string;
 
-    dup = _strdup(value);
+    dup = strdup(value);
     if(!dup)
         return -1;
 

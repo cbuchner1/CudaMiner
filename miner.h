@@ -1,7 +1,7 @@
 #ifndef __MINER_H__
 #define __MINER_H__
 
-#include "cudaminer-config.h"
+#include "cpuminer-config.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,6 +9,14 @@
 #include <pthread.h>
 #include <jansson.h>
 #include <curl/curl.h>
+
+#ifdef WIN32
+#define snprintf(...) _snprintf(__VA_ARGS__)
+#define strdup(x) _strdup(x)
+#define strncasecmp(x,y,z) _strnicmp(x,y,z)
+#define strcasecmp(x,y) _stricmp(x,y)
+typedef size_t ssize_t;
+#endif
 
 #ifdef STDC_HEADERS
 # include <stdlib.h>
@@ -42,6 +50,7 @@ void *alloca (size_t);
 enum {
 	LOG_ERR,
 	LOG_WARNING,
+	LOG_NOTICE,
 	LOG_INFO,
 	LOG_DEBUG,
 };
@@ -68,7 +77,7 @@ enum {
                    | (((x) >> 8) & 0x0000ff00u) | (((x) >> 24) & 0x000000ffu))
 #endif
 
-static __inline uint32_t swab32(uint32_t v)
+static inline uint32_t swab32(uint32_t v)
 {
 #ifdef WANT_BUILTIN_BSWAP
 	return __builtin_bswap32(v);
@@ -82,7 +91,7 @@ static __inline uint32_t swab32(uint32_t v)
 #endif
 
 #if !HAVE_DECL_BE32DEC
-static __inline uint32_t be32dec(const void *pp)
+static inline uint32_t be32dec(const void *pp)
 {
 	const uint8_t *p = (uint8_t const *)pp;
 	return ((uint32_t)(p[3]) + ((uint32_t)(p[2]) << 8) +
@@ -91,7 +100,7 @@ static __inline uint32_t be32dec(const void *pp)
 #endif
 
 #if !HAVE_DECL_LE32DEC
-static __inline uint32_t le32dec(const void *pp)
+static inline uint32_t le32dec(const void *pp)
 {
 	const uint8_t *p = (uint8_t const *)pp;
 	return ((uint32_t)(p[0]) + ((uint32_t)(p[1]) << 8) +
@@ -100,7 +109,7 @@ static __inline uint32_t le32dec(const void *pp)
 #endif
 
 #if !HAVE_DECL_BE32ENC
-static __inline void be32enc(void *pp, uint32_t x)
+static inline void be32enc(void *pp, uint32_t x)
 {
 	uint8_t *p = (uint8_t *)pp;
 	p[3] = x & 0xff;
@@ -111,7 +120,7 @@ static __inline void be32enc(void *pp, uint32_t x)
 #endif
 
 #if !HAVE_DECL_LE32ENC
-static __inline void le32enc(void *pp, uint32_t x)
+static inline void le32enc(void *pp, uint32_t x)
 {
 	uint8_t *p = (uint8_t *)pp;
 	p[0] = x & 0xff;
@@ -121,15 +130,24 @@ static __inline void le32enc(void *pp, uint32_t x)
 }
 #endif
 
+#if JANSSON_MAJOR_VERSION >= 2
+#define JSON_LOADS(str, err_ptr) json_loads((str), 0, (err_ptr))
+#else
+#define JSON_LOADS(str, err_ptr) json_loads((str), (err_ptr))
+#endif
+
+#define USER_AGENT PACKAGE_NAME "/" PACKAGE_VERSION
+
 void sha256_init(uint32_t *state);
 void sha256_transform(uint32_t *state, const uint32_t *block, int swap);
+void sha256d(unsigned char *hash, const unsigned char *data, int len);
 
 extern int scanhash_sha256d(int thr_id, uint32_t *pdata,
 	const uint32_t *ptarget, uint32_t max_nonce, unsigned long *hashes_done);
 
-extern int scanhash_scrypt(int thr_id, uint32_t *pdata,
-	const uint32_t *ptarget,
-	uint32_t max_nonce, unsigned long *hashes_done);
+extern unsigned char *scrypt_buffer_alloc();
+extern int scanhash_scrypt(int thr_id, uint32_t *pdata, // CB
+	const uint32_t *ptarget, uint32_t max_nonce, unsigned long *hashes_done);
 
 struct thr_info {
 	int		id;
@@ -142,19 +160,23 @@ struct work_restart {
 	char			padding[128 - sizeof(unsigned long)];
 };
 
+extern int num_processors; // CB
 extern bool opt_debug;
 extern bool opt_protocol;
 extern int opt_timeout;
 extern bool want_longpoll;
 extern bool have_longpoll;
+extern bool want_stratum;
+extern bool have_stratum;
+extern char *opt_cert;
 extern char *opt_proxy;
 extern long opt_proxy_type;
 extern bool use_syslog;
 extern pthread_mutex_t applog_lock;
 extern struct thr_info *thr_info;
 extern int longpoll_thr_id;
+extern int stratum_thr_id;
 extern struct work_restart *work_restart;
-extern int num_processors;
 
 extern void applog(int prio, const char *fmt, ...);
 extern json_t *json_rpc_call(CURL *curl, const char *url, const char *userpass,
@@ -164,6 +186,52 @@ extern bool hex2bin(unsigned char *p, const char *hexstr, size_t len);
 extern int timeval_subtract(struct timeval *result, struct timeval *x,
 	struct timeval *y);
 extern bool fulltest(const uint32_t *hash, const uint32_t *target);
+extern void diff_to_target(uint32_t *target, double diff);
+
+struct stratum_job {
+	char *job_id;
+	unsigned char prevhash[32];
+	size_t coinbase_size;
+	unsigned char *coinbase;
+	unsigned char *xnonce2;
+	int merkle_count;
+	unsigned char **merkle;
+	unsigned char version[4];
+	unsigned char nbits[4];
+	unsigned char ntime[4];
+	bool clean;
+	double diff;
+};
+
+struct stratum_ctx {
+	char *url;
+
+	CURL *curl;
+	char *curl_url;
+	char curl_err_str[CURL_ERROR_SIZE];
+	curl_socket_t sock;
+	size_t sockbuf_size;
+	char *sockbuf;
+	pthread_mutex_t sock_lock;
+
+	double next_diff;
+
+	char *session_id;
+	size_t xnonce1_size;
+	unsigned char *xnonce1;
+	size_t xnonce2_size;
+	struct stratum_job job;
+	pthread_mutex_t work_lock;
+};
+
+bool stratum_socket_full(struct stratum_ctx *sctx, int timeout);
+bool stratum_send_line(struct stratum_ctx *sctx, char *s);
+char *stratum_recv_line(struct stratum_ctx *sctx);
+bool stratum_connect(struct stratum_ctx *sctx, const char *url);
+void stratum_disconnect(struct stratum_ctx *sctx);
+bool stratum_subscribe(struct stratum_ctx *sctx);
+bool stratum_authorize(struct stratum_ctx *sctx, const char *user, const char *pass);
+bool stratum_handle_method(struct stratum_ctx *sctx, const char *s);
 
 struct thread_q;
 

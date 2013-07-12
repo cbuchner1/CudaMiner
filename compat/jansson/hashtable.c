@@ -10,6 +10,10 @@
 #include <stdlib.h>
 #include "hashtable.h"
 
+#ifdef WIN32
+#define inline __inline
+#endif
+
 typedef struct hashtable_list list_t;
 typedef struct hashtable_pair pair_t;
 typedef struct hashtable_bucket bucket_t;
@@ -19,13 +23,13 @@ typedef struct hashtable_bucket bucket_t;
 
 #define list_to_pair(list_)  container_of(list_, pair_t, list)
 
-static __inline void list_init(list_t *list)
+static inline void list_init(list_t *list)
 {
     list->next = list;
     list->prev = list;
 }
 
-static __inline void list_insert(list_t *list, list_t *node)
+static inline void list_insert(list_t *list, list_t *node)
 {
     node->next = list;
     node->prev = list->prev;
@@ -33,13 +37,13 @@ static __inline void list_insert(list_t *list, list_t *node)
     list->prev = node;
 }
 
-static __inline void list_remove(list_t *list)
+static inline void list_remove(list_t *list)
 {
     list->prev->next = list->next;
     list->next->prev = list->prev;
 }
 
-static __inline int bucket_is_empty(hashtable_t *hashtable, bucket_t *bucket)
+static inline int bucket_is_empty(hashtable_t *hashtable, bucket_t *bucket)
 {
     return bucket->first == &hashtable->list && bucket->first == bucket->last;
 }
@@ -67,7 +71,7 @@ static unsigned int primes[] = {
 };
 static const unsigned int num_primes = sizeof(primes) / sizeof(unsigned int);
 
-static __inline unsigned int num_buckets(hashtable_t *hashtable)
+static inline unsigned int num_buckets(hashtable_t *hashtable)
 {
     return primes[hashtable->num_buckets];
 }

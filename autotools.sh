@@ -1,1 +1,0 @@
-aclocal && autoheader && autoconf && automake

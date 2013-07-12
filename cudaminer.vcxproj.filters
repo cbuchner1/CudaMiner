@@ -27,18 +27,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="cuda-miner.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="scrypt.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="sha2.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="util.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="compat\jansson\dump.c">
       <Filter>Source Files\jansson</Filter>
     </ClCompile>
@@ -63,12 +51,21 @@
     <ClCompile Include="compat\gettimeofday.c">
       <Filter>Source Files\gettimeofday</Filter>
     </ClCompile>
+    <ClCompile Include="util.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="scrypt.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sha2.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cpu-miner.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="compat.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="cudaminer-config.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="elist.h">
@@ -91,6 +88,9 @@
     </ClInclude>
     <ClInclude Include="compat\stdbool.h">
       <Filter>Header Files\compat</Filter>
+    </ClInclude>
+    <ClInclude Include="cpuminer-config.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

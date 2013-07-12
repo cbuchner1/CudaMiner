@@ -19,11 +19,6 @@
 #define MAX_INTEGER_STR_LENGTH  100
 #define MAX_REAL_STR_LENGTH     100
 
-#ifndef WIN32
-#define _snprintf(...) snprintf(__VA_ARGS__)
-#define _strdup(x) strdup(x)
-#endif
-
 typedef int (*dump_func)(const char *buffer, int size, void *data);
 
 struct string
@@ -190,7 +185,7 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
             char buffer[MAX_INTEGER_STR_LENGTH];
             int size;
 
-            size = _snprintf(buffer, MAX_INTEGER_STR_LENGTH, "%d", json_integer_value(json));
+            size = snprintf(buffer, MAX_INTEGER_STR_LENGTH, "%d", json_integer_value(json));
             if(size >= MAX_INTEGER_STR_LENGTH)
                 return -1;
 
@@ -202,7 +197,7 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
             char buffer[MAX_REAL_STR_LENGTH];
             int size;
 
-            size = _snprintf(buffer, MAX_REAL_STR_LENGTH, "%.17g",
+            size = snprintf(buffer, MAX_REAL_STR_LENGTH, "%.17g",
                             json_real_value(json));
             if(size >= MAX_REAL_STR_LENGTH)
                 return -1;
@@ -311,7 +306,7 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
 
             if(flags & JSON_SORT_KEYS || flags & JSON_PRESERVE_ORDER)
             {
-                object_key_t **keys;
+                const object_key_t **keys;
                 unsigned int size;
                 unsigned int i;
                 int (*cmp_func)(const void *, const void *);
@@ -324,7 +319,7 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
                 i = 0;
                 while(iter)
                 {
-                    keys[i] = (object_key_t *)jsonp_object_iter_fullkey(iter);
+                    keys[i] = jsonp_object_iter_fullkey(iter);
                     iter = json_object_iter_next((json_t *)json, iter);
                     i++;
                 }
@@ -335,7 +330,7 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
                 else
                     cmp_func = object_key_compare_serials;
 
-                qsort(keys, size, sizeof(object_key_t *), cmp_func);
+                qsort((void*)keys, size, sizeof(object_key_t *), cmp_func);
 
                 for(i = 0; i < size; i++)
                 {
@@ -350,7 +345,7 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
                     if(dump(separator, separator_length, data) ||
                        do_dump(value, flags, depth + 1, dump, data))
                     {
-                        free(keys);
+                        free((void*)keys);
                         goto object_error;
                     }
 
@@ -359,7 +354,7 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
                         if(dump(",", 1, data) ||
                            dump_indent(flags, depth + 1, 1, dump, data))
                         {
-                            free(keys);
+                            free((void*)keys);
                             goto object_error;
                         }
                     }
@@ -367,13 +362,13 @@ static int do_dump(const json_t *json, unsigned long flags, int depth,
                     {
                         if(dump_indent(flags, depth, 0, dump, data))
                         {
-                            free(keys);
+                            free((void*)keys);
                             goto object_error;
                         }
                     }
                 }
 
-                free(keys);
+                free((void*)keys);
             }
             else
             {
@@ -436,7 +431,7 @@ char *json_dumps(const json_t *json, unsigned long flags)
         return NULL;
     }
 
-    result = _strdup(strbuffer_value(&strbuff));
+    result = strdup(strbuffer_value(&strbuff));
     strbuffer_close(&strbuff);
 
     return result;

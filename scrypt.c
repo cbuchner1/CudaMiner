@@ -1,6 +1,5 @@
 /*
- * Copyright 2009 Colin Percival, 2011 ArtForz, 2011-2012 pooler,
- * SSE2 vectorization Copyright 2013 Christian Buchner
+ * Copyright 2009 Colin Percival, 2011 ArtForz, 2011-2013 pooler
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -35,8 +34,9 @@ using namespace Concurrency;
 #include <omp.h>
 #endif
 
-#include "cudaminer-config.h"
+#include "cpuminer-config.h"
 #include "miner.h"
+#include "salsa_kernel.h"
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -688,17 +688,6 @@ static inline void PBKDF2_SHA256_128_32(uint32_t *tstate, uint32_t *ostate,
 // using SSE2 vectorized HMAC SHA256 on CPU and
 // a salsa core implementation on GPU with CUDA
 //
-
-// CUDA externals
-extern "C" int cuda_throughput(int thr_id);
-extern "C" uint32_t *cuda_transferbuffer(int thr_id, int stream);
-extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream, bool flush = false);
-extern "C" void cuda_scrypt_core(int thr_id, int stream, bool flush = false);
-extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream, bool flush = false);
-extern "C" void cuda_scrypt_sync(int thr_id, int stream);
-extern "C" void computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V);
-extern int device_map[8];
-extern char *device_name[8];
 
 int scanhash_scrypt(int thr_id, uint32_t *pdata,
 	const uint32_t *ptarget,

@@ -1,5 +1,5 @@
 
-CudaMiner release April 30th 2013 - alpha release
+CudaMiner release July 13th 2013 - alpha release
 -------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
@@ -23,7 +23,7 @@ will automatically use all nVidia GPUs found in your system, but the
 used device count can be limited to a lower number using the "-t"
 option, or even selected individually with the "-d" option
 
-This code is based on the pooler cpuminer 2.2.3 release and inherits
+This code is based on the pooler cpuminer 2.3.2 release and inherits
 its command line interface and options.
 
 Additional command line options are:
@@ -59,7 +59,7 @@ Additional command line options are:
 >>> Example command line options, advanced use <<<
 
 cudaminer.exe -d 0,1,2 -i 1,0,0 -l auto,S27x3,28x4 -C 0,2,1
--o http://ltc.kattare.com:9332 -O myworker.1:mypass
+-o stratum+tcp://coinotron.com:3334 -O workername:password  
 
 I tell cudaminer to use devices 0,1 and 2. Because I have the monitor
 attached to device 0, I set that device to run in interactive mode so
@@ -72,8 +72,8 @@ device 2 uses 28x4.
 I turn on the use of the texture cache to 2D for device 1, 1D for device
 2 and off for the other devices.
 
-The given -o/-O settings mine on Burnside's pool, on which I happen to have
-an account.
+The given -o/-O settings mine on the coinotrom pool using the stratum
+protocol.
 
 
 >>> Additional Notes <<<
@@ -95,6 +95,10 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+- the July 13th release adds support for the Stratum protocol,
+  by making a fresh fork of pooler's cpuminer code (and any future
+  updates of pooler's code will be easier to integrate).
 
 - the April 30th release fixes a minor problem in the CPU SHA-256
   parallelization that might have lead to inflated CPU use.
@@ -212,12 +216,15 @@ Prefix  | Non-Titan          | Titan
 
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
-- add Stratum support
+- clean up and modularize the CUDA code better
+- bring back to old "special" kernel for compute 1.x devices
 - add failover support
 
 Further Optimization:
 - consider use of some inline assembly in CUDA
 - investigate benefits of a LOOKUP_GAP implementation
+- optimization for compute 3.5 devices like newer GT640 cards
+  and the Geforce Titan.
 
 
 ***************************************************************

@@ -1,3 +1,4 @@
+
 if WANT_JANSSON
 JANSSON_INCLUDES= -I$(top_srcdir)/compat/jansson
 else
@@ -8,18 +9,18 @@ EXTRA_DIST		= autotools.sh configure.sh README.txt LICENSE.txt \
 			  cudaminer.sln cudaminer.vcxproj cudaminer.vcxproj.filters cudaminer.vcxproj.user \
 			  compat/gettimeofday.c compat/getopt/getopt_long.c
 
-SUBDIRS			= compat
+SUBDIRS		= compat
 
-INCLUDES		= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
+INCLUDES	= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
 
-bin_PROGRAMS		= cudaminer
+bin_PROGRAMS	= cudaminer
 
 cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  compat/inttypes.h compat/stdbool.h compat/unistd.h \
 			  compat/sys/time.h compat/getopt/getopt.h \
-			  cuda-miner.cpp util.cpp \
-			  sha2.cpp \
-			  scrypt.cpp \
+			  cuda-miner.c util.c \
+			  sha2.c \
+			  scrypt.c \
 			  salsa_kernel.cu \
 			  spinlock_kernel.cu \
 			  titan_kernel.cu
