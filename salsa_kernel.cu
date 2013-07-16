@@ -20,18 +20,8 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 #include <algorithm>
 
 #include <stdbool.h>
-
-extern void applog(int prio, const char *fmt, ...);
-#ifdef HAVE_SYSLOG_H
-#include <syslog.h> 
-#else
-enum {
-        LOG_ERR,
-        LOG_WARNING,
-        LOG_INFO,   
-        LOG_DEBUG,  
-};
-#endif
+#include "miner.h"
+#include "salsa_kernel.h"
 
 #ifndef WIN32
 #define _strdup(x) strdup(x)
@@ -57,10 +47,6 @@ enum {
 #define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
 #define SCRATCH (32768+64)
-
-// from cuda-miner.cpp
-extern bool abort_flag;
-extern bool opt_debug;
 
 // from titan_kernel.cu compilation unit
 extern void set_titan_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
@@ -387,13 +373,6 @@ bool validate_config(char *config, int &b, int &w, bool &s)
     return success;
 }
 
-bool autotune = true;
-int device_map[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
-int device_interactive[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
-int device_texturecache[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
-int device_singlememory[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
-char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
-char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 std::map<int, int> context_blocks;
 std::map<int, int> context_wpb;
 std::map<int, bool> context_concurrent;

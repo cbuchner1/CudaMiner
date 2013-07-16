@@ -743,8 +743,8 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 		}
 	}
 
-	cuda_scrypt_HtoD(thr_id, X[z], z);
-	cuda_scrypt_core(thr_id, z);
+	cuda_scrypt_HtoD(thr_id, X[z], z, false);
+	cuda_scrypt_core(thr_id, z, false);
 	cuda_scrypt_DtoH(thr_id, X[z], z, true);
 
 	int num_shares = 4*num_processors;
@@ -786,8 +786,8 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 			}
 		}
 
-		cuda_scrypt_HtoD(thr_id, X[zz], zz);
-		cuda_scrypt_core(thr_id, zz);
+		cuda_scrypt_HtoD(thr_id, X[zz], zz, false);
+		cuda_scrypt_core(thr_id, zz, false);
 		cuda_scrypt_DtoH(thr_id, X[zz], zz, true);
 
 		cuda_scrypt_sync(thr_id, z);

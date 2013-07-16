@@ -1,6 +1,10 @@
 #ifndef __MINER_H__
 #define __MINER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "cpuminer-config.h"
 
 #include <stdbool.h>
@@ -161,6 +165,7 @@ struct work_restart {
 };
 
 extern int num_processors; // CB
+extern bool abort_flag;    // CB
 extern bool opt_debug;
 extern bool opt_protocol;
 extern int opt_timeout;
@@ -241,5 +246,9 @@ extern bool tq_push(struct thread_q *tq, void *data);
 extern void *tq_pop(struct thread_q *tq, const struct timespec *abstime);
 extern void tq_freeze(struct thread_q *tq);
 extern void tq_thaw(struct thread_q *tq);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __MINER_H__ */

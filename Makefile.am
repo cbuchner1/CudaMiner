@@ -5,8 +5,8 @@ else
 JANSSON_INCLUDES=
 endif
 
-EXTRA_DIST		= autotools.sh configure.sh README.txt LICENSE.txt \
-			  cudaminer.sln cudaminer.vcxproj cudaminer.vcxproj.filters cudaminer.vcxproj.user \
+EXTRA_DIST		= autogen.sh README.txt LICENSE.txt \
+			  cudaminer.sln cudaminer.vcxproj cudaminer.vcxproj.filters \
 			  compat/gettimeofday.c compat/getopt/getopt_long.c
 
 SUBDIRS		= compat
@@ -18,10 +18,10 @@ bin_PROGRAMS	= cudaminer
 cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  compat/inttypes.h compat/stdbool.h compat/unistd.h \
 			  compat/sys/time.h compat/getopt/getopt.h \
-			  cuda-miner.c util.c \
+			  cpu-miner.c util.c \
 			  sha2.c \
-			  scrypt.c \
-			  salsa_kernel.cu \
+			  scrypt.cpp \
+			  salsa_kernel.cu salsa_kernel.h \
 			  spinlock_kernel.cu \
 			  titan_kernel.cu
 

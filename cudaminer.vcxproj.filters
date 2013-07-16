@@ -54,13 +54,13 @@
     <ClCompile Include="util.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="scrypt.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="sha2.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="cpu-miner.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="scrypt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

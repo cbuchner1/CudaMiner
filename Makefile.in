@@ -38,7 +38,7 @@ target_triplet = @target@
 bin_PROGRAMS = cudaminer$(EXEEXT)
 subdir = .
 DIST_COMMON = README $(am__configure_deps) $(srcdir)/Makefile.am \
-	$(srcdir)/Makefile.in $(srcdir)/cudaminer-config.h.in \
+	$(srcdir)/Makefile.in $(srcdir)/cpuminer-config.h.in \
 	$(top_srcdir)/configure AUTHORS COPYING ChangeLog INSTALL NEWS \
 	compile config.guess config.sub depcomp install-sh missing
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
@@ -48,12 +48,12 @@ am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
  configure.lineno config.status.lineno
 mkinstalldirs = $(install_sh) -d
-CONFIG_HEADER = cudaminer-config.h
+CONFIG_HEADER = cpuminer-config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
-am_cudaminer_OBJECTS = cudaminer-cuda-miner.$(OBJEXT) \
+am_cudaminer_OBJECTS = cudaminer-cpu-miner.$(OBJEXT) \
 	cudaminer-util.$(OBJEXT) cudaminer-sha2.$(OBJEXT) \
 	cudaminer-scrypt.$(OBJEXT) salsa_kernel.$(OBJEXT) \
 	spinlock_kernel.$(OBJEXT) titan_kernel.$(OBJEXT)
@@ -65,15 +65,15 @@ DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
 am__mv = mv -f
+COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
+	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
+CCLD = $(CC)
+LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
 CXXCOMPILE = $(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) \
 	$(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS)
 CXXLD = $(CXX)
 CXXLINK = $(CXXLD) $(AM_CXXFLAGS) $(CXXFLAGS) $(AM_LDFLAGS) $(LDFLAGS) \
 	-o $@
-COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
-	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
-CCLD = $(CC)
-LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
 SOURCES = $(cudaminer_SOURCES)
 DIST_SOURCES = $(cudaminer_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive dvi-recursive \
@@ -253,8 +253,8 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 @WANT_JANSSON_FALSE@JANSSON_INCLUDES = 
 @WANT_JANSSON_TRUE@JANSSON_INCLUDES = -I$(top_srcdir)/compat/jansson
-EXTRA_DIST = autotools.sh configure.sh README.txt LICENSE.txt \
-			  cudaminer.sln cudaminer.vcxproj cudaminer.vcxproj.filters cudaminer.vcxproj.user \
+EXTRA_DIST = autogen.sh README.txt LICENSE.txt \
+			  cudaminer.sln cudaminer.vcxproj cudaminer.vcxproj.filters \
 			  compat/gettimeofday.c compat/getopt/getopt_long.c
 
 SUBDIRS = compat
@@ -262,8 +262,8 @@ INCLUDES = $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
 cudaminer_SOURCES = elist.h miner.h compat.h \
 			  compat/inttypes.h compat/stdbool.h compat/unistd.h \
 			  compat/sys/time.h compat/getopt/getopt.h \
-			  cuda-miner.cpp util.cpp \
-			  sha2.cpp \
+			  cpu-miner.c util.c \
+			  sha2.c \
 			  scrypt.cpp \
 			  salsa_kernel.cu \
 			  spinlock_kernel.cu \
@@ -272,11 +272,11 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 cudaminer_LDFLAGS = $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
 cudaminer_LDADD = @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ @CUDA_LIBS@ @OPENMP_CFLAGS@ @LIBS@
 cudaminer_CPPFLAGS = -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@
-all: cudaminer-config.h
+all: cpuminer-config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
 .SUFFIXES:
-.SUFFIXES: .cpp .cu .o .obj
+.SUFFIXES: .c .cpp .cu .o .obj
 am--refresh: Makefile
 	@:
 $(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.am  $(am__configure_deps)
@@ -312,20 +312,20 @@ $(ACLOCAL_M4): @MAINTAINER_MODE_TRUE@ $(am__aclocal_m4_deps)
 	$(am__cd) $(srcdir) && $(ACLOCAL) $(ACLOCAL_AMFLAGS)
 $(am__aclocal_m4_deps):
 
-cudaminer-config.h: stamp-h1
+cpuminer-config.h: stamp-h1
 	@if test ! -f $@; then rm -f stamp-h1; else :; fi
 	@if test ! -f $@; then $(MAKE) $(AM_MAKEFLAGS) stamp-h1; else :; fi
 
-stamp-h1: $(srcdir)/cudaminer-config.h.in $(top_builddir)/config.status
+stamp-h1: $(srcdir)/cpuminer-config.h.in $(top_builddir)/config.status
 	@rm -f stamp-h1
-	cd $(top_builddir) && $(SHELL) ./config.status cudaminer-config.h
-$(srcdir)/cudaminer-config.h.in: @MAINTAINER_MODE_TRUE@ $(am__configure_deps) 
+	cd $(top_builddir) && $(SHELL) ./config.status cpuminer-config.h
+$(srcdir)/cpuminer-config.h.in: @MAINTAINER_MODE_TRUE@ $(am__configure_deps) 
 	($(am__cd) $(top_srcdir) && $(AUTOHEADER))
 	rm -f stamp-h1
 	touch $@
 
 distclean-hdr:
-	-rm -f cudaminer-config.h stamp-h1
+	-rm -f cpuminer-config.h stamp-h1
 install-binPROGRAMS: $(bin_PROGRAMS)
 	@$(NORMAL_INSTALL)
 	test -z "$(bindir)" || $(MKDIR_P) "$(DESTDIR)$(bindir)"
@@ -373,10 +373,66 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cudaminer-cuda-miner.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cudaminer-cpu-miner.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cudaminer-scrypt.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cudaminer-sha2.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cudaminer-util.Po@am__quote@
+
+.c.o:
+@am__fastdepCC_TRUE@	$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(COMPILE) -c $<
+
+.c.obj:
+@am__fastdepCC_TRUE@	$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ `$(CYGPATH_W) '$<'`
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(COMPILE) -c `$(CYGPATH_W) '$<'`
+
+cudaminer-cpu-miner.o: cpu-miner.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT cudaminer-cpu-miner.o -MD -MP -MF $(DEPDIR)/cudaminer-cpu-miner.Tpo -c -o cudaminer-cpu-miner.o `test -f 'cpu-miner.c' || echo '$(srcdir)/'`cpu-miner.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-cpu-miner.Tpo $(DEPDIR)/cudaminer-cpu-miner.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='cpu-miner.c' object='cudaminer-cpu-miner.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o cudaminer-cpu-miner.o `test -f 'cpu-miner.c' || echo '$(srcdir)/'`cpu-miner.c
+
+cudaminer-cpu-miner.obj: cpu-miner.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT cudaminer-cpu-miner.obj -MD -MP -MF $(DEPDIR)/cudaminer-cpu-miner.Tpo -c -o cudaminer-cpu-miner.obj `if test -f 'cpu-miner.c'; then $(CYGPATH_W) 'cpu-miner.c'; else $(CYGPATH_W) '$(srcdir)/cpu-miner.c'; fi`
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-cpu-miner.Tpo $(DEPDIR)/cudaminer-cpu-miner.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='cpu-miner.c' object='cudaminer-cpu-miner.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o cudaminer-cpu-miner.obj `if test -f 'cpu-miner.c'; then $(CYGPATH_W) 'cpu-miner.c'; else $(CYGPATH_W) '$(srcdir)/cpu-miner.c'; fi`
+
+cudaminer-util.o: util.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT cudaminer-util.o -MD -MP -MF $(DEPDIR)/cudaminer-util.Tpo -c -o cudaminer-util.o `test -f 'util.c' || echo '$(srcdir)/'`util.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-util.Tpo $(DEPDIR)/cudaminer-util.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='util.c' object='cudaminer-util.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o cudaminer-util.o `test -f 'util.c' || echo '$(srcdir)/'`util.c
+
+cudaminer-util.obj: util.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT cudaminer-util.obj -MD -MP -MF $(DEPDIR)/cudaminer-util.Tpo -c -o cudaminer-util.obj `if test -f 'util.c'; then $(CYGPATH_W) 'util.c'; else $(CYGPATH_W) '$(srcdir)/util.c'; fi`
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-util.Tpo $(DEPDIR)/cudaminer-util.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='util.c' object='cudaminer-util.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o cudaminer-util.obj `if test -f 'util.c'; then $(CYGPATH_W) 'util.c'; else $(CYGPATH_W) '$(srcdir)/util.c'; fi`
+
+cudaminer-sha2.o: sha2.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT cudaminer-sha2.o -MD -MP -MF $(DEPDIR)/cudaminer-sha2.Tpo -c -o cudaminer-sha2.o `test -f 'sha2.c' || echo '$(srcdir)/'`sha2.c
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-sha2.Tpo $(DEPDIR)/cudaminer-sha2.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='sha2.c' object='cudaminer-sha2.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o cudaminer-sha2.o `test -f 'sha2.c' || echo '$(srcdir)/'`sha2.c
+
+cudaminer-sha2.obj: sha2.c
+@am__fastdepCC_TRUE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT cudaminer-sha2.obj -MD -MP -MF $(DEPDIR)/cudaminer-sha2.Tpo -c -o cudaminer-sha2.obj `if test -f 'sha2.c'; then $(CYGPATH_W) 'sha2.c'; else $(CYGPATH_W) '$(srcdir)/sha2.c'; fi`
+@am__fastdepCC_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-sha2.Tpo $(DEPDIR)/cudaminer-sha2.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='sha2.c' object='cudaminer-sha2.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o cudaminer-sha2.obj `if test -f 'sha2.c'; then $(CYGPATH_W) 'sha2.c'; else $(CYGPATH_W) '$(srcdir)/sha2.c'; fi`
 
 .cpp.o:
 @am__fastdepCXX_TRUE@	$(CXXCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
@@ -391,48 +447,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCXX_FALSE@	$(CXXCOMPILE) -c -o $@ `$(CYGPATH_W) '$<'`
-
-cudaminer-cuda-miner.o: cuda-miner.cpp
-@am__fastdepCXX_TRUE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-cuda-miner.o -MD -MP -MF $(DEPDIR)/cudaminer-cuda-miner.Tpo -c -o cudaminer-cuda-miner.o `test -f 'cuda-miner.cpp' || echo '$(srcdir)/'`cuda-miner.cpp
-@am__fastdepCXX_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-cuda-miner.Tpo $(DEPDIR)/cudaminer-cuda-miner.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	source='cuda-miner.cpp' object='cudaminer-cuda-miner.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-cuda-miner.o `test -f 'cuda-miner.cpp' || echo '$(srcdir)/'`cuda-miner.cpp
-
-cudaminer-cuda-miner.obj: cuda-miner.cpp
-@am__fastdepCXX_TRUE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-cuda-miner.obj -MD -MP -MF $(DEPDIR)/cudaminer-cuda-miner.Tpo -c -o cudaminer-cuda-miner.obj `if test -f 'cuda-miner.cpp'; then $(CYGPATH_W) 'cuda-miner.cpp'; else $(CYGPATH_W) '$(srcdir)/cuda-miner.cpp'; fi`
-@am__fastdepCXX_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-cuda-miner.Tpo $(DEPDIR)/cudaminer-cuda-miner.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	source='cuda-miner.cpp' object='cudaminer-cuda-miner.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-cuda-miner.obj `if test -f 'cuda-miner.cpp'; then $(CYGPATH_W) 'cuda-miner.cpp'; else $(CYGPATH_W) '$(srcdir)/cuda-miner.cpp'; fi`
-
-cudaminer-util.o: util.cpp
-@am__fastdepCXX_TRUE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-util.o -MD -MP -MF $(DEPDIR)/cudaminer-util.Tpo -c -o cudaminer-util.o `test -f 'util.cpp' || echo '$(srcdir)/'`util.cpp
-@am__fastdepCXX_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-util.Tpo $(DEPDIR)/cudaminer-util.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	source='util.cpp' object='cudaminer-util.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-util.o `test -f 'util.cpp' || echo '$(srcdir)/'`util.cpp
-
-cudaminer-util.obj: util.cpp
-@am__fastdepCXX_TRUE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-util.obj -MD -MP -MF $(DEPDIR)/cudaminer-util.Tpo -c -o cudaminer-util.obj `if test -f 'util.cpp'; then $(CYGPATH_W) 'util.cpp'; else $(CYGPATH_W) '$(srcdir)/util.cpp'; fi`
-@am__fastdepCXX_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-util.Tpo $(DEPDIR)/cudaminer-util.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	source='util.cpp' object='cudaminer-util.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-util.obj `if test -f 'util.cpp'; then $(CYGPATH_W) 'util.cpp'; else $(CYGPATH_W) '$(srcdir)/util.cpp'; fi`
-
-cudaminer-sha2.o: sha2.cpp
-@am__fastdepCXX_TRUE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-sha2.o -MD -MP -MF $(DEPDIR)/cudaminer-sha2.Tpo -c -o cudaminer-sha2.o `test -f 'sha2.cpp' || echo '$(srcdir)/'`sha2.cpp
-@am__fastdepCXX_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-sha2.Tpo $(DEPDIR)/cudaminer-sha2.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	source='sha2.cpp' object='cudaminer-sha2.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-sha2.o `test -f 'sha2.cpp' || echo '$(srcdir)/'`sha2.cpp
-
-cudaminer-sha2.obj: sha2.cpp
-@am__fastdepCXX_TRUE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-sha2.obj -MD -MP -MF $(DEPDIR)/cudaminer-sha2.Tpo -c -o cudaminer-sha2.obj `if test -f 'sha2.cpp'; then $(CYGPATH_W) 'sha2.cpp'; else $(CYGPATH_W) '$(srcdir)/sha2.cpp'; fi`
-@am__fastdepCXX_TRUE@	$(am__mv) $(DEPDIR)/cudaminer-sha2.Tpo $(DEPDIR)/cudaminer-sha2.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	source='sha2.cpp' object='cudaminer-sha2.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-sha2.obj `if test -f 'sha2.cpp'; then $(CYGPATH_W) 'sha2.cpp'; else $(CYGPATH_W) '$(srcdir)/sha2.cpp'; fi`
 
 cudaminer-scrypt.o: scrypt.cpp
 @am__fastdepCXX_TRUE@	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-scrypt.o -MD -MP -MF $(DEPDIR)/cudaminer-scrypt.Tpo -c -o cudaminer-scrypt.o `test -f 'scrypt.cpp' || echo '$(srcdir)/'`scrypt.cpp
@@ -528,7 +542,7 @@ ID: $(HEADERS) $(SOURCES) $(LISP) $(TAGS_FILES)
 	mkid -fID $$unique
 tags: TAGS
 
-TAGS: tags-recursive $(HEADERS) $(SOURCES) cudaminer-config.h.in $(TAGS_DEPENDENCIES) \
+TAGS: tags-recursive $(HEADERS) $(SOURCES) cpuminer-config.h.in $(TAGS_DEPENDENCIES) \
 		$(TAGS_FILES) $(LISP)
 	set x; \
 	here=`pwd`; \
@@ -545,7 +559,7 @@ TAGS: tags-recursive $(HEADERS) $(SOURCES) cudaminer-config.h.in $(TAGS_DEPENDEN
 	      set "$$@" "$$include_option=$$here/$$subdir/TAGS"; \
 	  fi; \
 	done; \
-	list='$(SOURCES) $(HEADERS) cudaminer-config.h.in $(LISP) $(TAGS_FILES)'; \
+	list='$(SOURCES) $(HEADERS) cpuminer-config.h.in $(LISP) $(TAGS_FILES)'; \
 	unique=`for i in $$list; do \
 	    if test -f "$$i"; then echo $$i; else echo $(srcdir)/$$i; fi; \
 	  done | \
@@ -563,9 +577,9 @@ TAGS: tags-recursive $(HEADERS) $(SOURCES) cudaminer-config.h.in $(TAGS_DEPENDEN
 	  fi; \
 	fi
 ctags: CTAGS
-CTAGS: ctags-recursive $(HEADERS) $(SOURCES) cudaminer-config.h.in $(TAGS_DEPENDENCIES) \
+CTAGS: ctags-recursive $(HEADERS) $(SOURCES) cpuminer-config.h.in $(TAGS_DEPENDENCIES) \
 		$(TAGS_FILES) $(LISP)
-	list='$(SOURCES) $(HEADERS) cudaminer-config.h.in $(LISP) $(TAGS_FILES)'; \
+	list='$(SOURCES) $(HEADERS) cpuminer-config.h.in $(LISP) $(TAGS_FILES)'; \
 	unique=`for i in $$list; do \
 	    if test -f "$$i"; then echo $$i; else echo $(srcdir)/$$i; fi; \
 	  done | \
@@ -775,7 +789,7 @@ distcleancheck: distclean
 	       exit 1; } >&2
 check-am: all-am
 check: check-recursive
-all-am: Makefile $(PROGRAMS) cudaminer-config.h
+all-am: Makefile $(PROGRAMS) cpuminer-config.h
 installdirs: installdirs-recursive
 installdirs-am:
 	for dir in "$(DESTDIR)$(bindir)"; do \

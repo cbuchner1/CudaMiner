@@ -37,10 +37,16 @@
 #include <curl/curl.h>
 #include "compat.h"
 #include "miner.h"
-
 #include "salsa_kernel.h"
 
 bool abort_flag = false; // CB
+bool autotune = true;
+int device_map[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+int device_interactive[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+int device_texturecache[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+int device_singlememory[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
+char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
 #define PROGRAM_VERSION		"2013-07-13"
@@ -491,7 +497,7 @@ static bool workio_get_work(struct workio_cmd *wc, CURL *curl)
 	struct work *ret_work;
 	int failures = 0;
 
-	ret_work = (work*)calloc(1, sizeof(*ret_work));
+	ret_work = (struct work*)calloc(1, sizeof(*ret_work));
 	if (!ret_work)
 		return false;
 
@@ -586,7 +592,7 @@ static void workio_abort() // CB
 	struct workio_cmd *wc;
 
 	/* fill out work request message */
-	wc = (workio_cmd *)calloc(1, sizeof(*wc));
+	wc = (struct workio_cmd *)calloc(1, sizeof(*wc));
 	if (!wc)
 		return;
 
@@ -1074,7 +1080,7 @@ static void parse_arg (int key, char *arg)
 		for (i = 0; i < ARRAY_SIZE(algo_names); i++) {
 			if (algo_names[i] &&
 			    !strcmp(arg, algo_names[i])) {
-				opt_algo = (sha256_algos)i;
+				opt_algo = (enum sha256_algos)i;
 				break;
 			}
 		}
@@ -1248,7 +1254,7 @@ static void parse_arg (int key, char *arg)
 			char * pch = strtok (arg,",");
 			int cnt  = 0;
 			while (pch != NULL) {
-				device_config[cnt++] = _strdup(pch);
+				device_config[cnt++] = strdup(pch);
 				pch = strtok (NULL, ",");
 			}
 		}
