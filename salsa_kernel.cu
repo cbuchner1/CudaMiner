@@ -23,11 +23,6 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 #include "miner.h"
 #include "salsa_kernel.h"
 
-#ifndef WIN32
-#define _strdup(x) strdup(x)
-#define _stricmp(x,y) strcasecmp(x,y)
-#endif
-
 #if WIN32
 #ifdef _WIN64
 #define _64BIT_ALIGN 1
@@ -504,7 +499,7 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
     concurrent = (props.concurrentKernels > 1);
     titan = (props.major == 3) && (props.minor==5);
 
-    device_name[thr_id] = _strdup(props.name);
+    device_name[thr_id] = strdup(props.name);
     applog(LOG_INFO, "GPU #%d: %s with compute capability %d.%d", device_map[thr_id], props.name, props.major, props.minor);
 
     WARPS_PER_BLOCK = -1;
@@ -631,7 +626,7 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
     }
     else
     {
-        if (device_config[thr_id] != NULL && _stricmp("auto", device_config[thr_id]))
+        if (device_config[thr_id] != NULL && stricmp("auto", device_config[thr_id]))
             applog(LOG_INFO, "GPU #%d: Given launch config '%s' does not validate.", device_map[thr_id], device_config[thr_id]);
 
         if (autotune)
