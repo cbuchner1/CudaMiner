@@ -19,9 +19,9 @@ extern bool autotune;
 // CUDA externals
 int cuda_throughput(int thr_id);
 uint32_t *cuda_transferbuffer(int thr_id, int stream);
-void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream, bool flush = false);
-void cuda_scrypt_core(int thr_id, int stream, bool flush = false);
-void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream, bool flush = false);
+void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream, bool flush);
+void cuda_scrypt_core(int thr_id, int stream, bool flush);
+void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream, bool flush);
 void cuda_scrypt_sync(int thr_id, int stream);
 void computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V);
 
