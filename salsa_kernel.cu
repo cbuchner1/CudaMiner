@@ -626,7 +626,7 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
     }
     else
     {
-        if (device_config[thr_id] != NULL && stricmp("auto", device_config[thr_id]))
+        if (device_config[thr_id] != NULL && strcasecmp("auto", device_config[thr_id]))
             applog(LOG_INFO, "GPU #%d: Given launch config '%s' does not validate.", device_map[thr_id], device_config[thr_id]);
 
         if (autotune)
