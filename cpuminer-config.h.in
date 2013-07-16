@@ -32,7 +32,7 @@
 #undef HAVE_DECL_LE32ENC
 
 /* Define to 1 if you have the `getopt_long' function. */
-#define HAVE_GETOPT_LONG 1
+#undef HAVE_GETOPT_LONG
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
@@ -149,10 +149,10 @@
 #undef PACKAGE_BUGREPORT
 
 /* Define to the full name of this package. */
-#define PACKAGE_NAME "cudaminer"
+#undef PACKAGE_NAME
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "cudaminer 2013.07.13"
+#undef PACKAGE_STRING
 
 /* Define to the one symbol short name of this package. */
 #undef PACKAGE_TARNAME
@@ -161,7 +161,7 @@
 #undef PACKAGE_URL
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "2013.07.13"
+#undef PACKAGE_VERSION
 
 /* If using the C implementation of alloca, define if you know the
    direction of stack growth for your system; otherwise it will be
@@ -176,6 +176,9 @@
 
 /* Define to 1 if AVX assembly is available. */
 #undef USE_AVX
+
+/* Define to 1 if AVX2 assembly is available. */
+#undef USE_AVX2
 
 /* Define to 1 if XOP assembly is available. */
 #undef USE_XOP

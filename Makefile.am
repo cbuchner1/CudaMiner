@@ -7,7 +7,7 @@ endif
 
 EXTRA_DIST		= autogen.sh README.txt LICENSE.txt \
 			  cudaminer.sln cudaminer.vcxproj cudaminer.vcxproj.filters \
-			  compat/gettimeofday.c compat/getopt/getopt_long.c
+			  compat/gettimeofday.c compat/getopt/getopt_long.c cpuminer-config.h.in
 
 SUBDIRS		= compat
 

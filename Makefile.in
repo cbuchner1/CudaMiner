@@ -265,7 +265,7 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 			  cpu-miner.c util.c \
 			  sha2.c \
 			  scrypt.cpp \
-			  salsa_kernel.cu \
+			  salsa_kernel.cu salsa_kernel.h \
 			  spinlock_kernel.cu \
 			  titan_kernel.cu
 
