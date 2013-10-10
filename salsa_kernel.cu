@@ -1,12 +1,9 @@
 //
+// Contains the autotuning logic and some utility functions.
+// Note that all CUDA kernels have been moved to other .cu files
+//
 // NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=124
 //
-
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-#include <cuda.h>
-
-typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 
 #ifdef WIN32
 #include <windows.h>
@@ -19,332 +16,22 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 #include <map>
 #include <algorithm>
 
-#include <stdbool.h>
-#include "miner.h"
+#include <cuda.h>
+
 #include "salsa_kernel.h"
 
-#if WIN32
-#ifdef _WIN64
-#define _64BIT_ALIGN 1
-#else
-#define _64BIT_ALIGN 0
-#endif
-#else
-#if __x86_64__
-#define _64BIT_ALIGN 1
-#else
-#define _64BIT_ALIGN 0
-#endif
-#endif
+#include "titan_kernel.h"
+#include "spinlock_kernel.h"
+#include "fermi_kernel.h"
+#include "legacy_kernel.h"
 
-// Define work unit size
-#define WU_PER_WARP 32
-#define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
-#define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
-#define SCRATCH (32768+64)
-
-// from titan_kernel.cu compilation unit
-extern void set_titan_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
-extern bool run_titan_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark);
-
-extern void set_spinlock_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
-extern bool run_spinlock_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark, int texture_cache);
-extern bool spinlock_bindtexture_1D(uint32_t *d_V, size_t size);
-extern bool spinlock_bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch);
-extern bool spinlock_unbindtexture_1D();
-extern bool spinlock_unbindtexture_2D();
-
-// and a forward declaration from this unit
-void set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
-bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark, int texture_cache);
-
-// Not performing error checking is actually bad, but...
-#define checkCudaErrors(x) x
-#define getLastCudaError(x)
-
-__constant__ uint32_t* c_V[1024];
-
-// using texture references for the "tex" variants of the B kernels
-texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
-texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
+#include "miner.h"
 
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
 int       MAXWARPS[8];
 uint32_t* h_V[8][1024];
 uint32_t  h_V_extra[8][1024];
-
-#define ROTL(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
-
-static __host__ __device__ void xor_salsa8(uint32_t * const B, const uint32_t * const C)
-{
-    uint32_t x0 = (B[ 0] ^= C[ 0]), x1 = (B[ 1] ^= C[ 1]), x2 = (B[ 2] ^= C[ 2]), x3 = (B[ 3] ^= C[ 3]);
-    uint32_t x4 = (B[ 4] ^= C[ 4]), x5 = (B[ 5] ^= C[ 5]), x6 = (B[ 6] ^= C[ 6]), x7 = (B[ 7] ^= C[ 7]);
-    uint32_t x8 = (B[ 8] ^= C[ 8]), x9 = (B[ 9] ^= C[ 9]), xa = (B[10] ^= C[10]), xb = (B[11] ^= C[11]);
-    uint32_t xc = (B[12] ^= C[12]), xd = (B[13] ^= C[13]), xe = (B[14] ^= C[14]), xf = (B[15] ^= C[15]);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-        
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-        
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    B[ 0] += x0; B[ 1] += x1; B[ 2] += x2; B[ 3] += x3; B[ 4] += x4; B[ 5] += x5; B[ 6] += x6; B[ 7] += x7;
-    B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
-}
-
-static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
-{
-    left.x ^= right.x;
-    left.y ^= right.y;
-    left.z ^= right.z;
-    left.w ^= right.w;
-    return left;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Scrypt core kernel
-//! @param g_idata  input data in global memory
-//! @param g_odata  output data in global memory
-////////////////////////////////////////////////////////////////////////////////
-template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernelA(uint32_t *g_idata)
-{
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
-
-    volatile int warpIdx        = threadIdx.x / warpSize;
-    volatile int warpThread     = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_idata += 32 * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/4;
-    volatile unsigned int Z = 4*(warpThread%4);
-
-    // registers to store an entire work unit
-    uint32_t B[16], C[16];
-
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&V[SCRATCH*(wu+Y)+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&g_idata[32*(wu+Y)+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&V[SCRATCH*(wu+Y)+16+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&g_idata[32*(wu+Y)+16+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-    for (int i = 1; i < 1024; i++) {
-
-        xor_salsa8(B, C); xor_salsa8(C, B);
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(&V[SCRATCH*(wu+Y) + i*32 + 16 + Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
-    }
-}
-
-template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernelB(uint32_t *g_odata)
-{
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
-
-    volatile int warpIdx        = threadIdx.x / warpSize;
-    volatile int warpThread     = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32 * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/4;
-    volatile unsigned int Z = 4*(warpThread%4);
-
-    // registers to store an entire work unit
-    uint32_t B[16], C[16];
-
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&X[warpIdx][wu+Y][Z])) = *((uint4*)(&V[SCRATCH*(wu+Y) + 1023*32 + 16+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-    xor_salsa8(B, C); xor_salsa8(C, B);
-
-    for (int i = 0; i < 1024; i++) {
-
-        X[warpIdx][warpThread][16] = C[0];
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= *((uint4*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
-#pragma unroll 16
-        for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= *((uint4*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + 16 + Z]));
-#pragma unroll 16
-        for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-        xor_salsa8(B, C); xor_salsa8(C, B);
-    }
-
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&g_odata[32*(wu+Y)+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
-
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&g_odata[32*(wu+Y)+16+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
-}
-
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
-scrypt_core_kernelB_tex(uint32_t *g_odata)
-{
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
-
-    volatile int warpIdx        = threadIdx.x / warpSize;
-    volatile int warpThread     = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32 * offset;
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/4;
-    volatile unsigned int Z = 4*(warpThread%4);
-
-    // registers to store an entire work unit
-    uint32_t B[16], C[16];
-
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
-                    tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 1023*32 + Z)/4) :
-                    tex2D(texRef2D_4_V, 0.5f + (32*1023 + Z)/4, 0.5f + (offset+wu+Y)));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
-                    tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 1023*32 + 16+Z)/4) :
-                    tex2D(texRef2D_4_V, 0.5f + (32*1023 + 16+Z)/4, 0.5f + (offset+wu+Y)));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-    xor_salsa8(B, C); xor_salsa8(C, B);
-
-    for (int i = 0; i < 1024; i++) {
-
-        X[warpIdx][warpThread][16] = C[0];
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z)/4) :
-                        tex2D(texRef2D_4_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + Z)/4, 0.5f + (offset+wu+Y)));
-#pragma unroll 16
-        for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + 16+Z)/4) :
-                        tex2D(texRef2D_4_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + 16+Z)/4, 0.5f + (offset+wu+Y)));
-#pragma unroll 16
-        for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-        xor_salsa8(B, C); xor_salsa8(C, B);
-    }
-
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&g_odata[32*(wu+Y)+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
-
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
-        *((uint4*)(&g_odata[32*(wu+Y)+16+Z])) = *((uint4*)(&X[warpIdx][wu+Y][Z]));
-}
 
 extern "C" int cuda_num_devices()
 {
@@ -353,17 +40,41 @@ extern "C" int cuda_num_devices()
     return GPU_N;
 }
 
-bool validate_config(char *config, int &b, int &w, bool &s)
+bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NULL, cudaDeviceProp *props = NULL)
 {
     bool success = false;
+    char kernelid = ' ';
     if (config != NULL)
     {
-        if (config[0] == 'S') {
-               s = true; config++;
-        } else s = false;
+        if (config[0] == 'T' || (config[0] == 'S' || config[0] == 'K') || config[0] == 'F' || config[0] == 'L') {
+            kernelid = config[0];
+            config++;
+        }
+
         if (config[0] >= '0' && config[0] <= '9')
             if (sscanf(config, "%dx%d", &b, &w) == 2)
                 success = true;
+
+        if (success && kernel != NULL)
+        {
+            switch (kernelid)
+            {
+                case 'T': *kernel = new TitanKernel(); break;
+                case 'K': case 'S': *kernel = new SpinlockKernel(); break;
+                case 'F': *kernel = new FermiKernel(); break;
+                case 'L': *kernel = new LegacyKernel(); break;
+                case ' ': // choose based on device architecture
+                     if (props->major == 3 && props->minor == 5)
+                    *kernel = new TitanKernel();
+                else if (props->major == 3 && props->minor == 0)
+                    *kernel = new SpinlockKernel();
+                else if (props->major == 2)
+                    *kernel = new FermiKernel();
+                else if (props->major == 1)
+                    *kernel = new LegacyKernel();
+                break;
+            }
+        }
     }
     return success;
 }
@@ -371,8 +82,7 @@ bool validate_config(char *config, int &b, int &w, bool &s)
 std::map<int, int> context_blocks;
 std::map<int, int> context_wpb;
 std::map<int, bool> context_concurrent;
-std::map<int, bool> context_titan;
-std::map<int, bool> context_special;
+std::map<int, KernelInterface *> context_kernel;
 std::map<int, uint32_t *> context_idata[2];
 std::map<int, uint32_t *> context_odata[2];
 std::map<int, cudaStream_t> context_streams[2];
@@ -380,7 +90,7 @@ std::map<int, uint32_t *> context_X[2];
 std::map<int, int *> context_mutex[2];
 std::map<int, cudaEvent_t> context_serialize[2];
 
-int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &titan, int &wpb);
+int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurrent, int &wpb);
 
 extern "C" void cuda_shutdown(int thr_id)
 {
@@ -407,7 +117,8 @@ extern "C" int cuda_throughput(int thr_id)
         cudaFree(0);
 #endif
 
-        bool special, concurrent, titan; GRID_BLOCKS = find_optimal_blockcount(thr_id, special, concurrent, titan, WARPS_PER_BLOCK);
+        KernelInterface *kernel;
+        bool concurrent; GRID_BLOCKS = find_optimal_blockcount(thr_id, kernel, concurrent, WARPS_PER_BLOCK);
         unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
 
         // allocate device memory
@@ -438,9 +149,8 @@ extern "C" int cuda_throughput(int thr_id)
         checkCudaErrors(cudaEventCreateWithFlags(&tmp4, cudaEventDisableTiming)); context_serialize[1][thr_id] = tmp4;
         cudaEventRecord(context_serialize[1][thr_id]);
 
-        context_special[thr_id] = special;
+        context_kernel[thr_id] = kernel;
         context_concurrent[thr_id] = concurrent;
-        context_titan[thr_id] = titan;
         context_blocks[thr_id] = GRID_BLOCKS;
         context_wpb[thr_id] = WARPS_PER_BLOCK;
     }
@@ -489,15 +199,29 @@ inline int _ConvertSMVer2Cores(int major, int minor)
     return nGpuArchCoresPerSM[7].Cores;
 }
 
-
-int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &titan, int &WARPS_PER_BLOCK)
+#ifdef WIN32
+#include <windows.h>
+static int console_width()
 {
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+    return csbi.srWindow.Right - csbi.srWindow.Left + 1;
+}
+#else
+int console_width()
+{
+    return 999;
+}
+#endif
+
+int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurrent, int &WARPS_PER_BLOCK)
+{
+    int cw = console_width();
     int optimal_blocks = 0;
 
     cudaDeviceProp props;
     cudaGetDeviceProperties(&props, device_map[thr_id]);
     concurrent = (props.concurrentKernels > 1);
-    titan = (props.major == 3) && (props.minor==5);
 
     device_name[thr_id] = strdup(props.name);
     applog(LOG_INFO, "GPU #%d: %s with compute capability %d.%d", device_map[thr_id], props.name, props.major, props.minor);
@@ -524,15 +248,33 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
            (device_texturecache[thr_id] != 0) ? device_texturecache[thr_id] : 0, (device_texturecache[thr_id] != 0) ? 'D' : ' ',
            (device_singlememory[thr_id] != 0) ? 1 : 0 );
 
-    // compute highest MAXWARPS numbers for "special" and regular kernels allowing cudaBindTexture to succeed
-    int MW_1D = 134217728 / (SCRATCH * WU_PER_WARP / 4);
+    // figure out which kernel implementation to use
+    if (!validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, &kernel, &props)) {
+             if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'T') ||
+                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && (props.major == 3 && props.minor == 5)))
+            kernel = new TitanKernel();
+        else if ((device_config[thr_id] != NULL && (device_config[thr_id][0] == 'K' || device_config[thr_id][0] == 'S')) ||
+                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && (props.major == 3 && props.minor == 0)))
+            kernel = new SpinlockKernel();
+        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'F') ||
+                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && props.major == 2))
+            kernel = new FermiKernel();
+        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'L') ||
+                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && props.major == 1))
+            kernel = new LegacyKernel();
+    }
+
+    // compute highest MAXWARPS numbers for kernels allowing cudaBindTexture to succeed
+    int MW_1D_4 = 134217728 / (SCRATCH * WU_PER_WARP / 4); // for uint4_t textures
+    int MW_1D_2 = 134217728 / (SCRATCH * WU_PER_WARP / 2); // for uint2_t textures
+    int MW_1D = kernel->get_texel_width() == 2 ? MW_1D_2 : MW_1D_4;
 
     uint32_t *d_V = NULL;
     if (device_singlememory[thr_id])
     {
         // if no launch config was specified, we simply
         // allocate the single largest memory chunk on the device that we can get
-        if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, special)) {
+        if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK)) {
             MAXWARPS[thr_id] = optimal_blocks * WARPS_PER_BLOCK;
         }
         else {
@@ -556,39 +298,30 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
 
             if (device_texturecache[thr_id] == 1)
             {
-                // bind linear memory to a 1D texture reference
-
-                if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, special))
+                if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
                 {
                     if ( optimal_blocks * WARPS_PER_BLOCK > MW_1D )
                         applog(LOG_INFO, "GPU #%d: Given launch config '%s' exceeds limits for 1D cache.", device_map[thr_id], device_config[thr_id]);
                 }
-                cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
-                texRef1D_4_V.normalized = 0;
-                texRef1D_4_V.filterMode = cudaFilterModePoint;
-                texRef1D_4_V.addressMode[0] = cudaAddressModeClamp;
-                checkCudaErrors(cudaBindTexture(NULL, &texRef1D_4_V, d_V, &channelDesc4, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D) * sizeof(uint32_t)));
-
-                spinlock_bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D) * sizeof(uint32_t));
+                // bind linear memory to a 1D texture reference
+                if (kernel->get_texel_width() == 2)
+                    kernel->bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D_2) * sizeof(uint32_t));
+                else
+                    kernel->bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * std::min(MAXWARPS[thr_id],MW_1D_4) * sizeof(uint32_t));
             }
             else if (device_texturecache[thr_id] == 2)
             {
                 // bind pitch linear memory to a 2D texture reference
-
-                cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
-                texRef2D_4_V.normalized = 0;
-                texRef2D_4_V.filterMode = cudaFilterModePoint;
-                texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;
-                texRef2D_4_V.addressMode[1] = cudaAddressModeClamp;
-                checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_4_V, d_V, &channelDesc4, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t)));
-
-                spinlock_bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
+                if (kernel->get_texel_width() == 2)
+                    kernel->bindtexture_2D(d_V, SCRATCH/2, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
+                else
+                    kernel->bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
             }
         }
     }
     else
     {
-        if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, special))
+        if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
             MAXWARPS[thr_id] = optimal_blocks * WARPS_PER_BLOCK;
         else
             MAXWARPS[thr_id] = 1024;
@@ -613,13 +346,9 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
         }
         MAXWARPS[thr_id] = warp;
     }
-    if (titan) set_titan_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-    else {
-        set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-        set_spinlock_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-    }
+    kernel->set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
 
-    if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, special))
+    if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
     {
         if (optimal_blocks * WARPS_PER_BLOCK > MAXWARPS[thr_id])
             applog(LOG_INFO, "GPU #%d: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
@@ -651,25 +380,16 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
 
             double best_khash_sec = 0.0;
             int best_wpb = 0;
-            bool best_special = false;
-
-            // if the device supports global atomics (compute 1.1 or greater), we
-            // can try autotuning also for the "special" kernel which makes use of
-            // spinlocks to reduce shared memory even further.
-            int max_k = (props.major > 1 || props.minor >= 1) ? 1 : 0;
 
             // auto-tuning loop
-            for (int k=0; !abort_flag && k <= max_k; ++k)
             {
-                special = (bool)k;
-
                 // compute highest MAXWARPS number that we can support based on texture cache mode
                 int MW = (device_texturecache[thr_id] == 1) ? std::min(MAXWARPS[thr_id],MW_1D) : MAXWARPS[thr_id];
 
                 for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
                 {
-                    double kHash[16] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
-                    for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= 8; ++WARPS_PER_BLOCK)
+                    double kHash[16+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+                    for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= kernel->max_warps_per_block(); ++WARPS_PER_BLOCK)
                     {
                         double khash_sec = 0;
                         if (GRID_BLOCKS * WARPS_PER_BLOCK <= MW)
@@ -687,9 +407,7 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
                             bool r = false;
                             while (repeat < 3)  // average up to 3 measurements for better exactness
                             {
-                                if (titan) r=run_titan_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, special, device_interactive[thr_id], true);
-                                else if (special) r=run_spinlock_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, special, device_interactive[thr_id], true, device_texturecache[thr_id]);
-                                else r=run_normal_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, special, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
@@ -710,33 +428,32 @@ int find_optimal_blockcount(int thr_id, bool &special, bool &concurrent, bool &t
                                 optimal_blocks = GRID_BLOCKS;
                                 best_khash_sec = khash_sec;
                                 best_wpb = WARPS_PER_BLOCK;
-                                best_special = special;
                             }
                         }
                     }
 skip2:              ;
                     if (opt_debug) {
-                        if (GRID_BLOCKS == 1)
-                            if (!special)
-                                applog(LOG_DEBUG, "       x1    x2    x3    x4    x5    x6    x7    x8" );
+                        if (GRID_BLOCKS == 1) {
+                            char line[256] = "    ";
+                            for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
+                                char tmp[16]; sprintf(tmp, "   x%-2d", i);
+                                strcat(line, tmp);
+                                if (cw == 80 && i == 8) strcat(line, "\n                          ");
+                            }
+                            applog(LOG_DEBUG, line);
+                        }
+                        char line[256]; sprintf(line, "%3d:", GRID_BLOCKS);
+                        for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
+                            char tmp[16];
+                            if (kHash[i]>0)
+                                sprintf(tmp, "%5.1f%c", kHash[i], (i<kernel->max_warps_per_block())?'|':' ');
                             else
-                                applog(LOG_DEBUG, "   S   x1    x2    x3    x4    x5    x6    x7    x8" );
-                             if (kHash[2] == 0 && kHash[3] == 0 && kHash[4] == 0 && kHash[5] == 0 && kHash[6] == 0 && kHash[7] == 0 && kHash[8] == 0)
-                            applog(LOG_DEBUG, "%3d:%5.1f                                           kh/s", GRID_BLOCKS, kHash[1] );
-                        else if (                 kHash[3] == 0 && kHash[4] == 0 && kHash[5] == 0 && kHash[6] == 0 && kHash[7] == 0 && kHash[8] == 0)
-                            applog(LOG_DEBUG, "%3d:%5.1f|%5.1f                                     kh/s", GRID_BLOCKS, kHash[1], kHash[2] );
-                        else if (                                  kHash[4] == 0 && kHash[5] == 0 && kHash[6] == 0 && kHash[7] == 0 && kHash[8] == 0)
-                            applog(LOG_DEBUG, "%3d:%5.1f|%5.1f|%5.1f                               kh/s", GRID_BLOCKS, kHash[1], kHash[2], kHash[3] );
-                        else if (                                                   kHash[5] == 0 && kHash[6] == 0 && kHash[7] == 0 && kHash[8] == 0)
-                            applog(LOG_DEBUG, "%3d:%5.1f|%5.1f|%5.1f|%5.1f                         kh/s", GRID_BLOCKS, kHash[1], kHash[2], kHash[3], kHash[4] );
-                        else if (                                                                    kHash[6] == 0 && kHash[7] == 0 && kHash[8] == 0)
-                            applog(LOG_DEBUG, "%3d:%5.1f|%5.1f|%5.1f|%5.1f|%5.1f                   kh/s", GRID_BLOCKS, kHash[1], kHash[2], kHash[3], kHash[4], kHash[5] );
-                        else if (                                                                                     kHash[7] == 0 && kHash[8] == 0)
-                            applog(LOG_DEBUG, "%3d:%5.1f|%5.1f|%5.1f|%5.1f|%5.1f|%5.1f             kh/s", GRID_BLOCKS, kHash[1], kHash[2], kHash[3], kHash[4], kHash[5], kHash[6] );
-                        else if (                                                                                                      kHash[8] == 0)
-                            applog(LOG_DEBUG, "%3d:%5.1f|%5.1f|%5.1f|%5.1f|%5.1f|%5.1f|%5.1f       kh/s", GRID_BLOCKS, kHash[1], kHash[2], kHash[3], kHash[4], kHash[5], kHash[6], kHash[7] );
-                        else
-                            applog(LOG_DEBUG, "%3d:%5.1f|%5.1f|%5.1f|%5.1f|%5.1f|%5.1f|%5.1f|%5.1f kh/s", GRID_BLOCKS, kHash[1], kHash[2], kHash[3], kHash[4], kHash[5], kHash[6], kHash[7], kHash[8] );
+                                sprintf(tmp, "     %c", (i<kernel->max_warps_per_block())?'|':' ');
+                            strcat(line, tmp);
+                            if (cw == 80 && i == 8) strcat(line, "\n                          ");
+                        }
+                        strcat(line, "kH/s");
+                        applog(LOG_DEBUG, line);
                     }
                 }
 skip:           ;
@@ -747,8 +464,7 @@ skip:           ;
             checkCudaErrors(cudaFree(d_idata));
 
             WARPS_PER_BLOCK = best_wpb;
-            special = best_special;
-            applog(LOG_INFO, "GPU #%d: %7.2f khash/s with configuration %c%dx%d", device_map[thr_id], best_khash_sec, special?'S':' ', optimal_blocks, WARPS_PER_BLOCK);
+            applog(LOG_INFO, "GPU #%d: %7.2f khash/s with configuration %c%dx%d", device_map[thr_id], best_khash_sec, kernel->get_identifier(), optimal_blocks, WARPS_PER_BLOCK);
         }
         else
         {
@@ -760,7 +476,6 @@ skip:           ;
             // defaults, in case nothing else is chosen below
             optimal_blocks = 4 * device_cores / WU_PER_WARP;
             WARPS_PER_BLOCK = 2;
-            special = false;
 
             // Based on compute capability, pick a known good block x warp configuration.
             if (props.major == 3)
@@ -824,14 +539,12 @@ skip:           ;
                     // for now I assume performance is identical to compute 1.3
                     optimal_blocks = props.multiProcessorCount;
                     WARPS_PER_BLOCK = 3;
-                    special = true;
                 }
                 if (props.minor == 3)  // GT200
                 {
                     // my GTX 260 works best at S27x3
                     optimal_blocks = props.multiProcessorCount;
                     WARPS_PER_BLOCK = 3;
-                    special = true;
                 }
             }
 
@@ -844,7 +557,7 @@ skip:           ;
         }
     }
 
-    applog(LOG_INFO, "GPU #%d: using launch configuration %c%dx%d", device_map[thr_id], special?'S':' ', optimal_blocks, WARPS_PER_BLOCK);
+    applog(LOG_INFO, "GPU #%d: using launch configuration %c%dx%d", device_map[thr_id], kernel->get_identifier(), optimal_blocks, WARPS_PER_BLOCK);
 
     if (device_singlememory[thr_id])
     {
@@ -852,15 +565,9 @@ skip:           ;
         {
             MAXWARPS[thr_id] = optimal_blocks * WARPS_PER_BLOCK;
             if (device_texturecache[thr_id] == 1)
-            {
-                checkCudaErrors(cudaUnbindTexture(texRef1D_4_V));
-                spinlock_unbindtexture_1D();
-            }
+                kernel->unbindtexture_1D();
             else if (device_texturecache[thr_id] == 2)
-            {
-                checkCudaErrors(cudaUnbindTexture(texRef2D_4_V));
-                spinlock_unbindtexture_2D();
-            }
+                kernel->unbindtexture_2D();
             checkCudaErrors(cudaFree(d_V)); d_V = NULL;
 
             checkCudaErrors(cudaMalloc((void **)&d_V, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
@@ -871,35 +578,22 @@ skip:           ;
                 if (device_texturecache[thr_id] == 1)
                 {
                     // bind linear memory to a 1D texture reference
-
-                    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
-                    texRef1D_4_V.normalized = 0;
-                    texRef1D_4_V.filterMode = cudaFilterModePoint;
-                    texRef1D_4_V.addressMode[0] = cudaAddressModeClamp;
-                    checkCudaErrors(cudaBindTexture(NULL, &texRef1D_4_V, d_V, &channelDesc4, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
-
-                    spinlock_bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t));
+                    if (kernel->get_texel_width() == 2)
+                        kernel->bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t));
+                    else
+                        kernel->bindtexture_1D(d_V, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t));
                 }
                 else if (device_texturecache[thr_id] == 2)
                 {
                     // bind pitch linear memory to a 2D texture reference
-
-                    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
-                    texRef2D_4_V.normalized = 0;
-                    texRef2D_4_V.filterMode = cudaFilterModePoint;
-                    texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;
-                    texRef2D_4_V.addressMode[1] = cudaAddressModeClamp;
-                    checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_4_V, d_V, &channelDesc4, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t)));
-
-                    spinlock_bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
+                    if (kernel->get_texel_width() == 2)
+                        kernel->bindtexture_2D(d_V, SCRATCH/2, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
+                    else
+                        kernel->bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
                 }
 
                 // update pointers to scratch buffer in constant memory after reallocation
-                if (titan) set_titan_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-                else {
-                    set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-                    set_spinlock_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
-                }
+                kernel->set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
             }
         }
     }
@@ -978,10 +672,7 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, bool flush)
 #endif
     }
 
-    if (context_titan[thr_id])
-          run_titan_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], context_special[thr_id], device_interactive[thr_id], false);
-    else if (context_special[thr_id]) run_spinlock_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], context_special[thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
-    else run_normal_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], context_special[thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
+    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
 
     // record the serialization event in the current stream
     checkCudaErrors(cudaEventRecord(context_serialize[stream][thr_id], context_streams[stream][thr_id]));
@@ -1014,108 +705,14 @@ extern "C" uint32_t* cuda_transferbuffer(int thr_id, int stream)
     return context_X[stream][thr_id];
 }
 
-void set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
-{
-    checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
-}
-
-bool run_normal_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark, int texture_cache)
-{
-    bool success = true;
-
-    // clear CUDA's error variable
-    cudaGetLastError();
-
-    // First phase: Sequential writes to scratchpad.
-
-    if (!special)
-        switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 2: scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 3: scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 4: scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 5: scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 6: scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 7: scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 8: scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
-            default: success = false; break;
-        }
-
-    // Optional millisecond sleep in between kernels
-
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-#ifdef WIN32
-        Sleep(1);
-#else
-        usleep(1000);
-#endif
-    }
-
-    // Second phase: Random read access from scratchpad.
-
-    if (texture_cache)
-    {
-        if (texture_cache == 1)
-        {
-            if (!special)
-                switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 2: scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 3: scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 4: scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 5: scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 6: scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 7: scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 8: scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    default: success = false; break;
-                }
-        }
-        else if (texture_cache == 2)
-        {
-            if (!special)
-                switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 2: scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 3: scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 4: scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 5: scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 6: scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 7: scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 8: scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    default: success = false; break;
-                }
-        } else success = false;
-    }
-    else
-    {
-        if (!special)
-            switch (WARPS_PER_BLOCK) {
-                case 1: scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 4: scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 5: scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 6: scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 7: scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 8: scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
-                default: success = false; break;
-            }
-    }
-
-    // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
-    return success;
-}
-
-
 ////////////////////////////////////////////////////////////////////////////////
 //! Compute reference data set on the CPU
 //! @param idata      input data as provided to device
 //! @param reference  reference data, computed but preallocated
 //! @param V          scrypt scratchpad
 ////////////////////////////////////////////////////////////////////////////////
+static void xor_salsa8(uint32_t * const B, const uint32_t * const C);
+
 extern "C" void
 computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
 {
@@ -1130,7 +727,6 @@ computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
 		xor_salsa8(&X[0], &X[16]);
 		xor_salsa8(&X[16], &X[0]);
 	}
-#if 1
 	for (i = 0; i < 1024; i++) {
 		j = 32 * (X[16] & 1023);
 		for (k = 0; k < 32; k++)
@@ -1138,7 +734,67 @@ computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
 		xor_salsa8(&X[0], &X[16]);
 		xor_salsa8(&X[16], &X[0]);
 	}
-#endif
 	for (k = 0; k < 32; k++)
 		reference[k] = X[k];
+}
+
+#define ROTL(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
+
+static void xor_salsa8(uint32_t * const B, const uint32_t * const C)
+{
+    uint32_t x0 = (B[ 0] ^= C[ 0]), x1 = (B[ 1] ^= C[ 1]), x2 = (B[ 2] ^= C[ 2]), x3 = (B[ 3] ^= C[ 3]);
+    uint32_t x4 = (B[ 4] ^= C[ 4]), x5 = (B[ 5] ^= C[ 5]), x6 = (B[ 6] ^= C[ 6]), x7 = (B[ 7] ^= C[ 7]);
+    uint32_t x8 = (B[ 8] ^= C[ 8]), x9 = (B[ 9] ^= C[ 9]), xa = (B[10] ^= C[10]), xb = (B[11] ^= C[11]);
+    uint32_t xc = (B[12] ^= C[12]), xd = (B[13] ^= C[13]), xe = (B[14] ^= C[14]), xf = (B[15] ^= C[15]);
+
+    /* Operate on columns. */
+    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
+    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
+    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
+    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
+
+    /* Operate on rows. */
+    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
+    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
+    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
+    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
+
+    /* Operate on columns. */
+    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
+    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
+    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
+    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
+
+    /* Operate on rows. */
+    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
+    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
+    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
+    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
+
+    /* Operate on columns. */
+    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
+    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
+    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
+    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
+        
+    /* Operate on rows. */
+    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
+    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
+    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
+    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
+
+    /* Operate on columns. */
+    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
+    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
+    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
+    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
+        
+    /* Operate on rows. */
+    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
+    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
+    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
+    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
+
+    B[ 0] += x0; B[ 1] += x1; B[ 2] += x2; B[ 3] += x3; B[ 4] += x4; B[ 5] += x5; B[ 6] += x6; B[ 7] += x7;
+    B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
 }

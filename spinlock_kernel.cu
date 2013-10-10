@@ -1,12 +1,8 @@
 //
+// Kernel that runs best on Kepler (Compute 3.0) devices
+//
 // NOTE: compile this .cu module for compute_11,sm_11 with --maxrregcount=124
 //
-
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-#include <cuda.h>
-
-typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 
 #ifdef WIN32
 #include <windows.h>
@@ -16,10 +12,9 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <map>
-#include <algorithm>
+#include <cuda.h>
 
-#include <stdbool.h>
+#include "spinlock_kernel.h"
 
 #if WIN32
 #ifdef _WIN64
@@ -35,26 +30,23 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 #endif
 #endif
 
-// Define work unit size
-#define WU_PER_WARP 32
-#define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
-#define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
-#define SCRATCH (32768+64)
+// forward references
+template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernel_spinlockA(uint32_t *g_idata, int *mutex);
+template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernel_spinlockB(uint32_t *g_odata, int *mutex);
+template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void scrypt_core_kernel_spinlockB_tex(uint32_t *g_odata, int *mutex);
 
-// Not performing error checking is actually bad, but...
-#define checkCudaErrors(x) x
-#define getLastCudaError(x)
-
-// from salsa_kernel.cu
-extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
-
+// scratchbuf constants (pointers to scratch buffer for each work unit)
 __constant__ uint32_t* c_V[1024];
 
 // using texture references for the "tex" variants of the B kernels
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
 texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
-bool spinlock_bindtexture_1D(uint32_t *d_V, size_t size)
+SpinlockKernel::SpinlockKernel() : KernelInterface()
+{
+}
+
+bool SpinlockKernel::bindtexture_1D(uint32_t *d_V, size_t size)
 {
     cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
     texRef1D_4_V.normalized = 0;
@@ -64,7 +56,7 @@ bool spinlock_bindtexture_1D(uint32_t *d_V, size_t size)
     return true;
 }
 
-bool spinlock_bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch)
+bool SpinlockKernel::bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch)
 {
     cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
     texRef2D_4_V.normalized = 0;
@@ -75,81 +67,242 @@ bool spinlock_bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch)
     return true;
 }
 
-bool spinlock_unbindtexture_1D()
+bool SpinlockKernel::unbindtexture_1D()
 {
     checkCudaErrors(cudaUnbindTexture(texRef1D_4_V));
     return true;
 }
 
-bool spinlock_unbindtexture_2D()
+bool SpinlockKernel::unbindtexture_2D()
 {
     checkCudaErrors(cudaUnbindTexture(texRef2D_4_V));
     return true;
 }
 
-
-#define ROTL(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
-
-static __host__ __device__ void xor_salsa8(uint32_t * const B, const uint32_t * const C)
+void SpinlockKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
 {
-    uint32_t x0 = (B[ 0] ^= C[ 0]), x1 = (B[ 1] ^= C[ 1]), x2 = (B[ 2] ^= C[ 2]), x3 = (B[ 3] ^= C[ 3]);
-    uint32_t x4 = (B[ 4] ^= C[ 4]), x5 = (B[ 5] ^= C[ 5]), x6 = (B[ 6] ^= C[ 6]), x7 = (B[ 7] ^= C[ 7]);
-    uint32_t x8 = (B[ 8] ^= C[ 8]), x9 = (B[ 9] ^= C[ 9]), xa = (B[10] ^= C[10]), xb = (B[11] ^= C[11]);
-    uint32_t xc = (B[12] ^= C[12]), xd = (B[13] ^= C[13]), xe = (B[14] ^= C[14]), xf = (B[15] ^= C[15]);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-        
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    /* Operate on columns. */
-    x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-    x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-    xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-    x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-        
-    /* Operate on rows. */
-    x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-    x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-    x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-    x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-
-    B[ 0] += x0; B[ 1] += x1; B[ 2] += x2; B[ 3] += x3; B[ 4] += x4; B[ 5] += x5; B[ 6] += x6; B[ 7] += x7;
-    B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
+    checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
-static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
+bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool interactive, bool benchmark, int texture_cache)
+{
+    bool success = true;
+
+    // clear CUDA's error variable
+    cudaGetLastError();
+
+    // First phase: Sequential writes to scratchpad.
+
+    switch (WARPS_PER_BLOCK) {
+        case 1: scrypt_core_kernel_spinlockA<1><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 2: scrypt_core_kernel_spinlockA<2><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 3: scrypt_core_kernel_spinlockA<3><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 4: scrypt_core_kernel_spinlockA<4><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 5: scrypt_core_kernel_spinlockA<5><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 6: scrypt_core_kernel_spinlockA<6><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 7: scrypt_core_kernel_spinlockA<7><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 8: scrypt_core_kernel_spinlockA<8><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 9: scrypt_core_kernel_spinlockA<9><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 10: scrypt_core_kernel_spinlockA<10><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 11: scrypt_core_kernel_spinlockA<11><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 12: scrypt_core_kernel_spinlockA<12><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 13: scrypt_core_kernel_spinlockA<13><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 14: scrypt_core_kernel_spinlockA<14><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 15: scrypt_core_kernel_spinlockA<15><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 16: scrypt_core_kernel_spinlockA<16><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        default: success = false; break;
+    }
+
+    // Optional millisecond sleep in between kernels
+
+    if (!benchmark && interactive) {
+        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
+#ifdef WIN32
+        Sleep(1);
+#else
+        usleep(1000);
+#endif
+    }
+
+    // Second phase: Random read access from scratchpad.
+
+    if (texture_cache)
+    {
+        if (texture_cache == 1)
+        {
+            switch (WARPS_PER_BLOCK) {
+                case 1: scrypt_core_kernel_spinlockB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 2: scrypt_core_kernel_spinlockB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 3: scrypt_core_kernel_spinlockB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 4: scrypt_core_kernel_spinlockB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 5: scrypt_core_kernel_spinlockB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 6: scrypt_core_kernel_spinlockB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 7: scrypt_core_kernel_spinlockB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 8: scrypt_core_kernel_spinlockB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 9: scrypt_core_kernel_spinlockB_tex<9,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 10: scrypt_core_kernel_spinlockB_tex<10,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 11: scrypt_core_kernel_spinlockB_tex<11,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 12: scrypt_core_kernel_spinlockB_tex<12,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 13: scrypt_core_kernel_spinlockB_tex<13,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 14: scrypt_core_kernel_spinlockB_tex<14,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 15: scrypt_core_kernel_spinlockB_tex<15,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 16: scrypt_core_kernel_spinlockB_tex<16,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                default: success = false; break;
+            }
+        }
+        else if (texture_cache == 2)
+        {
+            switch (WARPS_PER_BLOCK) {
+                case 1: scrypt_core_kernel_spinlockB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 2: scrypt_core_kernel_spinlockB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 3: scrypt_core_kernel_spinlockB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 4: scrypt_core_kernel_spinlockB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 5: scrypt_core_kernel_spinlockB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 6: scrypt_core_kernel_spinlockB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 7: scrypt_core_kernel_spinlockB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 8: scrypt_core_kernel_spinlockB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 9: scrypt_core_kernel_spinlockB_tex<9,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 10: scrypt_core_kernel_spinlockB_tex<10,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 11: scrypt_core_kernel_spinlockB_tex<11,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 12: scrypt_core_kernel_spinlockB_tex<12,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 13: scrypt_core_kernel_spinlockB_tex<13,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 14: scrypt_core_kernel_spinlockB_tex<14,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 15: scrypt_core_kernel_spinlockB_tex<15,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 16: scrypt_core_kernel_spinlockB_tex<16,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                default: success = false; break;
+            }
+        } else success = false;
+    }
+    else
+    {
+        switch (WARPS_PER_BLOCK) {
+            case 1: scrypt_core_kernel_spinlockB<1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 2: scrypt_core_kernel_spinlockB<2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 3: scrypt_core_kernel_spinlockB<3><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 4: scrypt_core_kernel_spinlockB<4><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 5: scrypt_core_kernel_spinlockB<5><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 6: scrypt_core_kernel_spinlockB<6><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 7: scrypt_core_kernel_spinlockB<7><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 8: scrypt_core_kernel_spinlockB<8><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 9: scrypt_core_kernel_spinlockB<9><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 10: scrypt_core_kernel_spinlockB<10><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 11: scrypt_core_kernel_spinlockB<11><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 12: scrypt_core_kernel_spinlockB<12><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 13: scrypt_core_kernel_spinlockB<13><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 14: scrypt_core_kernel_spinlockB<14><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 15: scrypt_core_kernel_spinlockB<15><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 16: scrypt_core_kernel_spinlockB<16><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            default: success = false; break;
+        }
+    }
+
+    // catch any kernel launch failures
+    if (cudaPeekAtLastError() != cudaSuccess) success = false;
+
+    return success;
+}
+
+#define ROTL7(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<7) | ((a00)>>25) );\
+a1^=(((a10)<<7) | ((a10)>>25) );\
+a2^=(((a20)<<7) | ((a20)>>25) );\
+a3^=(((a30)<<7) | ((a30)>>25) );\
+};\
+
+#define ROTL9(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<9) | ((a00)>>23) );\
+a1^=(((a10)<<9) | ((a10)>>23) );\
+a2^=(((a20)<<9) | ((a20)>>23) );\
+a3^=(((a30)<<9) | ((a30)>>23) );\
+};\
+
+#define ROTL13(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<13) | ((a00)>>19) );\
+a1^=(((a10)<<13) | ((a10)>>19) );\
+a2^=(((a20)<<13) | ((a20)>>19) );\
+a3^=(((a30)<<13) | ((a30)>>19) );\
+};\
+
+#define ROTL18(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<18) | ((a00)>>14) );\
+a1^=(((a10)<<18) | ((a10)>>14) );\
+a2^=(((a20)<<18) | ((a20)>>14) );\
+a3^=(((a30)<<18) | ((a30)>>14) );\
+};\
+
+static __device__ void xor_salsa8(uint32_t *B,uint32_t *C)
+{
+	uint32_t x[16];
+	x[0]=(B[0] ^= C[0]);
+	x[1]=(B[1] ^= C[1]);
+	x[2]=(B[2] ^= C[2]);
+	x[3]=(B[3] ^= C[3]);
+	x[4]=(B[4] ^= C[4]);
+	x[5]=(B[5] ^= C[5]);
+	x[6]=(B[6] ^= C[6]);
+	x[7]=(B[7] ^= C[7]);
+	x[8]=(B[8] ^= C[8]);
+	x[9]=(B[9] ^= C[9]);
+	x[10]=(B[10] ^= C[10]);
+	x[11]=(B[11] ^= C[11]);
+	x[12]=(B[12] ^= C[12]);
+	x[13]=(B[13] ^= C[13]);
+	x[14]=(B[14] ^= C[14]);
+	x[15]=(B[15] ^= C[15]);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    B[ 0] += x[0]; B[ 1] += x[1]; B[ 2] += x[2]; B[ 3] += x[3]; B[ 4] += x[4]; B[ 5] += x[5]; B[ 6] += x[6]; B[ 7] += x[7];
+    B[ 8] += x[8]; B[ 9] += x[9]; B[10] += x[10]; B[11] += x[11]; B[12] += x[12]; B[13] += x[13]; B[14] += x[14]; B[15] += x[15];
+}
+
+static __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
     left.x ^= right.x;
     left.y ^= right.y;
@@ -396,100 +549,4 @@ scrypt_core_kernel_spinlockB_tex(uint32_t *g_odata, int *mutex)
         *((uint4*)(&g_odata[32*(wu+Y)+16+Z])) = *((uint4*)(&X[warpIdx/2][wu+Y][Z]));
 
     if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx/2);
-}
-
-
-void set_spinlock_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
-{
-    checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
-}
-
-bool run_spinlock_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark, int texture_cache)
-{
-    bool success = true;
-
-    // clear CUDA's error variable
-    cudaGetLastError();
-
-    // First phase: Sequential writes to scratchpad.
-
-    if (special)
-        switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernel_spinlockA<1><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            case 2: scrypt_core_kernel_spinlockA<2><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            case 3: scrypt_core_kernel_spinlockA<3><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            case 4: scrypt_core_kernel_spinlockA<4><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            case 5: scrypt_core_kernel_spinlockA<5><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            case 6: scrypt_core_kernel_spinlockA<6><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            case 7: scrypt_core_kernel_spinlockA<7><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            case 8: scrypt_core_kernel_spinlockA<8><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-            default: success = false; break;
-        }
-
-    // Optional millisecond sleep in between kernels
-
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-#ifdef WIN32
-        Sleep(1);
-#else
-        usleep(1000);
-#endif
-    }
-
-    // Second phase: Random read access from scratchpad.
-
-    if (texture_cache)
-    {
-        if (texture_cache == 1)
-        {
-            if (special)
-                switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernel_spinlockB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 2: scrypt_core_kernel_spinlockB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 3: scrypt_core_kernel_spinlockB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 4: scrypt_core_kernel_spinlockB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 5: scrypt_core_kernel_spinlockB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 6: scrypt_core_kernel_spinlockB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 7: scrypt_core_kernel_spinlockB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 8: scrypt_core_kernel_spinlockB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    default: success = false; break;
-                }
-        }
-        else if (texture_cache == 2)
-        {
-            if (special)
-                switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernel_spinlockB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 2: scrypt_core_kernel_spinlockB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 3: scrypt_core_kernel_spinlockB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 4: scrypt_core_kernel_spinlockB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 5: scrypt_core_kernel_spinlockB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 6: scrypt_core_kernel_spinlockB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 7: scrypt_core_kernel_spinlockB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    case 8: scrypt_core_kernel_spinlockB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                    default: success = false; break;
-                }
-        } else success = false;
-    }
-    else
-    {
-        if (special)
-            switch (WARPS_PER_BLOCK) {
-                case 1: scrypt_core_kernel_spinlockB<1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                case 2: scrypt_core_kernel_spinlockB<2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                case 3: scrypt_core_kernel_spinlockB<3><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                case 4: scrypt_core_kernel_spinlockB<4><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                case 5: scrypt_core_kernel_spinlockB<5><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                case 6: scrypt_core_kernel_spinlockB<6><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                case 7: scrypt_core_kernel_spinlockB<7><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                case 8: scrypt_core_kernel_spinlockB<8><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-                default: success = false; break;
-            }
-    }
-
-    // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
-    return success;
 }

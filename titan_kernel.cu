@@ -1,12 +1,8 @@
 //
+// Kernel that runs best on Kepler (Compute 3.5) devices
+//
 // NOTE: compile this .cu module for compute_35,sm_35 with --maxrregcount=64
 //
-
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-#include <cuda.h>
-
-typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 
 #ifdef WIN32
 #include <windows.h>
@@ -16,25 +12,77 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <map>
-#include <algorithm>
+#include <cuda.h>
 
-#include <stdbool.h>
+#include "titan_kernel.h"
 
-// Define work unit size
-#define WU_PER_WARP 32
-#define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
-#define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
-#define SCRATCH (32768+64)
+// forward references
+__global__ void scrypt_core_kernel_spinlock_titanA(uint32_t *g_idata, int *mutex);
+__global__ void scrypt_core_kernel_spinlock_titanB(uint32_t *g_odata, int *mutex);
 
-// Not performing error checking is actually bad, but...
-#define checkCudaErrors(x) x
-#define getLastCudaError(x)
-
-// from salsa_kernel.cu
-extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
-
+// scratchbuf constants (pointers to scratch buffer for each work unit)
 __constant__ uint32_t* c_V[1024];
+
+TitanKernel::TitanKernel() : KernelInterface()
+{
+}
+
+bool TitanKernel::bindtexture_1D(uint32_t *d_V, size_t size)
+{
+    return true;
+}
+
+bool TitanKernel::bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch)
+{
+    return true;
+}
+
+bool TitanKernel::unbindtexture_1D()
+{
+    return true;
+}
+
+bool TitanKernel::unbindtexture_2D()
+{
+    return true;
+}
+
+void TitanKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
+{
+    checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
+}
+
+bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool interactive, bool benchmark, int texture_cache)
+{
+    bool success = true;
+
+    // clear CUDA's error variable
+    cudaGetLastError();
+
+    // First phase: Sequential writes to scratchpad.
+
+    scrypt_core_kernel_spinlock_titanA<<< grid, threads, 0, stream >>>(d_idata, mutex);
+
+    // Optional millisecond sleep in between kernels
+
+    if (!benchmark && interactive) {
+        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
+#ifdef WIN32
+        Sleep(1);
+#else
+        usleep(1000);
+#endif
+    }
+
+    // Second phase: Random read access from scratchpad.
+
+    scrypt_core_kernel_spinlock_titanB<<< grid, threads, 0, stream >>>(d_odata, mutex);
+
+    // catch any kernel launch failures
+    if (cudaPeekAtLastError() != cudaSuccess) success = false;
+
+    return success;
+}
 
 #define ROTL(a, b) __funnelshift_l( a, a, b );
 
@@ -251,201 +299,4 @@ scrypt_core_kernel_spinlock_titanB(uint32_t *g_odata, int *mutex)
         *((uint2*)(&g_odata[32*(wu+Y)+16+Z])) = *((uint2*)(&X[wu+Y][Z]));
 
     if (warpThread == 0) unlock(mutex, blockIdx.x);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Scrypt core kernel
-//! Version for Geforce Titan, low register count (<=64), low shared mem use.
-//! @param g_idata  input data in global memory
-//! @param g_odata  output data in global memory
-////////////////////////////////////////////////////////////////////////////////
-template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernel_titanA(uint32_t *g_idata)
-{
-    volatile __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+2]; // +2 to reduce bank conflicts
-                                                                        // while maintaining alignment
-    int warpIdx        = threadIdx.x / warpSize;
-    int warpThread     = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_idata += 32 * offset;
-    uint32_t* V = (uint32_t*)c_V[offset/WU_PER_WARP];
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/8;
-    volatile unsigned int Z = 2*(warpThread%8);
-
-    // registers to store an entire work unit
-    uint32_t B[16], C[16];
-
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-        *((uint2*)(&V[SCRATCH*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&g_idata[32*(wu+Y)+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-        *((uint2*)(&V[SCRATCH*(wu+Y)+16+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&g_idata[32*(wu+Y)+16+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-    for (int i = 1; i < 1024; i++) {
-
-        xor_salsa8(B, C); xor_salsa8(C, B);
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-            *((uint2*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-            *((uint2*)(&V[SCRATCH*(wu+Y) + i*32 + 16 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-    }
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-//! Scrypt core kernel
-//! Version for Geforce Titan, low register count (<=64), low shared mem use.
-//! @param g_idata  input data in global memory
-//! @param g_odata  output data in global memory
-////////////////////////////////////////////////////////////////////////////////
-template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernel_titanB(uint32_t *g_odata)
-{
-    volatile __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+2]; // +2 to reduce bank conflicts
-                                                                        // while maintaining alignment
-    int warpIdx        = threadIdx.x / warpSize;
-    int warpThread     = threadIdx.x % warpSize;
-
-    // add block specific offsets
-    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32 * offset;
-    const uint32_t* __restrict__ V = (const uint32_t*)c_V[offset/WU_PER_WARP];
-
-    // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/8;
-    volatile unsigned int Z = 2*(warpThread%8);
-
-    // registers to store an entire work unit
-    uint32_t B[16], C[16];
-
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-        *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-        *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&V[SCRATCH*(wu+Y) + 1023*32 + 16+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-    xor_salsa8(B, C); xor_salsa8(C, B);
-
-    for (int i = 0; i < 1024; i++) {
-
-        X[warpIdx][warpThread][16] = C[0];
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= *((uint2*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = X[warpIdx][warpThread][idx];
-
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= *((uint2*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + 16 + Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = X[warpIdx][warpThread][idx];
-
-        xor_salsa8(B, C); xor_salsa8(C, B);
-    }
-
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = B[idx];
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-        *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) X[warpIdx][warpThread][idx] = C[idx];
-#pragma unroll 8
-    for (int wu=0; wu < 32; wu+=4)
-        *((uint2*)(&g_odata[32*(wu+Y)+16+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
-}
-
-
-void set_titan_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
-{
-    checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
-}
-
-bool run_titan_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool special, bool interactive, bool benchmark)
-{
-    bool success = true;
-
-    // clear CUDA's error variable
-    cudaGetLastError();
-
-    // First phase: Sequential writes to scratchpad.
-
-    if (special)
-        scrypt_core_kernel_spinlock_titanA<<< grid, threads, 0, stream >>>(d_idata, mutex);
-    else
-        switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernel_titanA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 2: scrypt_core_kernel_titanA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 3: scrypt_core_kernel_titanA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 4: scrypt_core_kernel_titanA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 5: scrypt_core_kernel_titanA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 6: scrypt_core_kernel_titanA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 7: scrypt_core_kernel_titanA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 8: scrypt_core_kernel_titanA<8><<< grid, threads, 0, stream >>>(d_idata); break;
-            default: success = false; break;
-        }
-
-    // Optional millisecond sleep in between kernels
-
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-#ifdef WIN32
-        Sleep(1);
-#else
-        usleep(1000);
-#endif
-    }
-
-    // Second phase: Random read access from scratchpad.
-
-    if (special)
-        scrypt_core_kernel_spinlock_titanB<<< grid, threads, 0, stream >>>(d_odata, mutex);
-    else
-        switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernel_titanB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 2: scrypt_core_kernel_titanB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 3: scrypt_core_kernel_titanB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 4: scrypt_core_kernel_titanB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 5: scrypt_core_kernel_titanB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 6: scrypt_core_kernel_titanB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 7: scrypt_core_kernel_titanB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 8: scrypt_core_kernel_titanB<8><<< grid, threads, 0, stream >>>(d_odata); break;
-            default: success = false; break;
-        }
-
-    // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
-    return success;
 }

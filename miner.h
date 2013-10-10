@@ -166,6 +166,7 @@ struct work_restart {
 
 extern int num_processors; // CB
 extern bool abort_flag;    // CB
+extern int parallel;       // CB
 extern bool opt_debug;
 extern bool opt_protocol;
 extern int opt_timeout;

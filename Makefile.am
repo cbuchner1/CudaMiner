@@ -22,8 +22,10 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  sha2.c \
 			  scrypt.cpp \
 			  salsa_kernel.cu salsa_kernel.h \
-			  spinlock_kernel.cu \
-			  titan_kernel.cu
+			  spinlock_kernel.cu spinlock_kernel.h \
+			  legacy_kernel.cu legacy_kernel.h \
+			  fermi_kernel.cu fermi_kernel.h \
+			  titan_kernel.cu titan_kernel.h
 
 cudaminer_LDFLAGS	= $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
 cudaminer_LDADD		= @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ @CUDA_LIBS@ @OPENMP_CFLAGS@ @LIBS@

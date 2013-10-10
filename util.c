@@ -659,7 +659,7 @@ char *stratum_recv_line(struct stratum_ctx *sctx)
 	ssize_t len, buflen;
 	char *tok, *sret = NULL;
 
-	if (!strstr(sctx->sockbuf, "\n")) {
+	if (!strchr(sctx->sockbuf, '\n')) {
 		bool ret = true;
 		time_t rstart;
 
@@ -685,7 +685,7 @@ char *stratum_recv_line(struct stratum_ctx *sctx)
 				}
 			} else
 				stratum_buffer_append(sctx, s);
-		} while (time(NULL) - rstart < 60 && !strstr(sctx->sockbuf, "\n"));
+		} while (time(NULL) - rstart < 60 && !strchr(sctx->sockbuf, '\n'));
 
 		if (!ret) {
 			applog(LOG_ERR, "stratum_recv_line failed");
@@ -694,16 +694,16 @@ char *stratum_recv_line(struct stratum_ctx *sctx)
 	}
 
 	buflen = strlen(sctx->sockbuf);
-	tok = strtok(sctx->sockbuf, "\n");
+	tok = strchr(sctx->sockbuf, '\n');
 	if (!tok) {
-		applog(LOG_ERR, "stratum_recv_line failed to parse a newline-terminated string");
+		applog(LOG_ERR, "stratum_recv_line failed to parse a newline-terminated string (length %d)", buflen);
+		sctx->sockbuf[0] = '\0';
 		goto out;
-	}
-	sret = strdup(tok);
+	} else *tok = '\0';
+	sret = strdup(sctx->sockbuf);
 	len = strlen(sret);
-
 	if (buflen > len + 1)
-		memmove(sctx->sockbuf, sctx->sockbuf + len + 1, buflen - len + 1);
+		memmove(sctx->sockbuf, sctx->sockbuf + len + 1, buflen - len);
 	else
 		sctx->sockbuf[0] = '\0';
 

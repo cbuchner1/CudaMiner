@@ -757,26 +757,38 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 			n += 4;
 		}
 
+                if (parallel)
+                {
 #ifdef WIN32
-		parallel_for (0, num_shares, [&](int share) {
-			for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
-				for (int l = 0; l < 8; l++)
-					tstatex4[zz][k * 8 + l] = uint32x4_t(midstate[l]);
-				HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
-				PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
-			}
-		} );
+			parallel_for (0, num_shares, [&](int share) {
+				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
+					for (int l = 0; l < 8; l++)
+						tstatex4[zz][k * 8 + l] = uint32x4_t(midstate[l]);
+						HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
+						PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
+				}
+			} );
 #else
 		#pragma omp parallel for
-		for (int share = 0; share < num_shares; share++) {
-			for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
+			for (int share = 0; share < num_shares; share++) {
+				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
+					for (int l = 0; l < 8; l++)
+						tstatex4[zz][k * 8 + l] = uint32x4_t(midstate[l]);
+						HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
+						PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
+				}
+			}
+#endif
+		}
+		else
+		{
+			for (int k = 0; k < throughput/4; k++) {
 				for (int l = 0; l < 8; l++)
 					tstatex4[zz][k * 8 + l] = uint32x4_t(midstate[l]);
-				HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
-				PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
+					HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
+					PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
 			}
 		}
-#endif
 
 		for (i = 0; i < throughput/4; i++) {
 			for (int j = 0; j < 32; j++) {
@@ -799,19 +811,27 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 			}
 		}
 
+		if (parallel)
+		{
 #ifdef WIN32
-		parallel_for (0, num_shares, [&](int share) { 
-			for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
-				PBKDF2_SHA256_128_32x4(&tstatex4[z][k * 8], &ostatex4[z][k * 8], &Xx4[z][k * 32], &hashx4[z][k * 8]);
-			}
-		} );
+			parallel_for (0, num_shares, [&](int share) { 
+				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
+					PBKDF2_SHA256_128_32x4(&tstatex4[z][k * 8], &ostatex4[z][k * 8], &Xx4[z][k * 32], &hashx4[z][k * 8]);
+				}
+			} );
 #else
-		#pragma omp parallel for
-		for (int share = 0; share < num_shares; share++) {
-			for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++)
+			#pragma omp parallel for
+			for (int share = 0; share < num_shares; share++) {
+				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++)
+					PBKDF2_SHA256_128_32x4(&tstatex4[z][k * 8], &ostatex4[z][k * 8], &Xx4[z][k * 32], &hashx4[z][k * 8]);
+			}
+#endif
+		}
+		else
+		{
+			for (int k = 0; k < throughput/4; k++)
 				PBKDF2_SHA256_128_32x4(&tstatex4[z][k * 8], &ostatex4[z][k * 8], &Xx4[z][k * 32], &hashx4[z][k * 8]);
 		}
-#endif
 
 		for (i = 0; i < throughput/4; i++) {
 			for (int j = 0; j < 8; j++) {

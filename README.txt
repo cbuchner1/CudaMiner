@@ -1,6 +1,6 @@
 
-CudaMiner release July 13th 2013 - alpha release
--------------------------------------------------
+CudaMiner release October 10th 2013 - alpha release
+---------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
 The most computationally heavy parts of the scrypt algorithm (the
@@ -9,11 +9,11 @@ Salsa 20/8 iterations) are run on the GPU.
 You should see a notable speed-up compared to OpenCL based miners.
 Some numbers from my testing:
 
-GTX 260:    44  kHash/sec  (OpenCL: 20)
-GTX 640:    39  kHash/sec
-GTX 460:   101  kHash/sec
+GTX 260:    44  kHash/sec (maybe more on Linux/WinXP)
+GTX 640:    40  kHash/sec
+GTX 460:   100  kHash/sec
 GTX 560Ti: 140  kHash/sec
-GTX 660Ti: 176  kHash/sec  (OpenCL: 60-70)
+GTX 660Ti: 176  kHash/sec (or 225 kHash/sec on the 448 core edition)
 
 NOTE: Compute 1.0 through 1.3 devices seem to run faster on Windows XP
 or Linux.
@@ -36,7 +36,11 @@ Additional command line options are:
                  Device IDs start counting from 0!
 
 --launch-config  [-l] specify the kernel launch configuration per device.
-                 This replaces autotune or heuristic selection.
+                 This replaces autotune or heuristic selection. You can
+                 pass the strings "auto" or just a kernel prefix like
+                 L or F or K or T to autotune for a specific card generation
+                 or a kernel prefix plus a lauch configuration like F28x8
+                 if you know what kernel runs best (from a previous autotune).
 
 --interactive    [-i] list of flags (0 or 1) to enable interactive
                  desktop performance on individual cards. Use this
@@ -47,32 +51,40 @@ Additional command line options are:
 --texture-cache  [-C] list of flags (0 or 1 or 2) to enable use of the 
                  texture cache for reading from the scrypt scratchpad.
                  1 uses a 1D cache, whereas 2 uses a 2D texture layout.
-                 This is very experimental and may hurt performance
-                 on some cards.
+                 Cached operation has proven to be slightly faster than
+                 noncached operation on most GPUs.
 
 --single-memory  [-m] list of flags (0 or 1) to make the devices
                  allocate their scrypt scratchpad in a single,
                  consecutive memory block. On Windows Vista, 7/8
                  this may lead to a smaller memory size being used.
+                 When using the texture cache this option is implied.
 
+--hash-parallel  [-H] 1 to enable parallel hashing on the CPU. May
+                 use more CPU but distributes hashing load neatly
+                 across all CPU cores. Use 0 otherwise, which is now
+                 the default.
 
 >>> Example command line options, advanced use <<<
 
-cudaminer.exe -d 0,1,2 -i 1,0,0 -l auto,S27x3,28x4 -C 0,2,1
+cudaminer.exe -H 1 -d 0,1,2 -i 1,0,0 -l auto,F27x3,K28x4 -C 0,2,1
 -o stratum+tcp://coinotron.com:3334 -O workername:password  
 
-I tell cudaminer to use devices 0,1 and 2. Because I have the monitor
+The option -H 1 distributes the CPU load across all available cores.
+
+I instruct cudaminer to use devices 0,1 and 2. Because I have the display
 attached to device 0, I set that device to run in interactive mode so
 it is fully responsive for desktop use while mining.
 
-Device 0 performs autotune for interactive mode because I explicitly
-set it to auto. Device 1 will use kernel launch configuration S27x3 and
-device 2 uses 28x4.
+Device 0 performs autotune and runs in interactive mode because I explicitly
+set the launch config to auto and the corresponding interactive flag is 1.
+Device 1 will use kernel launch configuration F27x3 (for Fermi) and device 2
+uses K28x4 (for Kepler) both in non-interactive mode.
 
 I turn on the use of the texture cache to 2D for device 1, 1D for device
-2 and off for the other devices.
+2 and off for devices 0.
 
-The given -o/-O settings mine on the coinotrom pool using the stratum
+The given -o/-O settings mine on the coinotron pool using the stratum
 protocol.
 
 
@@ -81,8 +93,9 @@ protocol.
 The HMAC SHA-256 parts of scrypt are still executed on the CPU, and so
 any BitCoin mining will NOT be GPU accelerated. This tool is for LTC.
 
-This does not support the Stratum protocol. To do stratum mining
-you have to run a local proxy.
+There is also some SHA256 hashing required to do Scrypt hashing, and
+this part is also done by the CPU, in parallel to the work done by
+the GPU(s).
 
 This code should be fine on nVidia GPUs ranging from compute
 capability 1.1 up to compute capability 3.5. The Geforce Titan has
@@ -95,6 +108,13 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+- the October 10th release may fix some infrequent hanging in
+  the stratum protocol. Or maybe not. Please test.
+
+  I also turned of the parallel SHA256 computations on the CPU
+  because they seem to load the CPU a little more in most cases.
+  use -H 1 to get the previous behavior.
 
 - the July 13th release adds support for the Stratum protocol,
   by making a fresh fork of pooler's cpuminer code (and any future
@@ -182,48 +202,40 @@ the autotuning output of multiple cards will mix.
 
 CUDA kernels do the computation. Which one we select and in which
 configuration it is run greatly affects performance. CUDA kernel
-launch configurations are given as a character string, e.g. S27x3
+launch configurations are given as a character string, e.g. F27x3
 
                        prefix blocks x warps
 
-Currently there is just one prefix, which is "S". Later releases may
-see the introduction of more kernel variants with using other letters.
+Available kernel prefixes are:
+L - Legacy cards (compute 1.x)
+F - Fermi cards (Compute 2.x)
+K - Kepler cards (Compute 3.0). The letter S (for "spinlock") also works
+T - Titan and GK208 based cards (Compute 3.5)
 
 Examples:
 
-e.g. S27x3 is a launch configuration that works well on GTX 260
-      28x4 is a launch configuration that works on Geforce GTX 460
-     290x2 is a launch configuration that works on Geforce GTX 660Ti
+e.g. L27x3 is a launch configuration that works well on GTX 260
+     F28x4 is a launch configuration that works on Geforce GTX 460
+     K290x2 is a launch configuration that works on Geforce GTX 660Ti
 
 You should wait through autotune to see what kernel is found best for
-your current hardware configuration.
+your current hardware configuration. You can also override the autotune's
+automatic device generation selection, e.g. pass
 
-The choice between Non-Titan and Titan CUDA kernels is automatically
-made based on your device's compute capability. Titans cost around
-a thousand dollars, so you probably don't have one.
+-l F
 
-
-Prefix  | Non-Titan          | Titan
--------------------------------------------------------
- <none> | low shared memory  | default kernel
-        | optimized kernel   | with funnel shifter
-        |                    |
-   S    | spinlock kernel    | spinlock kernel
-        | for Kepler GPUs    | with funnel shifter
-
+in order to autotune the Fermi kernel on a Legacy Kepler or Titan device
 
 >>> TODO <<<
 
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
-- clean up and modularize the CUDA code better
-- bring back to old "special" kernel for compute 1.x devices
-- add failover support
+- add failover support between different pools
 
 Further Optimization:
 - consider use of some inline assembly in CUDA
 - investigate benefits of a LOOKUP_GAP implementation
-- optimization for compute 3.5 devices like newer GT640 cards
+- optimization more for compute 3.5 devices like newer GT640 cards
   and the Geforce Titan.
 
 

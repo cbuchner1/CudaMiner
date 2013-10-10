@@ -49,7 +49,7 @@ char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2013-07-13"
+#define PROGRAM_VERSION		"2013-10-10"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -150,6 +150,7 @@ static enum sha256_algos opt_algo = ALGO_SCRYPT;
 static int opt_n_threads;
 int num_processors; // CB
 static int num_gpus; // CB
+int parallel = 0; // CB
 static char *rpc_url;
 static char *rpc_userpass;
 static char *rpc_user, *rpc_pass;
@@ -220,7 +221,11 @@ Options:\n\
                         cache for mining. Kepler devices will profit.\n\
   -m, --single-memory   comma separated list of flags (0/1) specifying\n\
                         which of the CUDA devices shall allocate their\n\
-                        scrypt scratchbuffers in a single memory block.\n"
+                        scrypt scratchbuffers in a single memory block.\n\
+  -H, --hash-parallel   1 to enable parallel SHA256 hashing on the CPU. May\n\
+                        use more CPU overall, but distributes hashing load\n\
+                        neatly across all CPU cores. 0 is now the default\n\
+                        which assigns one static CPU core to each GPU.\n"
 #ifdef HAVE_SYSLOG_H
 "\
   -S, --syslog          use system log for output messages\n"
@@ -243,7 +248,7 @@ static char const short_options[] =
 #ifdef HAVE_SYSLOG_H
 	"S"
 #endif
-	"a:c:Dhp:Px:qr:R:s:t:T:o:u:O:Vd:l:i:C:m:"; // CB 
+	"a:c:Dhp:Px:qr:R:s:t:T:o:u:O:Vd:l:i:C:m:H:"; // CB 
 
 static struct option const options[] = {
 	{ "algo", 1, NULL, 'a' },
@@ -279,6 +284,7 @@ static struct option const options[] = {
 	{ "interactive", 1, NULL, 'i' },
 	{ "texture-cache", 1, NULL, 'C' },
 	{ "single-memory", 1, NULL, 'm' },
+	{ "hash-parallel", 1, NULL, 'H' },
 	{ 0, 0, 0, 0 }
 };
 
@@ -741,16 +747,13 @@ static void *miner_thread(void *userdata)
 		drop_policy();
 	}
 
-	/* Cpu affinity only makes sense if the number of threads is a multiple
-	 * of the number of CPUs */
-#if 0 // CB
-	if (num_processors > 1 && opt_n_threads % num_processors == 0) {
+        if (!parallel) // CB
+        {
 		if (!opt_quiet)
 			applog(LOG_INFO, "Binding thread %d to cpu %d",
 			       thr_id, thr_id % num_processors);
 		affine_to_cpu(thr_id, thr_id % num_processors);
 	}
-#endif
 
 	do { // CB
 		unsigned long hashes_done;
@@ -1042,6 +1045,7 @@ static void *stratum_thread(void *userdata)
 		} else
 			s = stratum_recv_line(&stratum);
 		if (!s) {
+			applog(LOG_ERR, "Disconnecting stratum connection...");
 			stratum_disconnect(&stratum);
 			applog(LOG_ERR, "Stratum connection interrupted");
 			continue;
@@ -1287,6 +1291,11 @@ static void parse_arg (int key, char *arg)
 				device_singlememory[opt_n_threads++] = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
+		}
+		break;
+	case 'H':
+		{
+			parallel = atoi(arg);
 		}
 		break;
 	case 'V':
