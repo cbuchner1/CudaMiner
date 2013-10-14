@@ -1,1 +1,1 @@
-aclocal && autoheader && automake --gnu --add-missing --copy && autoconf
+aclocal && autoheader && automake --add-missing --gnu --copy && autoconf
