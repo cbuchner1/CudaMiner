@@ -19,7 +19,7 @@ extern "C" {
 #define strdup(x) _strdup(x)
 #define strncasecmp(x,y,z) _strnicmp(x,y,z)
 #define strcasecmp(x,y) _stricmp(x,y)
-typedef size_t ssize_t;
+typedef int ssize_t;
 #endif
 
 #ifdef STDC_HEADERS
