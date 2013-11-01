@@ -49,7 +49,7 @@ char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2013-10-10"
+#define PROGRAM_VERSION		"2013-11-01"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 

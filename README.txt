@@ -109,6 +109,12 @@ the autotuning output of multiple cards will mix.
 
 >>> RELEASE HISTORY <<<
 
+- the November 1st release finally fixes the stratum protocol
+  hang for good. Root cause analysis: The ssize_t didn't wasn't
+  a signed type in my Windows port, causing the stratum_send_line
+  function to enter an infinite loop whenever the connection was
+  lost, while holding the socket mutex.
+
 - the October 10th release may fix some infrequent hanging in
   the stratum protocol. Or maybe not. Please test.
 
@@ -223,19 +229,26 @@ your current hardware configuration. You can also override the autotune's
 automatic device generation selection, e.g. pass
 
 -l F
+or
+-l K
+or
+-l T
 
-in order to autotune the Fermi kernel on a Legacy Kepler or Titan device
+in order to autotune the Fermi kernel on a Legacy, Kepler or Titan device
 
 >>> TODO <<<
 
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
+- a compiled 64 bit version also for Windows
 - add failover support between different pools
+- investigate why on some machine the legacy kernel fails,
+  and on other machines the Fermi kernel fails.
 
 Further Optimization:
 - consider use of some inline assembly in CUDA
 - investigate benefits of a LOOKUP_GAP implementation
-- optimization more for compute 3.5 devices like newer GT640 cards
+- optimize more for compute 3.5 devices like newer GT640 cards
   and the Geforce Titan.
 
 
