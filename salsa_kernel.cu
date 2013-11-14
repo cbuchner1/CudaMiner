@@ -240,14 +240,6 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     // the amount of memory that we can allocate on Windows Vista, 7 and 8 (WDDM driver model issue)
     if (device_singlememory[thr_id] == -1) device_singlememory[thr_id] = 0;
 
-    // Texture caching only works with single memory allocation
-    if (device_texturecache[thr_id]) device_singlememory[thr_id] = 1;
-
-    applog(LOG_INFO, "GPU #%d: interactive: %d, tex-cache: %d%c, single-alloc: %d", device_map[thr_id],
-           (device_interactive[thr_id]  != 0) ? 1 : 0,
-           (device_texturecache[thr_id] != 0) ? device_texturecache[thr_id] : 0, (device_texturecache[thr_id] != 0) ? 'D' : ' ',
-           (device_singlememory[thr_id] != 0) ? 1 : 0 );
-
     // figure out which kernel implementation to use
     if (!validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, &kernel, &props)) {
              if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'T') ||
@@ -263,6 +255,20 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                  ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && props.major == 1))
             kernel = new LegacyKernel();
     }
+
+    // some kernels (e.g. Titan) do not support the texture cache
+    if (kernel->no_textures() && device_texturecache[thr_id]) {
+        applog(LOG_INFO, "GPU #%d: the '%c' kernel ignores the texture cache argument", device_map[thr_id], kernel->get_identifier());
+        device_texturecache[thr_id] = 0;
+    }
+
+    // Texture caching only works with single memory allocation
+    if (device_texturecache[thr_id]) device_singlememory[thr_id] = 1;
+
+    applog(LOG_INFO, "GPU #%d: interactive: %d, tex-cache: %d%c, single-alloc: %d", device_map[thr_id],
+           (device_interactive[thr_id]  != 0) ? 1 : 0,
+           (device_texturecache[thr_id] != 0) ? device_texturecache[thr_id] : 0, (device_texturecache[thr_id] != 0) ? 'D' : ' ',
+           (device_singlememory[thr_id] != 0) ? 1 : 0 );
 
     // compute highest MAXWARPS numbers for kernels allowing cudaBindTexture to succeed
     int MW_1D_4 = 134217728 / (SCRATCH * WU_PER_WARP / 4); // for uint4_t textures

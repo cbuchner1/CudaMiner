@@ -109,6 +109,10 @@ the autotuning output of multiple cards will mix.
 
 >>> RELEASE HISTORY <<<
 
+- November 14th brings a performance boost for Compute 3.5 cards:
+  nVidia GTX 780, 780Ti, Titan and GT 640 (GK208 chip)
+  Note that the -C option isn't needed for the Titan kernel.
+
 - the November 1st release finally fixes the stratum protocol
   hang for good. Root cause analysis: The ssize_t didn't wasn't
   a signed type in my Windows port, causing the stratum_send_line

@@ -118,6 +118,11 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_35,sm_35</CodeGeneration>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">64</MaxRegCount>
+      <AdditionalCompilerOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </AdditionalCompilerOptions>
+      <PtxAsOptionV Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</PtxAsOptionV>
+      <PtxAsOptionV Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</PtxAsOptionV>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
