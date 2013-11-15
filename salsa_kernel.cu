@@ -110,10 +110,12 @@ extern "C" int cuda_throughput(int thr_id)
         cuCtxCreate( &ctx, CU_CTX_SCHED_YIELD, device_map[thr_id] );
         cuCtxSetCurrent(ctx);
         cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_Shared);
+        cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
 #else
         cudaSetDeviceFlags(cudaDeviceScheduleYield);
         cudaSetDevice(device_map[thr_id]);
         cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
+        cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
         cudaFree(0);
 #endif
 
