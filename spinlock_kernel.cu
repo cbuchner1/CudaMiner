@@ -96,6 +96,14 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
         case 14: scrypt_core_kernel_spinlockA<14><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
         case 15: scrypt_core_kernel_spinlockA<15><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
         case 16: scrypt_core_kernel_spinlockA<16><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 17: scrypt_core_kernel_spinlockA<17><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 18: scrypt_core_kernel_spinlockA<18><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 19: scrypt_core_kernel_spinlockA<19><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 20: scrypt_core_kernel_spinlockA<20><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 21: scrypt_core_kernel_spinlockA<21><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 22: scrypt_core_kernel_spinlockA<22><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 23: scrypt_core_kernel_spinlockA<23><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 24: scrypt_core_kernel_spinlockA<24><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
         default: success = false; break;
     }
 
@@ -133,6 +141,14 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
                 case 14: scrypt_core_kernel_spinlockB_tex<14,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
                 case 15: scrypt_core_kernel_spinlockB_tex<15,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
                 case 16: scrypt_core_kernel_spinlockB_tex<16,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 17: scrypt_core_kernel_spinlockB_tex<17,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 18: scrypt_core_kernel_spinlockB_tex<18,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 19: scrypt_core_kernel_spinlockB_tex<19,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 20: scrypt_core_kernel_spinlockB_tex<20,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 21: scrypt_core_kernel_spinlockB_tex<21,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 22: scrypt_core_kernel_spinlockB_tex<22,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 23: scrypt_core_kernel_spinlockB_tex<23,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 24: scrypt_core_kernel_spinlockB_tex<24,1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
                 default: success = false; break;
             }
         }
@@ -155,6 +171,14 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
                 case 14: scrypt_core_kernel_spinlockB_tex<14,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
                 case 15: scrypt_core_kernel_spinlockB_tex<15,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
                 case 16: scrypt_core_kernel_spinlockB_tex<16,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 17: scrypt_core_kernel_spinlockB_tex<17,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 18: scrypt_core_kernel_spinlockB_tex<18,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 19: scrypt_core_kernel_spinlockB_tex<19,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 20: scrypt_core_kernel_spinlockB_tex<20,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 21: scrypt_core_kernel_spinlockB_tex<21,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 22: scrypt_core_kernel_spinlockB_tex<22,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 23: scrypt_core_kernel_spinlockB_tex<23,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+                case 24: scrypt_core_kernel_spinlockB_tex<24,2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
                 default: success = false; break;
             }
         } else success = false;
@@ -178,6 +202,14 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
             case 14: scrypt_core_kernel_spinlockB<14><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
             case 15: scrypt_core_kernel_spinlockB<15><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
             case 16: scrypt_core_kernel_spinlockB<16><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 17: scrypt_core_kernel_spinlockB<17><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 18: scrypt_core_kernel_spinlockB<18><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 19: scrypt_core_kernel_spinlockB<19><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 20: scrypt_core_kernel_spinlockB<20><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 21: scrypt_core_kernel_spinlockB<21><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 22: scrypt_core_kernel_spinlockB<22><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 23: scrypt_core_kernel_spinlockB<23><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+            case 24: scrypt_core_kernel_spinlockB<24><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
             default: success = false; break;
         }
     }

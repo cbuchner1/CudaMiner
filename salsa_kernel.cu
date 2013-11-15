@@ -396,7 +396,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
                 for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
                 {
-                    double kHash[16+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+                    double kHash[24+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
                     for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= kernel->max_warps_per_block(); ++WARPS_PER_BLOCK)
                     {
                         double khash_sec = 0;
@@ -446,7 +446,7 @@ skip2:              ;
                             for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
                                 char tmp[16]; sprintf(tmp, "   x%-2d", i);
                                 strcat(line, tmp);
-                                if (cw == 80 && i == 8) strcat(line, "\n                          ");
+                                if (cw == 80 && (i == 8 || i == 16)) strcat(line, "\n                          ");
                             }
                             applog(LOG_DEBUG, line);
                         }
@@ -458,7 +458,7 @@ skip2:              ;
                             else
                                 sprintf(tmp, "     %c", (i<kernel->max_warps_per_block())?'|':' ');
                             strcat(line, tmp);
-                            if (cw == 80 && i == 8) strcat(line, "\n                          ");
+                            if (cw == 80 && (i == 8 || i == 16)) strcat(line, "\n                          ");
                         }
                         strcat(line, "kH/s");
                         applog(LOG_DEBUG, line);

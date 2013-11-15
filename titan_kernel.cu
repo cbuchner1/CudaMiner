@@ -1,7 +1,7 @@
 //
 // Kernel that runs best on Kepler (Compute 3.5) devices
 // uses funnel shifter and __ldg() intrinsic, but suffers from unfavorable
-// shared memory alignment (+2 instead of +1) due to different PTX ISA
+// shared memory alignment (+4 instead of +1) due to different PTX ISA
 //
 // NOTE: compile this .cu module for compute_35,sm_35 with --maxrregcount=64
 //
@@ -60,6 +60,14 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         case 14: scrypt_core_kernel_titanA<14><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
         case 15: scrypt_core_kernel_titanA<15><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
         case 16: scrypt_core_kernel_titanA<16><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 17: scrypt_core_kernel_titanA<17><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 18: scrypt_core_kernel_titanA<18><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 19: scrypt_core_kernel_titanA<19><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 20: scrypt_core_kernel_titanA<20><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 21: scrypt_core_kernel_titanA<21><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 22: scrypt_core_kernel_titanA<22><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 23: scrypt_core_kernel_titanA<23><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 24: scrypt_core_kernel_titanA<24><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
         default: success = false; break;
     }
 
@@ -93,6 +101,14 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         case 14: scrypt_core_kernel_titanB<14><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
         case 15: scrypt_core_kernel_titanB<15><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
         case 16: scrypt_core_kernel_titanB<16><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 17: scrypt_core_kernel_titanB<17><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 18: scrypt_core_kernel_titanB<18><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 19: scrypt_core_kernel_titanB<19><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 20: scrypt_core_kernel_titanB<20><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 21: scrypt_core_kernel_titanB<21><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 22: scrypt_core_kernel_titanB<22><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 23: scrypt_core_kernel_titanB<23><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 24: scrypt_core_kernel_titanB<24><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
         default: success = false; break;
     }
 
@@ -227,8 +243,8 @@ static __device__ __forceinline__ void unlock(int *mutex, int i)
 template <int WARPS_PER_BLOCK> __global__ void
 scrypt_core_kernel_titanA(uint32_t *g_idata, int *mutex)
 {
-     // bank conflict mitigation:  +2 for alignment for uint4 in PTX >=2.0 ISA
-    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+2];
+     // bank conflict mitigation:  +4 for alignment for uint4 in PTX >=2.0 ISA
+    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
 
     volatile int warpIdx        = threadIdx.x / warpSize;
     volatile int warpThread     = threadIdx.x % warpSize;
@@ -284,8 +300,8 @@ scrypt_core_kernel_titanA(uint32_t *g_idata, int *mutex)
 template <int WARPS_PER_BLOCK> __global__ void
 scrypt_core_kernel_titanB(uint32_t *g_odata, int *mutex)
 {
-    // bank conflict mitigation:  +2 for alignment for uint4 in PTX >=2.0 ISA
-    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+2];
+    // bank conflict mitigation:  +4 for alignment for uint4 in PTX >=2.0 ISA
+    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
 
     volatile int warpIdx        = threadIdx.x / warpSize;
     volatile int warpThread     = threadIdx.x % warpSize;
