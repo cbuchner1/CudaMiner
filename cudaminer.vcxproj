@@ -116,6 +116,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_11,sm_11</CodeGeneration>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_11,sm_11</CodeGeneration>
     </CudaCompile>
+    <CudaCompile Include="test_kernel.cu" />
     <CudaCompile Include="titan_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_35,sm_35</CodeGeneration>
@@ -166,6 +167,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="miner.h" />
     <ClInclude Include="salsa_kernel.h" />
     <ClInclude Include="spinlock_kernel.h" />
+    <ClInclude Include="test_kernel.h" />
     <ClInclude Include="titan_kernel.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

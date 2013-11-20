@@ -113,6 +113,9 @@
     <ClInclude Include="legacy_kernel.h">
       <Filter>Header Files\CUDA</Filter>
     </ClInclude>
+    <ClInclude Include="test_kernel.h">
+      <Filter>Header Files\CUDA</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="titan_kernel.cu">
@@ -128,6 +131,9 @@
       <Filter>Source Files\CUDA</Filter>
     </CudaCompile>
     <CudaCompile Include="legacy_kernel.cu">
+      <Filter>Source Files\CUDA</Filter>
+    </CudaCompile>
+    <CudaCompile Include="test_kernel.cu">
       <Filter>Source Files\CUDA</Filter>
     </CudaCompile>
   </ItemGroup>

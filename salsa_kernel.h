@@ -59,6 +59,7 @@ public:
     virtual int max_warps_per_block() = 0;
     virtual int get_texel_width() = 0;
     virtual bool no_textures() { return false; };
+    virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeDefault; }
 };
 
 // Define work unit size

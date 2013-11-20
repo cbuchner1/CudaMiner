@@ -24,6 +24,7 @@
 #include "spinlock_kernel.h"
 #include "fermi_kernel.h"
 #include "legacy_kernel.h"
+#include "test_kernel.h"
 
 #include "miner.h"
 
@@ -63,6 +64,7 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
                 case 'K': case 'S': *kernel = new SpinlockKernel(); break;
                 case 'F': *kernel = new FermiKernel(); break;
                 case 'L': *kernel = new LegacyKernel(); break;
+                case 'X': *kernel = new TestKernel(); break;
                 case ' ': // choose based on device architecture
                      if (props->major == 3 && props->minor == 5)
                     *kernel = new TitanKernel();
@@ -110,12 +112,10 @@ extern "C" int cuda_throughput(int thr_id)
         cuCtxCreate( &ctx, CU_CTX_SCHED_YIELD, device_map[thr_id] );
         cuCtxSetCurrent(ctx);
         cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_Shared);
-        cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
 #else
         cudaSetDeviceFlags(cudaDeviceScheduleYield);
         cudaSetDevice(device_map[thr_id]);
         cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
-        cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
         cudaFree(0);
 #endif
 
@@ -256,7 +256,12 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'L') ||
                  ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && props.major == 1))
             kernel = new LegacyKernel();
+        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'X'))
+            kernel = new TestKernel();
     }
+
+    // set whatever shared memory bank mode the kernel prefers
+    cudaDeviceSetSharedMemConfig(kernel->shared_mem_config());
 
     // some kernels (e.g. Titan) do not support the texture cache
     if (kernel->no_textures() && device_texturecache[thr_id]) {

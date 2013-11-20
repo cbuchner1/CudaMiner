@@ -18,6 +18,7 @@ public:
     virtual char get_identifier() { return 'K'; };
     virtual int max_warps_per_block() { return 24; };
     virtual int get_texel_width() { return 4; };
+    virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeEightByte; }
 };
 
 #endif // #ifndef SPINLOCK_KERNEL_H
