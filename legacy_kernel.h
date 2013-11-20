@@ -3,6 +3,8 @@
 
 #include "salsa_kernel.h"
 
+#define EXTRA_WARPS 0
+
 class LegacyKernel : public KernelInterface
 {
 public:
@@ -16,7 +18,11 @@ public:
     virtual bool unbindtexture_2D();
 
     virtual char get_identifier() { return 'L'; };
+#if EXTRA_WARPS
+    virtual int max_warps_per_block() { return 8; };
+#else
     virtual int max_warps_per_block() { return 3; };
+#endif
     virtual int get_texel_width() { return 2; };
 };
 

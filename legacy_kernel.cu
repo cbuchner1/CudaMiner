@@ -97,11 +97,13 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
         case 1: legacy_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
         case 2: legacy_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
         case 3: legacy_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 4: legacy_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 5: legacy_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 6: legacy_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 7: legacy_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 8: legacy_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
+#if EXTRA_WARPS
+            case 4: legacy_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 5: legacy_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 6: legacy_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 7: legacy_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 8: legacy_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
+#endif
         default: success = false; break;
     }
 
@@ -126,11 +128,13 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
                 case 1: legacy_scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
                 case 2: legacy_scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
                 case 3: legacy_scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 4: legacy_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 5: legacy_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 6: legacy_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 7: legacy_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 8: legacy_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
+#if EXTRA_WARPS
+                    case 4: legacy_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 5: legacy_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 6: legacy_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 7: legacy_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 8: legacy_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
+#endif
                 default: success = false; break;
             }
         }
@@ -140,11 +144,13 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
                 case 1: legacy_scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
                 case 2: legacy_scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
                 case 3: legacy_scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 4: legacy_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 5: legacy_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 6: legacy_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 7: legacy_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 8: legacy_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
+#if EXTRA_WARPS
+                   case 4: legacy_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                   case 5: legacy_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                   case 6: legacy_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                   case 7: legacy_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                   case 8: legacy_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
+#endif
                 default: success = false; break;
             }
         } else success = false;
@@ -155,11 +161,13 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
             case 1: legacy_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
             case 2: legacy_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
             case 3: legacy_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 4: legacy_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 5: legacy_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 6: legacy_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 7: legacy_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 8: legacy_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
+#if EXTRA_WARPS
+                case 4: legacy_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 5: legacy_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 6: legacy_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 7: legacy_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 8: legacy_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
+#endif
             default: success = false; break;
         }
     }
@@ -170,30 +178,88 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     return success;
 }
 
-#define ROTL(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
+#define ROTL7(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<7) | ((a00)>>25) );\
+a1^=(((a10)<<7) | ((a10)>>25) );\
+a2^=(((a20)<<7) | ((a20)>>25) );\
+a3^=(((a30)<<7) | ((a30)>>25) );\
+};\
+
+#define ROTL9(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<9) | ((a00)>>23) );\
+a1^=(((a10)<<9) | ((a10)>>23) );\
+a2^=(((a20)<<9) | ((a20)>>23) );\
+a3^=(((a30)<<9) | ((a30)>>23) );\
+};\
+
+#define ROTL13(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<13) | ((a00)>>19) );\
+a1^=(((a10)<<13) | ((a10)>>19) );\
+a2^=(((a20)<<13) | ((a20)>>19) );\
+a3^=(((a30)<<13) | ((a30)>>19) );\
+};\
+
+#define ROTL18(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=(((a00)<<18) | ((a00)>>14) );\
+a1^=(((a10)<<18) | ((a10)>>14) );\
+a2^=(((a20)<<18) | ((a20)>>14) );\
+a3^=(((a30)<<18) | ((a30)>>14) );\
+};\
 
 static __host__ __device__ void xor_salsa8(uint32_t * const B, const uint32_t * const C)
 {
-    // the "volatile" puts data into registers right away
-    volatile uint32_t x0 = (B[ 0] ^= C[ 0]), x1 = (B[ 1] ^= C[ 1]), x2 = (B[ 2] ^= C[ 2]), x3 = (B[ 3] ^= C[ 3]);
-    volatile uint32_t x4 = (B[ 4] ^= C[ 4]), x5 = (B[ 5] ^= C[ 5]), x6 = (B[ 6] ^= C[ 6]), x7 = (B[ 7] ^= C[ 7]);
-    volatile uint32_t x8 = (B[ 8] ^= C[ 8]), x9 = (B[ 9] ^= C[ 9]), xa = (B[10] ^= C[10]), xb = (B[11] ^= C[11]);
-    volatile uint32_t xc = (B[12] ^= C[12]), xd = (B[13] ^= C[13]), xe = (B[14] ^= C[14]), xf = (B[15] ^= C[15]);
+    uint32_t x0 = (B[ 0] ^= C[ 0]), x1 = (B[ 1] ^= C[ 1]), x2 = (B[ 2] ^= C[ 2]), x3 = (B[ 3] ^= C[ 3]);
+    uint32_t x4 = (B[ 4] ^= C[ 4]), x5 = (B[ 5] ^= C[ 5]), x6 = (B[ 6] ^= C[ 6]), x7 = (B[ 7] ^= C[ 7]);
+    uint32_t x8 = (B[ 8] ^= C[ 8]), x9 = (B[ 9] ^= C[ 9]), xa = (B[10] ^= C[10]), xb = (B[11] ^= C[11]);
+    uint32_t xc = (B[12] ^= C[12]), xd = (B[13] ^= C[13]), xe = (B[14] ^= C[14]), xf = (B[15] ^= C[15]);
 
-    for (int i = 0; i < 4; ++i)
-    {
-        /* Operate on columns. */
-        x4 ^= ROTL(x0 + xc,  7);  x9 ^= ROTL(x5 + x1,  7); xe ^= ROTL(xa + x6,  7);  x3 ^= ROTL(xf + xb,  7);
-        x8 ^= ROTL(x4 + x0,  9);  xd ^= ROTL(x9 + x5,  9); x2 ^= ROTL(xe + xa,  9);  x7 ^= ROTL(x3 + xf,  9);
-        xc ^= ROTL(x8 + x4, 13);  x1 ^= ROTL(xd + x9, 13); x6 ^= ROTL(x2 + xe, 13);  xb ^= ROTL(x7 + x3, 13);
-        x0 ^= ROTL(xc + x8, 18);  x5 ^= ROTL(x1 + xd, 18); xa ^= ROTL(x6 + x2, 18);  xf ^= ROTL(xb + x7, 18);
-        
-        /* Operate on rows. */
-        x1 ^= ROTL(x0 + x3,  7);  x6 ^= ROTL(x5 + x4,  7); xb ^= ROTL(xa + x9,  7);  xc ^= ROTL(xf + xe,  7);
-        x2 ^= ROTL(x1 + x0,  9);  x7 ^= ROTL(x6 + x5,  9); x8 ^= ROTL(xb + xa,  9);  xd ^= ROTL(xc + xf,  9);
-        x3 ^= ROTL(x2 + x1, 13);  x4 ^= ROTL(x7 + x6, 13); x9 ^= ROTL(x8 + xb, 13);  xe ^= ROTL(xd + xc, 13);
-        x0 ^= ROTL(x3 + x2, 18);  x5 ^= ROTL(x4 + x7, 18); xa ^= ROTL(x9 + x8, 18);  xf ^= ROTL(xe + xd, 18);
-    }
+    /* Operate on columns. */
+	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
+	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
+	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
+	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
+
+    /* Operate on rows. */
+	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
+	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
+	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
+	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
+
+    /* Operate on columns. */
+	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
+	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
+	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
+	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
+
+    /* Operate on rows. */
+	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
+	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
+	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
+	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
+
+    /* Operate on columns. */
+	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
+	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
+	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
+	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
+
+    /* Operate on rows. */
+	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
+	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
+	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
+	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
+
+    /* Operate on columns. */
+	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
+	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
+	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
+	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
+
+    /* Operate on rows. */
+	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
+	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
+	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
+	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
 
     B[ 0] += x0; B[ 1] += x1; B[ 2] += x2; B[ 3] += x3; B[ 4] += x4; B[ 5] += x5; B[ 6] += x6; B[ 7] += x7;
     B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
@@ -220,13 +286,13 @@ legacy_scrypt_core_kernelA(uint32_t *g_idata)
     volatile int warpThread = threadIdx.x % warpSize;
 
     // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/16;
-    volatile unsigned int Z = 2*(warpThread%16);
+    unsigned int Y = warpThread/16;
+    unsigned int Z = 2*(warpThread%16);
 
     // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_idata += 32      * offset;
-    uint32_t * volatile V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
+    uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
 
     uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
     uint32_t *XX = X[warpIdx][warpThread];
@@ -261,13 +327,13 @@ legacy_scrypt_core_kernelB(uint32_t *g_odata)
     volatile int warpThread = threadIdx.x % warpSize;
 
     // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/16;
-    volatile unsigned int Z = 2*(warpThread%16);
+    unsigned int Y = warpThread/16;
+    unsigned int Z = 2*(warpThread%16);
 
     // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_odata += 32      * offset;
-    uint32_t * volatile V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
+    uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
 
     uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
     uint32_t *XX = X[warpIdx][warpThread];
@@ -305,11 +371,11 @@ legacy_scrypt_core_kernelB_tex(uint32_t *g_odata)
     volatile int warpThread = threadIdx.x % warpSize;
 
     // variables supporting the large memory transaction magic
-    volatile unsigned int Y = warpThread/16;
-    volatile unsigned int Z = 2*(warpThread%16);
+    unsigned int Y = warpThread/16;
+    unsigned int Z = 2*(warpThread%16);
 
     // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_odata += 32      * offset;
 
     uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
