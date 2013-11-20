@@ -31,9 +31,9 @@
 #endif
 
 // forward references
-template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernelA(uint32_t *g_idata);
-template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernelB(uint32_t *g_odata);
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void scrypt_core_kernelB_tex(uint32_t *g_odata);
+template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelA(uint32_t *g_idata);
+template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelB(uint32_t *g_odata);
+template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void legacy_scrypt_core_kernelB_tex(uint32_t *g_odata);
 
 // scratchbuf constants (pointers to scratch buffer for each work unit)
 __constant__ uint32_t* c_V[1024];
@@ -94,14 +94,14 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     // First phase: Sequential writes to scratchpad.
 
     switch (WARPS_PER_BLOCK) {
-        case 1: scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 2: scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 3: scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 4: scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 5: scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 6: scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 7: scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-//            case 8: scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
+        case 1: legacy_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
+        case 2: legacy_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
+        case 3: legacy_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
+//            case 4: legacy_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
+//            case 5: legacy_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
+//            case 6: legacy_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
+//            case 7: legacy_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
+//            case 8: legacy_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
         default: success = false; break;
     }
 
@@ -123,28 +123,28 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
         if (texture_cache == 1)
         {
             switch (WARPS_PER_BLOCK) {
-                case 1: scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 4: scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 5: scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 6: scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 7: scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                    case 8: scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 1: legacy_scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 2: legacy_scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 3: legacy_scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
+//                    case 4: legacy_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
+//                    case 5: legacy_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
+//                    case 6: legacy_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
+//                    case 7: legacy_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
+//                    case 8: legacy_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
                 default: success = false; break;
             }
         }
         else if (texture_cache == 2)
         {
             switch (WARPS_PER_BLOCK) {
-                case 1: scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 4: scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 5: scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 6: scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 7: scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                   case 8: scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 1: legacy_scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 2: legacy_scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 3: legacy_scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
+//                   case 4: legacy_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
+//                   case 5: legacy_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
+//                   case 6: legacy_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
+//                   case 7: legacy_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
+//                   case 8: legacy_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
                 default: success = false; break;
             }
         } else success = false;
@@ -152,14 +152,14 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     else
     {
         switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 2: scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 3: scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 4: scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 5: scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 6: scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 7: scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 8: scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 1: legacy_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 2: legacy_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 3: legacy_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
+//                case 4: legacy_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
+//                case 5: legacy_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
+//                case 6: legacy_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
+//                case 7: legacy_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
+//                case 8: legacy_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
             default: success = false; break;
         }
     }
@@ -212,126 +212,134 @@ static __host__ __device__ uint2& operator^=(uint2& left, const uint2& right)
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernelA(uint32_t *g_idata)
+legacy_scrypt_core_kernelA(uint32_t *g_idata)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx    = threadIdx.x / warpSize;
     volatile int warpThread = threadIdx.x % warpSize;
 
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_idata += 32      * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
     // variables supporting the large memory transaction magic
     volatile unsigned int Y = warpThread/16;
     volatile unsigned int Z = 2*(warpThread%16);
 
+    // add block specific offsets
+    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_idata += 32      * offset;
+    uint32_t * volatile V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
+
+    uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
+    uint32_t *XX = X[warpIdx][warpThread];
+
     {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&g_idata[32*(wu+Y)+Z]));
+            *((uint2*)XB[wu]) = *((uint2*)(&g_idata[32*(wu+Y)+Z]));
 
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&V[SCRATCH*(wu+Y) + 0*32 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
+            *((uint2*)(&V[SCRATCH*wu])) = *((uint2*)XB[wu]);
 
         for (int i = 1; i < 1024; i++)
         {
-            xor_salsa8(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-            xor_salsa8(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
+            xor_salsa8(&XX[0], &XX[16]);
+            xor_salsa8(&XX[16], &XX[0]);
 
 #pragma unroll 16
             for (int wu=0; wu < 32; wu+=2)
-                *((uint2*)(&V[SCRATCH*(wu+Y) + i*32 + Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
+                *((uint2*)(&V[SCRATCH*wu + i*32])) = *((uint2*)XB[wu]);
         }
     }
 }
 
 template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernelB(uint32_t *g_odata)
+legacy_scrypt_core_kernelB(uint32_t *g_odata)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx    = threadIdx.x / warpSize;
     volatile int warpThread = threadIdx.x % warpSize;
 
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32      * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
     // variables supporting the large memory transaction magic
     volatile unsigned int Y = warpThread/16;
     volatile unsigned int Z = 2*(warpThread%16);
 
+    // add block specific offsets
+    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_odata += 32      * offset;
+    uint32_t * volatile V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
+
+    uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
+    uint32_t *XX = X[warpIdx][warpThread];
+
     {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) = *((uint2*)(&V[SCRATCH*(wu+Y) + 1023*32 + Z]));
+            *((uint2*)XB[wu]) = *((uint2*)(&V[SCRATCH*wu + 1023*32]));
 
-        xor_salsa8(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-        xor_salsa8(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
+        xor_salsa8(&XX[0], &XX[16]);
+        xor_salsa8(&XX[16], &XX[0]);
 
         for (int i = 0; i < 1024; i++)
         {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= *((uint2*)(&V[SCRATCH*(wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z]));
+            *((uint2*)XB[wu]) ^= *((uint2*)(&V[SCRATCH*wu + 32*(X[warpIdx][wu+Y][16] & 1023)]));
 
-            xor_salsa8(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-            xor_salsa8(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
+            xor_salsa8(&XX[0], &XX[16]);
+            xor_salsa8(&XX[16], &XX[0]);
         }
 
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
+            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)XB[wu]);
     }
 }
 
 template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
-scrypt_core_kernelB_tex(uint32_t *g_odata)
+legacy_scrypt_core_kernelB_tex(uint32_t *g_odata)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
     volatile int warpIdx    = threadIdx.x / warpSize;
     volatile int warpThread = threadIdx.x % warpSize;
 
-    // add block specific offsets
-    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32      * offset;
-    uint32_t * volatile V = c_V[offset/WU_PER_WARP];
-
     // variables supporting the large memory transaction magic
     volatile unsigned int Y = warpThread/16;
     volatile unsigned int Z = 2*(warpThread%16);
 
+    // add block specific offsets
+    volatile int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_odata += 32      * offset;
+
+    uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
+    uint32_t *XX = X[warpIdx][warpThread];
+
     {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) = ((TEX_DIM == 1) ?
+            *((uint2*)XB[wu]) = ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 1023*32 + Z)/2) :
                         tex2D(texRef2D_2_V, 0.5f + (32*1023 + Z)/2, 0.5f + (offset+wu+Y)));
 
-        xor_salsa8(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-        xor_salsa8(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
+        xor_salsa8(&XX[0], &XX[16]);
+        xor_salsa8(&XX[16], &XX[0]);
 
         for (int i = 0; i < 1024; i++)
         {
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&X[warpIdx][wu+Y][Z])) ^= ((TEX_DIM == 1) ?
+            *((uint2*)XB[wu]) ^= ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2) :
                         tex2D(texRef2D_2_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2, 0.5f + (offset+wu+Y)));
 
-            xor_salsa8(&X[warpIdx][warpThread][0], &X[warpIdx][warpThread][16]);
-            xor_salsa8(&X[warpIdx][warpThread][16], &X[warpIdx][warpThread][0]);
+            xor_salsa8(&XX[0], &XX[16]);
+            xor_salsa8(&XX[16], &XX[0]);
         }
 
 #pragma unroll 16
         for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)(&X[warpIdx][wu+Y][Z]));
+            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)XB[wu]);
     }
 }
 

@@ -31,9 +31,9 @@
 #endif
 
 // forward references
-template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernelA(uint32_t *g_idata);
-template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernelB(uint32_t *g_odata);
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void scrypt_core_kernelB_tex(uint32_t *g_odata);
+template <int WARPS_PER_BLOCK> __global__ void fermi_scrypt_core_kernelA(uint32_t *g_idata);
+template <int WARPS_PER_BLOCK> __global__ void fermi_scrypt_core_kernelB(uint32_t *g_odata);
+template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void fermi_scrypt_core_kernelB_tex(uint32_t *g_odata);
 
 // scratchbuf constants (pointers to scratch buffer for each work unit)
 __constant__ uint32_t* c_V[1024];
@@ -94,22 +94,22 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     // First phase: Sequential writes to scratchpad.
 
     switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 2: scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 3: scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 4: scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 5: scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 6: scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 7: scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 8: scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 9: scrypt_core_kernelA<9><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 10: scrypt_core_kernelA<10><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 11: scrypt_core_kernelA<11><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 12: scrypt_core_kernelA<12><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 13: scrypt_core_kernelA<13><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 14: scrypt_core_kernelA<14><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 15: scrypt_core_kernelA<15><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 16: scrypt_core_kernelA<16><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 1: fermi_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 2: fermi_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 3: fermi_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 4: fermi_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 5: fermi_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 6: fermi_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 7: fermi_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 8: fermi_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 9: fermi_scrypt_core_kernelA<9><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 10: fermi_scrypt_core_kernelA<10><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 11: fermi_scrypt_core_kernelA<11><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 12: fermi_scrypt_core_kernelA<12><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 13: fermi_scrypt_core_kernelA<13><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 14: fermi_scrypt_core_kernelA<14><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 15: fermi_scrypt_core_kernelA<15><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 16: fermi_scrypt_core_kernelA<16><<< grid, threads, 0, stream >>>(d_idata); break;
         default: success = false; break;
     }
 
@@ -131,44 +131,44 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         if (texture_cache == 1)
         {
             switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 2: scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 3: scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 4: scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 5: scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 6: scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 7: scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 8: scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 9: scrypt_core_kernelB_tex<9,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 10: scrypt_core_kernelB_tex<10,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 11: scrypt_core_kernelB_tex<11,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 12: scrypt_core_kernelB_tex<12,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 13: scrypt_core_kernelB_tex<13,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 14: scrypt_core_kernelB_tex<14,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 15: scrypt_core_kernelB_tex<15,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 16: scrypt_core_kernelB_tex<16,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 1: fermi_scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 2: fermi_scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 3: fermi_scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 4: fermi_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 5: fermi_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 6: fermi_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 7: fermi_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 8: fermi_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 9: fermi_scrypt_core_kernelB_tex<9,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 10: fermi_scrypt_core_kernelB_tex<10,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 11: fermi_scrypt_core_kernelB_tex<11,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 12: fermi_scrypt_core_kernelB_tex<12,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 13: fermi_scrypt_core_kernelB_tex<13,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 14: fermi_scrypt_core_kernelB_tex<14,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 15: fermi_scrypt_core_kernelB_tex<15,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 16: fermi_scrypt_core_kernelB_tex<16,1><<< grid, threads, 0, stream >>>(d_odata); break;
                 default: success = false; break;
             }
         }
         else if (texture_cache == 2)
         {
             switch (WARPS_PER_BLOCK) {
-                    case 1: scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 2: scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 3: scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 4: scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 5: scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 6: scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 7: scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 8: scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 9: scrypt_core_kernelB_tex<9,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 10: scrypt_core_kernelB_tex<10,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 11: scrypt_core_kernelB_tex<11,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 12: scrypt_core_kernelB_tex<12,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 13: scrypt_core_kernelB_tex<13,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 14: scrypt_core_kernelB_tex<14,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 15: scrypt_core_kernelB_tex<15,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 16: scrypt_core_kernelB_tex<16,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 1: fermi_scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 2: fermi_scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 3: fermi_scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 4: fermi_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 5: fermi_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 6: fermi_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 7: fermi_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 8: fermi_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 9: fermi_scrypt_core_kernelB_tex<9,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 10: fermi_scrypt_core_kernelB_tex<10,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 11: fermi_scrypt_core_kernelB_tex<11,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 12: fermi_scrypt_core_kernelB_tex<12,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 13: fermi_scrypt_core_kernelB_tex<13,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 14: fermi_scrypt_core_kernelB_tex<14,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 15: fermi_scrypt_core_kernelB_tex<15,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 16: fermi_scrypt_core_kernelB_tex<16,2><<< grid, threads, 0, stream >>>(d_odata); break;
                 default: success = false; break;
             }
         } else success = false;
@@ -176,22 +176,22 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     else
     {
         switch (WARPS_PER_BLOCK) {
-            case 1: scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 2: scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 3: scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 4: scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 5: scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 6: scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 7: scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 8: scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 9: scrypt_core_kernelB<9><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 10: scrypt_core_kernelB<10><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 11: scrypt_core_kernelB<11><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 12: scrypt_core_kernelB<12><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 13: scrypt_core_kernelB<13><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 14: scrypt_core_kernelB<14><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 15: scrypt_core_kernelB<15><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 16: scrypt_core_kernelB<16><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 1: fermi_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 2: fermi_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 3: fermi_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 4: fermi_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 5: fermi_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 6: fermi_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 7: fermi_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 8: fermi_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 9: fermi_scrypt_core_kernelB<9><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 10: fermi_scrypt_core_kernelB<10><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 11: fermi_scrypt_core_kernelB<11><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 12: fermi_scrypt_core_kernelB<12><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 13: fermi_scrypt_core_kernelB<13><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 14: fermi_scrypt_core_kernelB<14><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 15: fermi_scrypt_core_kernelB<15><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 16: fermi_scrypt_core_kernelB<16><<< grid, threads, 0, stream >>>(d_odata); break;
             default: success = false; break;
         }
     }
@@ -317,7 +317,7 @@ static __device__ uint4& operator^=(uint4& left, const uint4& right)
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernelA(uint32_t *g_idata)
+fermi_scrypt_core_kernelA(uint32_t *g_idata)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
@@ -370,7 +370,7 @@ scrypt_core_kernelA(uint32_t *g_idata)
 }
 
 template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernelB(uint32_t *g_odata)
+fermi_scrypt_core_kernelB(uint32_t *g_odata)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
@@ -443,7 +443,7 @@ scrypt_core_kernelB(uint32_t *g_odata)
 }
 
 template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
-scrypt_core_kernelB_tex(uint32_t *g_odata)
+fermi_scrypt_core_kernelB_tex(uint32_t *g_odata)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][16+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 

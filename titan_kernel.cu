@@ -27,8 +27,8 @@
 static __device__ __inline__ ulonglong2 __ldg(ulonglong2 *ptr) { ulonglong2 ret; asm volatile ("ld.global.nc.v2.u64 {%0,%1}, [%2];" : "=l"(ret.x), "=l"(ret.y) : __LDG_PTR (ptr)); return ret; }
 
 // forward references
-template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernel_titanA(uint32_t *g_idata, int *mutex);
-template <int WARPS_PER_BLOCK> __global__ void scrypt_core_kernel_titanB(uint32_t *g_odata, int *mutex);
+template <int WARPS_PER_BLOCK> __global__ void titan_scrypt_core_kernelA(uint32_t *g_idata, int *mutex);
+template <int WARPS_PER_BLOCK> __global__ void titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex);
 
 // scratchbuf constants (pointers to scratch buffer for each work unit)
 __constant__ uint32_t* c_V[1024];
@@ -52,30 +52,30 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     // First phase: Sequential writes to scratchpad.
 
     switch (WARPS_PER_BLOCK) {
-        case 1: scrypt_core_kernel_titanA<1><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 2: scrypt_core_kernel_titanA<2><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 3: scrypt_core_kernel_titanA<3><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 4: scrypt_core_kernel_titanA<4><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 5: scrypt_core_kernel_titanA<5><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 6: scrypt_core_kernel_titanA<6><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 7: scrypt_core_kernel_titanA<7><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 8: scrypt_core_kernel_titanA<8><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 9: scrypt_core_kernel_titanA<9><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 10: scrypt_core_kernel_titanA<10><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 11: scrypt_core_kernel_titanA<11><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 12: scrypt_core_kernel_titanA<12><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 13: scrypt_core_kernel_titanA<13><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 14: scrypt_core_kernel_titanA<14><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 15: scrypt_core_kernel_titanA<15><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 16: scrypt_core_kernel_titanA<16><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 17: scrypt_core_kernel_titanA<17><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 18: scrypt_core_kernel_titanA<18><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 19: scrypt_core_kernel_titanA<19><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 20: scrypt_core_kernel_titanA<20><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 21: scrypt_core_kernel_titanA<21><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 22: scrypt_core_kernel_titanA<22><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 23: scrypt_core_kernel_titanA<23><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
-        case 24: scrypt_core_kernel_titanA<24><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 1: titan_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 2: titan_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 3: titan_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 4: titan_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 5: titan_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 6: titan_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 7: titan_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 8: titan_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 9: titan_scrypt_core_kernelA<9><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 10: titan_scrypt_core_kernelA<10><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 11: titan_scrypt_core_kernelA<11><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 12: titan_scrypt_core_kernelA<12><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 13: titan_scrypt_core_kernelA<13><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 14: titan_scrypt_core_kernelA<14><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 15: titan_scrypt_core_kernelA<15><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 16: titan_scrypt_core_kernelA<16><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 17: titan_scrypt_core_kernelA<17><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 18: titan_scrypt_core_kernelA<18><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 19: titan_scrypt_core_kernelA<19><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 20: titan_scrypt_core_kernelA<20><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 21: titan_scrypt_core_kernelA<21><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 22: titan_scrypt_core_kernelA<22><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 23: titan_scrypt_core_kernelA<23><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
+        case 24: titan_scrypt_core_kernelA<24><<< grid, threads, 0, stream >>>(d_idata, mutex); break;
         default: success = false; break;
     }
 
@@ -93,30 +93,30 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     // Second phase: Random read access from scratchpad.
 
     switch (WARPS_PER_BLOCK) {
-        case 1: scrypt_core_kernel_titanB<1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 2: scrypt_core_kernel_titanB<2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 3: scrypt_core_kernel_titanB<3><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 4: scrypt_core_kernel_titanB<4><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 5: scrypt_core_kernel_titanB<5><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 6: scrypt_core_kernel_titanB<6><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 7: scrypt_core_kernel_titanB<7><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 8: scrypt_core_kernel_titanB<8><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 9: scrypt_core_kernel_titanB<9><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 10: scrypt_core_kernel_titanB<10><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 11: scrypt_core_kernel_titanB<11><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 12: scrypt_core_kernel_titanB<12><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 13: scrypt_core_kernel_titanB<13><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 14: scrypt_core_kernel_titanB<14><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 15: scrypt_core_kernel_titanB<15><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 16: scrypt_core_kernel_titanB<16><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 17: scrypt_core_kernel_titanB<17><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 18: scrypt_core_kernel_titanB<18><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 19: scrypt_core_kernel_titanB<19><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 20: scrypt_core_kernel_titanB<20><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 21: scrypt_core_kernel_titanB<21><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 22: scrypt_core_kernel_titanB<22><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 23: scrypt_core_kernel_titanB<23><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
-        case 24: scrypt_core_kernel_titanB<24><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 1: titan_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 2: titan_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 3: titan_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 4: titan_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 5: titan_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 6: titan_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 7: titan_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 8: titan_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 9: titan_scrypt_core_kernelB<9><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 10: titan_scrypt_core_kernelB<10><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 11: titan_scrypt_core_kernelB<11><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 12: titan_scrypt_core_kernelB<12><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 13: titan_scrypt_core_kernelB<13><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 14: titan_scrypt_core_kernelB<14><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 15: titan_scrypt_core_kernelB<15><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 16: titan_scrypt_core_kernelB<16><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 17: titan_scrypt_core_kernelB<17><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 18: titan_scrypt_core_kernelB<18><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 19: titan_scrypt_core_kernelB<19><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 20: titan_scrypt_core_kernelB<20><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 21: titan_scrypt_core_kernelB<21><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 22: titan_scrypt_core_kernelB<22><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 23: titan_scrypt_core_kernelB<23><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
+        case 24: titan_scrypt_core_kernelB<24><<< grid, threads, 0, stream >>>(d_odata, mutex); break;
         default: success = false; break;
     }
 
@@ -247,7 +247,7 @@ static __device__ __forceinline__ void unlock(int *mutex, int i)
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernel_titanA(uint32_t *g_idata, int *mutex)
+titan_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
 {
      // bank conflict mitigation:  +4 for alignment for ulonglong2 in PTX >=2.0 ISA
     __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
@@ -307,7 +307,7 @@ scrypt_core_kernel_titanA(uint32_t *g_idata, int *mutex)
 }
 
 template <int WARPS_PER_BLOCK> __global__ void
-scrypt_core_kernel_titanB(uint32_t *g_odata, int *mutex)
+titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
 {
     // bank conflict mitigation:  +4 for alignment for ulonglong2 in PTX >=2.0 ISA
     __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
