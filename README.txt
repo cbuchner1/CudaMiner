@@ -1,5 +1,5 @@
 
-CudaMiner release October 10th 2013 - alpha release
+CudaMiner release November 20th 2013 - alpha release
 ---------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
@@ -108,6 +108,13 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+- the November 20 release removes a possible reason for crashing
+  Legacy and Fermi kernels and adds some of the latest optimizations
+  to the Legacy kernel as well.
+
+- November 15th brings a slight performance boost for Kepler kernels,
+  and some more optimization for Fermi and Titan kernels.
 
 - November 14th brings a performance boost for Compute 3.5 cards:
   nVidia GTX 780, 780Ti, Titan and GT 640 (GK208 chip)
