@@ -1,7 +1,10 @@
 //
 // Kernel that runs best on Legacy (Compute 1.x) devices
 //
-// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=124
+// -full half-warp based memory coalescing
+// -high consumption of shared memory
+//
+// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
 //
 
 #ifdef WIN32

@@ -97,7 +97,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CInterleavedPTX>true</CInterleavedPTX>
     </CudaCompile>
     <CudaCompile>
-      <MaxRegCount>124</MaxRegCount>
+      <MaxRegCount>64</MaxRegCount>
     </CudaCompile>
     <CudaCompile>
       <PtxAsOptionV>true</PtxAsOptionV>
@@ -107,7 +107,10 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <CudaCompile Include="fermi_kernel.cu" />
-    <CudaCompile Include="legacy_kernel.cu" />
+    <CudaCompile Include="legacy_kernel.cu">
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">64</MaxRegCount>
+    </CudaCompile>
     <CudaCompile Include="salsa_kernel.cu" />
     <CudaCompile Include="spinlock_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_11,sm_11</CodeGeneration>

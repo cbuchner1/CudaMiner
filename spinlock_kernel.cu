@@ -1,7 +1,13 @@
 //
 // Kernel that runs best on Kepler (Compute 3.0) devices
 //
-// NOTE: compile this .cu module for compute_11,sm_11 with --maxrregcount=124
+// - makes use of 8 byte of Kepler's shared memory bank mode
+// - does memory transfers with ulonglong2 vectors whereever possible
+// - further halves shared memory consumption over Fermi kernel by sharing
+//   the same shared memory buffers among two neighbor warps. Requires spinlocks
+//   based on global atomics and hence Compute 1.1
+//  
+// NOTE: compile this .cu module for compute_11,sm_11 with --maxrregcount=64
 //
 
 #ifdef WIN32

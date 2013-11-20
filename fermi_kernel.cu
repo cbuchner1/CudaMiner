@@ -1,7 +1,13 @@
 //
 // Kernel that runs best on Fermi devices
 //
-// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=124
+// - shared memory use reduced by nearly factor 2 over legacy kernel
+//   by transferring only half work units (16 x uint32_t) at once.
+// - uses uint4 based memory transfers (each thread moves 16 bytes),
+//   allowing for shorter unrolled loops. This relies on Fermi's better
+//   memory controllers to get high memory troughput.
+//
+// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
 //
 
 #ifdef WIN32

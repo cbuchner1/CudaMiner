@@ -1,8 +1,15 @@
 //
 // Kernel that runs best on Kepler (Compute 3.5) devices
-// uses funnel shifter and __ldg() intrinsic, but suffers from unfavorable
-// shared memory alignment (+4 instead of +1) due to different PTX ISA
 //
+// - makes use of 8 byte of Kepler's shared memory bank mode
+// - does memory transfers with ulonglong2 vectors whereever possible
+// - further halves shared memory consumption over Fermi kernel by sharing
+//   the same shared memory buffers among two warps. Requires spinlocks
+//   based on global atomics.
+// - uses funnel shifter and __ldg() intrinsics from Compute 3.5 ISA
+// - suffers from unfavorable shared memory alignment (+4 instead of +1)#
+//   due to different PTX ISA alignment requirements
+
 // NOTE: compile this .cu module for compute_35,sm_35 with --maxrregcount=64
 //
 
