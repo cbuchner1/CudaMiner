@@ -28,6 +28,10 @@
 
 #include "miner.h"
 
+// require CUDA 5.0 driver API
+#define DMAJ 5
+#define DMIN 0
+
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
 int       MAXWARPS[8];
@@ -36,8 +40,28 @@ uint32_t  h_V_extra[8][1024];
 
 extern "C" int cuda_num_devices()
 {
+    int version;
+    int err = cudaDriverGetVersion(&version);
+    if (err != cudaSuccess)
+    {
+        applog(LOG_ERR, "Unable to query CUDA driver version! Is an nVidia driver installed?");
+        exit(1);
+    }
+
+    int maj = version / 1000, min = version % 100; // same as in deviceQuery sample
+    if (maj < DMAJ || (maj == DMAJ && min < DMIN))
+    {
+        applog(LOG_ERR, "Driver does not support CUDA %d.%d API! Update your nVidia driver!", DMAJ, DMIN);
+        exit(1);
+    }
+
     int GPU_N;
-    cudaGetDeviceCount(&GPU_N);
+    err = cudaGetDeviceCount(&GPU_N);
+    if (err != cudaSuccess)
+    {
+        applog(LOG_ERR, "Unable to query number of CUDA devices! Is an nVidia driver installed?");
+        exit(1);
+    }
     return GPU_N;
 }
 
@@ -106,7 +130,6 @@ extern "C" int cuda_throughput(int thr_id)
     int GRID_BLOCKS, WARPS_PER_BLOCK;
     if (context_blocks.find(thr_id) == context_blocks.end())
     {
-        if (cudaGetLastError() != cudaSuccess) applog(LOG_INFO, "GPU #%d: starting up...\n", device_map[thr_id]);
 #if 0
         CUcontext ctx;
         cuCtxCreate( &ctx, CU_CTX_SCHED_YIELD, device_map[thr_id] );
