@@ -10,10 +10,10 @@ You should see a notable speed-up compared to OpenCL based miners.
 Some numbers from my testing:
 
 GTX 260:    44  kHash/sec (maybe more on Linux/WinXP)
-GTX 640:    40  kHash/sec
 GTX 460:   100  kHash/sec
-GTX 560Ti: 140  kHash/sec
-GTX 660Ti: 176  kHash/sec (or 225 kHash/sec on the 448 core edition)
+GTX 640:    64  kHash/sec (if based on GK 208 chip)
+GTX 560Ti: 150  kHash/sec (or 225 kHash/sec on the 448 core edition)
+GTX 660Ti: 180  kHash/sec (close to 200 kHash/s with overclocking)
 
 NOTE: Compute 1.0 through 1.3 devices seem to run faster on Windows XP
 or Linux.
@@ -227,7 +227,7 @@ Available kernel prefixes are:
 L - Legacy cards (compute 1.x)
 F - Fermi cards (Compute 2.x)
 K - Kepler cards (Compute 3.0). The letter S (for "spinlock") also works
-T - Titan and GK208 based cards (Compute 3.5)
+T - Titan, GTX 780 and GK208 based cards (Compute 3.5)
 
 Examples:
 
@@ -239,28 +239,27 @@ You should wait through autotune to see what kernel is found best for
 your current hardware configuration. You can also override the autotune's
 automatic device generation selection, e.g. pass
 
+-l L
+or
 -l F
 or
 -l K
 or
 -l T
 
-in order to autotune the Fermi kernel on a Legacy, Kepler or Titan device
+in order to autotune the Legacy, Fermi, Kepler or Titan kernels
+overriding the automatic selection.
 
 >>> TODO <<<
 
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
-- a compiled 64 bit version also for Windows
 - add failover support between different pools
-- investigate why on some machine the legacy kernel fails,
-  and on other machines the Fermi kernel fails.
+
 
 Further Optimization:
 - consider use of some inline assembly in CUDA
 - investigate benefits of a LOOKUP_GAP implementation
-- optimize more for compute 3.5 devices like newer GT640 cards
-  and the Geforce Titan.
 
 
 ***************************************************************
