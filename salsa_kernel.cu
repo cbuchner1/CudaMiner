@@ -315,7 +315,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else {
             // compute no. of warps to allocate the largest number producing a single memory block below 4GB
-            for (int warp = 0xFFFFFFFF / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)); warp >= 1; --warp) {
+            for (int warp = 0x7FFFFFFF / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)); warp >= 1; --warp) {
+                cudaGetLastError(); // clear the error state
                 checkCudaErrors(cudaMalloc((void **)&d_V, SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t)));
                 if (cudaGetLastError() == cudaSuccess) {
                     checkCudaErrors(cudaFree(d_V)); d_V = NULL;
@@ -327,6 +328,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
 
         // now allocate a buffer for determined MAXWARPS setting
+        cudaGetLastError(); // clear the error state
         checkCudaErrors(cudaMalloc((void **)&d_V, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
         if (cudaGetLastError() == cudaSuccess) {
             for (int i=0; i < MAXWARPS[thr_id]; ++i)
@@ -367,6 +369,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         for (warp = 0; warp < MAXWARPS[thr_id]; ++warp) {
             // work around partition camping problems by adding an offset
             h_V_extra[thr_id][warp] = (props.major == 1) ? (16 * (rand()%(16384/16))) : 0;
+            cudaGetLastError(); // clear the error state
             checkCudaErrors(cudaMalloc((void **) &h_V[thr_id][warp], (SCRATCH * WU_PER_WARP + h_V_extra[thr_id][warp])*sizeof(uint32_t)));
             if (cudaGetLastError() == cudaSuccess) h_V[thr_id][warp] += h_V_extra[thr_id][warp];
             else {
@@ -421,6 +424,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             {
                 // compute highest MAXWARPS number that we can support based on texture cache mode
                 int MW = (device_texturecache[thr_id] == 1) ? std::min(MAXWARPS[thr_id],MW_1D) : MAXWARPS[thr_id];
+
+                applog(LOG_INFO, "GPU #%d: maximum warps: %d", device_map[thr_id], MW);
 
                 for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
                 {
@@ -606,6 +611,7 @@ skip:           ;
                 kernel->unbindtexture_2D();
             checkCudaErrors(cudaFree(d_V)); d_V = NULL;
 
+            cudaGetLastError(); // clear the error state
             checkCudaErrors(cudaMalloc((void **)&d_V, SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
             if (cudaGetLastError() == cudaSuccess) {
                 for (int i=0; i < MAXWARPS[thr_id]; ++i)

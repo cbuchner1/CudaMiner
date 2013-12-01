@@ -1,12 +1,15 @@
 //
-// Kernel for doing eXperiments
+// Experimental Kernel for Kepler (Compute 3.5) devices
 //
-// a couple of ideas I want to try out:
-// - direct access to global memory (no shared memory). Kernel A should be fine,
-//   but Kernel B will need textures for any kind of performance due to the random permutations.
-// - dynamic shared memory allocation, instead of templated kernels (shortens the binary)
+// Eliminates shared memory entirely, uses warp shuffle instructions instead
+// based on a technique found in this blog posting by Allan MacKinnon:
+// http://www.pixel.io/blog/2013/4/7/fast-matrix-transposition-without-shuffling-or-shared-memory.html
 //
-// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
+// Does not yet run as fast as the shared memory based kernel, but there may
+// be further room for optimization! (417 kHash/s vs 450 kHash/s for T kernel)
+// The card also seems to run hotter, running into its thermal limits soon.
+//
+// NOTE: compile this .cu module for compute_35,sm_35 with --maxrregcount=64
 //
 
 #ifdef WIN32
@@ -21,67 +24,18 @@
 
 #include "test_kernel.h"
 
-#if WIN32
-#ifdef _WIN64
-#define _64BIT_ALIGN 1
-#else
-#define _64BIT_ALIGN 0
-#endif
-#else
-#if __x86_64__
-#define _64BIT_ALIGN 1
-#else
-#define _64BIT_ALIGN 0
-#endif
-#endif
+// grab lane ID
+static __device__ __inline__ unsigned int __laneId() { unsigned int laneId; asm( "mov.u32 %0, %%laneid;" : "=r"( laneId ) ); return laneId; }
 
 // forward references
-template <int WARPS_PER_BLOCK> __global__ void test_scrypt_core_kernelA(uint32_t *g_idata);
-template <int WARPS_PER_BLOCK> __global__ void test_scrypt_core_kernelB(uint32_t *g_odata);
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void test_scrypt_core_kernelB_tex(uint32_t *g_odata);
+__global__ void test_scrypt_core_kernelA(uint32_t *g_idata, int *mutex);
+__global__ void test_scrypt_core_kernelB(uint32_t *g_odata, int *mutex);
 
 // scratchbuf constants (pointers to scratch buffer for each work unit)
 __constant__ uint32_t* c_V[1024];
 
-// using texture references for the "tex" variants of the B kernels
-texture<uint2, 1, cudaReadModeElementType> texRef1D_2_V;
-texture<uint2, 2, cudaReadModeElementType> texRef2D_2_V;
-
 TestKernel::TestKernel() : KernelInterface()
 {
-}
-
-bool TestKernel::bindtexture_1D(uint32_t *d_V, size_t size)
-{
-    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
-    texRef1D_2_V.normalized = 0;
-    texRef1D_2_V.filterMode = cudaFilterModePoint;
-    texRef1D_2_V.addressMode[0] = cudaAddressModeClamp;
-    checkCudaErrors(cudaBindTexture(NULL, &texRef1D_2_V, d_V, &channelDesc2, size));
-    return true;
-}
-
-bool TestKernel::bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch)
-{
-    cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<uint2>();
-    texRef2D_2_V.normalized = 0;
-    texRef2D_2_V.filterMode = cudaFilterModePoint;
-    texRef2D_2_V.addressMode[0] = cudaAddressModeClamp;
-    texRef2D_2_V.addressMode[1] = cudaAddressModeClamp;
-    checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_2_V, d_V, &channelDesc2, width, height, pitch));
-    return true;
-}
-
-bool TestKernel::unbindtexture_1D()
-{
-    checkCudaErrors(cudaUnbindTexture(texRef1D_2_V));
-    return true;
-}
-
-bool TestKernel::unbindtexture_2D()
-{
-    checkCudaErrors(cudaUnbindTexture(texRef2D_2_V));
-    return true;
 }
 
 void TestKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
@@ -98,19 +52,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // First phase: Sequential writes to scratchpad.
 
-    switch (WARPS_PER_BLOCK) {
-        case 1: test_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 2: test_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 3: test_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-#if TEST_EXTRA_WARPS
-            case 4: test_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 5: test_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 6: test_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 7: test_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 8: test_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
-#endif
-        default: success = false; break;
-    }
+    test_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata, mutex);
 
     // Optional millisecond sleep in between kernels
 
@@ -125,57 +67,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // Second phase: Random read access from scratchpad.
 
-    if (texture_cache)
-    {
-        if (texture_cache == 1)
-        {
-            switch (WARPS_PER_BLOCK) {
-                case 1: test_scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: test_scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: test_scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
-#if TEST_EXTRA_WARPS
-                    case 4: test_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 5: test_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 6: test_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 7: test_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 8: test_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
-#endif
-                default: success = false; break;
-            }
-        }
-        else if (texture_cache == 2)
-        {
-            switch (WARPS_PER_BLOCK) {
-                case 1: test_scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: test_scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: test_scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
-#if TEST_EXTRA_WARPS
-                   case 4: test_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 5: test_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 6: test_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 7: test_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 8: test_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
-#endif
-                default: success = false; break;
-            }
-        } else success = false;
-    }
-    else
-    {
-        switch (WARPS_PER_BLOCK) {
-            case 1: test_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 2: test_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 3: test_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-#if TEST_EXTRA_WARPS
-                case 4: test_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 5: test_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 6: test_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 7: test_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 8: test_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
-#endif
-            default: success = false; break;
-        }
-    }
+    test_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata, mutex);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
@@ -183,234 +75,276 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     return success;
 }
 
-#define ROTL7(a0,a1,a2,a3,a00,a10,a20,a30){\
-a0^=(((a00)<<7) | ((a00)>>25) );\
-a1^=(((a10)<<7) | ((a10)>>25) );\
-a2^=(((a20)<<7) | ((a20)>>25) );\
-a3^=(((a30)<<7) | ((a30)>>25) );\
-};\
-
-#define ROTL9(a0,a1,a2,a3,a00,a10,a20,a30){\
-a0^=(((a00)<<9) | ((a00)>>23) );\
-a1^=(((a10)<<9) | ((a10)>>23) );\
-a2^=(((a20)<<9) | ((a20)>>23) );\
-a3^=(((a30)<<9) | ((a30)>>23) );\
-};\
-
-#define ROTL13(a0,a1,a2,a3,a00,a10,a20,a30){\
-a0^=(((a00)<<13) | ((a00)>>19) );\
-a1^=(((a10)<<13) | ((a10)>>19) );\
-a2^=(((a20)<<13) | ((a20)>>19) );\
-a3^=(((a30)<<13) | ((a30)>>19) );\
-};\
-
-#define ROTL18(a0,a1,a2,a3,a00,a10,a20,a30){\
-a0^=(((a00)<<18) | ((a00)>>14) );\
-a1^=(((a10)<<18) | ((a10)>>14) );\
-a2^=(((a20)<<18) | ((a20)>>14) );\
-a3^=(((a30)<<18) | ((a30)>>14) );\
-};\
-
-static __host__ __device__ void xor_salsa8(uint32_t * const B, const uint32_t * const C)
-{
-    uint32_t x0 = (B[ 0] ^= C[ 0]), x1 = (B[ 1] ^= C[ 1]), x2 = (B[ 2] ^= C[ 2]), x3 = (B[ 3] ^= C[ 3]);
-    uint32_t x4 = (B[ 4] ^= C[ 4]), x5 = (B[ 5] ^= C[ 5]), x6 = (B[ 6] ^= C[ 6]), x7 = (B[ 7] ^= C[ 7]);
-    uint32_t x8 = (B[ 8] ^= C[ 8]), x9 = (B[ 9] ^= C[ 9]), xa = (B[10] ^= C[10]), xb = (B[11] ^= C[11]);
-    uint32_t xc = (B[12] ^= C[12]), xd = (B[13] ^= C[13]), xe = (B[14] ^= C[14]), xf = (B[15] ^= C[15]);
-
-    /* Operate on columns. */
-	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
-	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
-	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
-	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
-
-    /* Operate on rows. */
-	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
-	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
-	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
-	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
-
-    /* Operate on columns. */
-	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
-	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
-	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
-	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
-
-    /* Operate on rows. */
-	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
-	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
-	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
-	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
-
-    /* Operate on columns. */
-	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
-	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
-	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
-	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
-
-    /* Operate on rows. */
-	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
-	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
-	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
-	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
-
-    /* Operate on columns. */
-	ROTL7(x4,x9,xe,x3,x0+xc,x1+x5,x6+xa,xb+xf);
-	ROTL9(x8,xd,x2,x7,x0+x4,x5+x9,xa+xe,x3+xf);
-	ROTL13(xc,x1,x6,xb,x4+x8,x9+xd,x2+xe,x3+x7);
-	ROTL18(x0,x5,xa,xf,x8+xc,x1+xd,x2+x6,x7+xb);
-
-    /* Operate on rows. */
-	ROTL7(x1,x6,xb,xc,x0+x3,x4+x5,x9+xa,xe+xf);
-	ROTL9(x2,x7,x8,xd,x0+x1,x5+x6,xa+xb,xc+xf);
-	ROTL13(x3,x4,x9,xe,x1+x2,x6+x7,x8+xb,xc+xd);
-	ROTL18(x0,x5,xa,xf,x2+x3,x4+x7,x8+x9,xd+xe);
-
-    B[ 0] += x0; B[ 1] += x1; B[ 2] += x2; B[ 3] += x3; B[ 4] += x4; B[ 5] += x5; B[ 6] += x6; B[ 7] += x7;
-    B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
-}
-
-static __host__ __device__ uint2& operator^=(uint2& left, const uint2& right)
+static __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
     left.x ^= right.x;
     left.y ^= right.y;
+    left.z ^= right.z;
+    left.w ^= right.w;
     return left;
 }
 
+__device__ __forceinline__ uint4 __shfl(const uint4 val, unsigned int lane)
+{
+    return make_uint4(
+        (unsigned int)__shfl((int)val.x, lane),
+        (unsigned int)__shfl((int)val.y, lane),
+        (unsigned int)__shfl((int)val.z, lane),
+        (unsigned int)__shfl((int)val.w, lane));
+}
+
+__device__ __forceinline__ void __swap(uint4 &a, uint4 &b)
+{
+//    uint4 t = b; b = a; a = t;
+    uint32_t t;
+    t=a.x; a.x=b.x; b.x=t;
+    t=a.y; a.y=b.y; b.y=t;
+    t=a.z; a.z=b.z; b.z=t;
+    t=a.w; a.w=b.w; b.w=t;
+}
+
+__device__ __forceinline__ void __transposed_write(uint4 (&S)[4], uint4 *D, int spacing=1)
+{
+    unsigned int laneId = __laneId();
+
+    unsigned int lane4 = laneId%4;
+    unsigned int tile  = laneId/4;
+    unsigned int tile4 = tile*4;
+
+    unsigned int rot3 = tile4+(lane4+3)%4;
+    unsigned int rot2 = tile4+(lane4+2)%4;
+    unsigned int rot1 = tile4+(lane4+1)%4;
+
+    // rotate
+    S[1] = __shfl(S[1], rot3);
+    S[2] = __shfl(S[2], rot2);
+    S[3] = __shfl(S[3], rot1);
+
+    // exchange
+    if (lane4 >= 2) { __swap(S[0], S[2]); __swap(S[1], S[3]); }
+
+    // select + write
+    D[spacing*2*(16*tile   )+ lane4     ] = (laneId % 2 == 0) ? S[0] : S[1];
+    D[spacing*2*(16*tile+4 )+(lane4+3)%4] = (laneId % 2 == 0) ? S[3] : S[0];
+    D[spacing*2*(16*tile+8 )+(lane4+2)%4] = (laneId % 2 == 0) ? S[2] : S[3];
+    D[spacing*2*(16*tile+12)+(lane4+1)%4] = (laneId % 2 == 0) ? S[1] : S[2];
+
+    // undo exchange
+    if (lane4 >= 2) { __swap(S[0], S[2]); __swap(S[1], S[3]); }
+
+    // undo rotate
+    S[1] = __shfl(S[1], rot1);
+    S[2] = __shfl(S[2], rot2);
+    S[3] = __shfl(S[3], rot3);
+}
+
+__device__ __forceinline__ void __transposed_read(uint4 *S, uint4 (&D)[4], int spacing=1)
+{
+    unsigned int laneId = __laneId();
+
+    unsigned int lane4 = laneId%4;
+    unsigned int tile  = laneId/4;
+    unsigned int tile4 = tile*4;
+
+    unsigned int rot3 = tile4+(lane4+3)%4;
+    unsigned int rot2 = tile4+(lane4+2)%4;
+    unsigned int rot1 = tile4+(lane4+1)%4;
+
+    // read and select
+    uint4 tmp; 
+    tmp = __ldg(&S[spacing*2*(16*tile   )+ lane4     ]); if (laneId % 2 == 0) D[0] = tmp; else D[1] = tmp;
+    tmp = __ldg(&S[spacing*2*(16*tile+4 )+(lane4+3)%4]); if (laneId % 2 == 0) D[3] = tmp; else D[0] = tmp;
+    tmp = __ldg(&S[spacing*2*(16*tile+8 )+(lane4+2)%4]); if (laneId % 2 == 0) D[2] = tmp; else D[3] = tmp;
+    tmp = __ldg(&S[spacing*2*(16*tile+12)+(lane4+1)%4]); if (laneId % 2 == 0) D[1] = tmp; else D[2] = tmp;
+
+    // undo exchange
+    if (lane4 >= 2) { __swap(D[0], D[2]); __swap(D[1], D[3]); }
+
+    // undo rotate
+    D[1] = __shfl(D[1], rot1);
+    D[2] = __shfl(D[2], rot2);
+    D[3] = __shfl(D[3], rot3);
+}
+
+__device__ __forceinline__ void __transposed_xor(uint4 *S, uint4 (&D)[4], int spacing=1, int row=0)
+{
+    unsigned int laneId = __laneId();
+
+    unsigned int lane4 = laneId%4;
+    unsigned int tile  = laneId/4;
+    unsigned int tile4 = tile*4;
+
+    unsigned int rot3 = tile4+(lane4+3)%4;
+    unsigned int rot2 = tile4+(lane4+2)%4;
+    unsigned int rot1 = tile4+(lane4+1)%4;
+
+    // rotate
+    D[1] = __shfl(D[1], rot3);
+    D[2] = __shfl(D[2], rot2);
+    D[3] = __shfl(D[3], rot1);
+
+    // exchange
+    if (lane4 >= 2) { __swap(D[0], D[2]); __swap(D[1], D[3]); }
+
+    // read and select
+    uint4 tmp; 
+    tmp = __ldg(&S[spacing*2*(16*tile   )+ lane4     +8*__shfl(row,tile4  )]); if (laneId % 2 == 0) D[0] ^= tmp; else D[1] ^= tmp;
+    tmp = __ldg(&S[spacing*2*(16*tile+4 )+(lane4+3)%4+8*__shfl(row,tile4+1)]); if (laneId % 2 == 0) D[3] ^= tmp; else D[0] ^= tmp;
+    tmp = __ldg(&S[spacing*2*(16*tile+8 )+(lane4+2)%4+8*__shfl(row,tile4+2)]); if (laneId % 2 == 0) D[2] ^= tmp; else D[3] ^= tmp;
+    tmp = __ldg(&S[spacing*2*(16*tile+12)+(lane4+1)%4+8*__shfl(row,tile4+3)]); if (laneId % 2 == 0) D[1] ^= tmp; else D[2] ^= tmp;
+
+    // undo exchange
+    if (lane4 >= 2) { __swap(D[0], D[2]); __swap(D[1], D[3]); }
+
+    // undo rotate
+    D[1] = __shfl(D[1], rot1);
+    D[2] = __shfl(D[2], rot2);
+    D[3] = __shfl(D[3], rot3);
+}
+
+#define ROTL(a, b) __funnelshift_l( a, a, b );
+
+#define ROTL7(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=ROTL(a00, 7); a1^=ROTL(a10, 7); a2^=ROTL(a20, 7); a3^=ROTL(a30, 7);\
+};\
+
+#define ROTL9(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=ROTL(a00, 9); a1^=ROTL(a10, 9); a2^=ROTL(a20, 9); a3^=ROTL(a30, 9);\
+};\
+
+#define ROTL13(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=ROTL(a00, 13); a1^=ROTL(a10, 13); a2^=ROTL(a20, 13); a3^=ROTL(a30, 13);\
+};\
+
+#define ROTL18(a0,a1,a2,a3,a00,a10,a20,a30){\
+a0^=ROTL(a00, 18); a1^=ROTL(a10, 18); a2^=ROTL(a20, 18); a3^=ROTL(a30, 18);\
+};\
+
+static __device__ void xor_salsa8(uint4 *B, uint4 *C)
+{
+	uint32_t x[16];
+	x[0]=(B[0].x ^= C[0].x);
+	x[1]=(B[0].y ^= C[0].y);
+	x[2]=(B[0].z ^= C[0].z);
+	x[3]=(B[0].w ^= C[0].w);
+	x[4]=(B[1].x ^= C[1].x);
+	x[5]=(B[1].y ^= C[1].y);
+	x[6]=(B[1].z ^= C[1].z);
+	x[7]=(B[1].w ^= C[1].w);
+	x[8]=(B[2].x ^= C[2].x);
+	x[9]=(B[2].y ^= C[2].y);
+	x[10]=(B[2].z ^= C[2].z);
+	x[11]=(B[2].w ^= C[2].w);
+	x[12]=(B[3].x ^= C[3].x);
+	x[13]=(B[3].y ^= C[3].y);
+	x[14]=(B[3].z ^= C[3].z);
+	x[15]=(B[3].w ^= C[3].w);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    /* Operate on columns. */
+	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+
+    /* Operate on rows. */
+	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+
+    B[0].x += x[0]; B[0].y += x[1]; B[0].z += x[2];  B[0].w += x[3];  B[1].x += x[4];  B[1].y += x[5];  B[1].z += x[6];  B[1].w += x[7];
+    B[2].x += x[8]; B[2].y += x[9]; B[2].z += x[10]; B[2].w += x[11]; B[3].x += x[12]; B[3].y += x[13]; B[3].z += x[14]; B[3].w += x[15];
+}
+
 ////////////////////////////////////////////////////////////////////////////////
-//! Scrypt core kernel with higher shared memory use (faster on older devices)
+//! Experimental Scrypt core kernel for Titan devices.
 //! @param g_idata  input data in global memory
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
-template <int WARPS_PER_BLOCK> __global__ void
-test_scrypt_core_kernelA(uint32_t *g_idata)
+__global__ void test_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
+    // add warp specific offsets
+    int offset = blockIdx.x * blockDim.x + threadIdx.x / warpSize * warpSize;
+    g_idata += 32 * offset;
+    uint32_t * V = c_V[offset / warpSize];
 
-    volatile int warpIdx    = threadIdx.x / warpSize;
-    volatile int warpThread = threadIdx.x % warpSize;
+    // registers to store an entire work unit
+    uint4 B[4], C[4];
 
-    // variables supporting the large memory transaction magic
-    unsigned int Y = warpThread/16;
-    unsigned int Z = 2*(warpThread%16);
+    __transposed_read((uint4*)(g_idata)   , B, 1);
+    __transposed_read((uint4*)(g_idata+16), C, 1);
 
-    // add block specific offsets
-    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_idata += 32      * offset;
-    uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
+    __transposed_write(B, (uint4*)V, 1024); V+=16;
+    __transposed_write(C, (uint4*)V, 1024); V+=16;
 
-    uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
-    uint32_t *XX = X[warpIdx][warpThread];
+    for (int i = 1; i < 1024; i++) {
 
-    {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)XB[wu]) = *((uint2*)(&g_idata[32*(wu+Y)+Z]));
+        xor_salsa8(B, C); xor_salsa8(C, B);
 
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&V[SCRATCH*wu])) = *((uint2*)XB[wu]);
-
-        for (int i = 1; i < 1024; i++)
-        {
-            xor_salsa8(&XX[0], &XX[16]);
-            xor_salsa8(&XX[16], &XX[0]);
-
-#pragma unroll 16
-            for (int wu=0; wu < 32; wu+=2)
-                *((uint2*)(&V[SCRATCH*wu + i*32])) = *((uint2*)XB[wu]);
-        }
+        __transposed_write(B, (uint4*)V, 1024); V+=16;
+        __transposed_write(C, (uint4*)V, 1024); V+=16;
     }
 }
 
-template <int WARPS_PER_BLOCK> __global__ void
-test_scrypt_core_kernelB(uint32_t *g_odata)
+__global__ void test_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
 {
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
+    // add warp specific offsets
+    int offset = blockIdx.x * blockDim.x + threadIdx.x / warpSize * warpSize;
+    g_odata += 32 * offset;
+    uint32_t * V = c_V[offset / warpSize];
 
-    volatile int warpIdx    = threadIdx.x / warpSize;
-    volatile int warpThread = threadIdx.x % warpSize;
+    // registers to store an entire work unit
+    uint4 B[4], C[4];
 
-    // variables supporting the large memory transaction magic
-    unsigned int Y = warpThread/16;
-    unsigned int Z = 2*(warpThread%16);
+    __transposed_read((uint4*)(V+1023*32),    B, 1024);
+    __transposed_read((uint4*)(V+1023*32+16), C, 1024);
 
-    // add block specific offsets
-    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32      * offset;
-    uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
+    xor_salsa8(B, C); xor_salsa8(C, B);
 
-    uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
-    uint32_t *XX = X[warpIdx][warpThread];
+    for (int i = 0; i < 1024; i++) {
 
-    {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)XB[wu]) = *((uint2*)(&V[SCRATCH*wu + 1023*32]));
+        __transposed_xor((uint4*)(V),    B, 1024, (C[0].x & 1023));
+        __transposed_xor((uint4*)(V+16), C, 1024, (C[0].x & 1023));
 
-        xor_salsa8(&XX[0], &XX[16]);
-        xor_salsa8(&XX[16], &XX[0]);
-
-        for (int i = 0; i < 1024; i++)
-        {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)XB[wu]) ^= *((uint2*)(&V[SCRATCH*wu + 32*(X[warpIdx][wu+Y][16] & 1023)]));
-
-            xor_salsa8(&XX[0], &XX[16]);
-            xor_salsa8(&XX[16], &XX[0]);
-        }
-
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)XB[wu]);
+        xor_salsa8(B, C); xor_salsa8(C, B);
     }
+
+    __transposed_write(B, (uint4*)(g_odata)   , 1);
+    __transposed_write(C, (uint4*)(g_odata+16), 1);
 }
-
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
-test_scrypt_core_kernelB_tex(uint32_t *g_odata)
-{
-    __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
-
-    volatile int warpIdx    = threadIdx.x / warpSize;
-    volatile int warpThread = threadIdx.x % warpSize;
-
-    // variables supporting the large memory transaction magic
-    unsigned int Y = warpThread/16;
-    unsigned int Z = 2*(warpThread%16);
-
-    // add block specific offsets
-    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
-    g_odata += 32      * offset;
-
-    uint32_t ((*XB)[32+1+_64BIT_ALIGN]) = (uint32_t (*)[32+1+_64BIT_ALIGN])&X[warpIdx][Y][Z];
-    uint32_t *XX = X[warpIdx][warpThread];
-
-    {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)XB[wu]) = ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 1023*32 + Z)/2) :
-                        tex2D(texRef2D_2_V, 0.5f + (32*1023 + Z)/2, 0.5f + (offset+wu+Y)));
-
-        xor_salsa8(&XX[0], &XX[16]);
-        xor_salsa8(&XX[16], &XX[0]);
-
-        for (int i = 0; i < 1024; i++)
-        {
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)XB[wu]) ^= ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_2_V, (SCRATCH*(offset+wu+Y) + 32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2) :
-                        tex2D(texRef2D_2_V, 0.5f + (32*(X[warpIdx][wu+Y][16] & 1023) + Z)/2, 0.5f + (offset+wu+Y)));
-
-            xor_salsa8(&XX[0], &XX[16]);
-            xor_salsa8(&XX[16], &XX[0]);
-        }
-
-#pragma unroll 16
-        for (int wu=0; wu < 32; wu+=2)
-            *((uint2*)(&g_odata[32*(wu+Y)+Z])) = *((uint2*)XB[wu]);
-    }
-}
-

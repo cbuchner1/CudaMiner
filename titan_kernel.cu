@@ -259,9 +259,8 @@ titan_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
      // bank conflict mitigation:  +4 for alignment for ulonglong2 in PTX >=2.0 ISA
     __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
 
-    volatile int warpIdx        = threadIdx.x / warpSize;
-    volatile int warpThread     = threadIdx.x % warpSize;
-    volatile int warpIdx_2      = warpIdx/2;
+    int warpIdx        = threadIdx.x / warpSize;
+    int warpThread     = threadIdx.x % warpSize;
 
     // variables supporting the large memory transaction magic
     unsigned int Y = warpThread/4;
@@ -275,6 +274,7 @@ titan_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
     // registers to store an entire work unit
     uint32_t B[16], C[16];
 
+    volatile int warpIdx_2      = warpIdx/2;
     uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_2][Y][Z];
     uint32_t *XX = X[warpIdx_2][warpThread];
 
@@ -319,9 +319,8 @@ titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
     // bank conflict mitigation:  +4 for alignment for ulonglong2 in PTX >=2.0 ISA
     __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
 
-    volatile int warpIdx        = threadIdx.x / warpSize;
-    volatile int warpThread     = threadIdx.x % warpSize;
-    volatile int warpIdx_2      = warpIdx/2;
+    int warpIdx        = threadIdx.x / warpSize;
+    int warpThread     = threadIdx.x % warpSize;
 
     // variables supporting the large memory transaction magic
     unsigned int Y = warpThread/4;
@@ -335,6 +334,7 @@ titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
     // registers to store an entire work unit
     uint32_t B[16], C[16];
 
+    volatile int warpIdx_2      = warpIdx/2;
     uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_2][Y][Z];
     uint32_t *XX = X[warpIdx_2][warpThread];
 
@@ -364,7 +364,7 @@ titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
         for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulonglong2*)XB[wu]) ^= __ldg((ulonglong2*)(&V[SCRATCH*wu + X[warpIdx_2][wu+Y][16]]));
+            *((ulonglong2*)XB[wu]) ^= __ldg((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z]]));
 #pragma unroll 16
         for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
 
@@ -372,7 +372,7 @@ titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
         for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulonglong2*)XB[wu]) ^= __ldg((ulonglong2*)(&V[SCRATCH*wu + X[warpIdx_2][wu+Y][16] + 16]));
+            *((ulonglong2*)XB[wu]) ^= __ldg((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z] + 16]));
 #pragma unroll 16
         for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
 

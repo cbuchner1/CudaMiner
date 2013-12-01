@@ -1256,41 +1256,45 @@ static void parse_arg (int key, char *arg)
 	case 'l':
 		{
 			char * pch = strtok (arg,",");
-			int cnt  = 0;
+			int tmp_n_threads = 0; char *last = 0;
 			while (pch != NULL) {
-				device_config[cnt++] = strdup(pch);
+				device_config[tmp_n_threads++] = last = strdup(pch);
 				pch = strtok (NULL, ",");
 			}
+			while (tmp_n_threads < 8) device_config[tmp_n_threads++] = last;
 		}
 		break;
 	case 'i':
 		{
 			char * pch = strtok (arg,",");
-			opt_n_threads = 0;
+			int tmp_n_threads = 0, last = 0;
 			while (pch != NULL) {
-				device_interactive[opt_n_threads++] = atoi(pch);
+				device_interactive[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
+			while (tmp_n_threads < 8) device_interactive[tmp_n_threads++] = last;
 		}
 		break;
 	case 'C':
 		{
 			char * pch = strtok (arg,",");
-			opt_n_threads = 0;
+			int tmp_n_threads = 0, last = 0;
 			while (pch != NULL) {
-				device_texturecache[opt_n_threads++] = atoi(pch);
+				device_texturecache[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
+			while (tmp_n_threads < 8) device_texturecache[tmp_n_threads++] = last;
 		}
 		break;
 	case 'm':
 		{
 			char * pch = strtok (arg,",");
-			opt_n_threads = 0;
+			int tmp_n_threads = 0, last = 0;
 			while (pch != NULL) {
-				device_singlememory[opt_n_threads++] = atoi(pch);
+				device_singlememory[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
+			while (tmp_n_threads < 8) device_singlememory[tmp_n_threads++] = last;
 		}
 		break;
 	case 'H':

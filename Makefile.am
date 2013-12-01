@@ -40,3 +40,6 @@ spinlock_kernel.o: spinlock_kernel.cu
 
 titan_kernel.o: titan_kernel.cu
 	$(NVCC) @CFLAGS@ -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+
+test_kernel.o: test_kernel.cu
+	$(NVCC) @CFLAGS@ -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
