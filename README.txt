@@ -1,6 +1,6 @@
 
-CudaMiner release November 20th 2013 - alpha release
----------------------------------------------------
+CudaMiner release December 1st 2013 - beta release
+--------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
 The most computationally heavy parts of the scrypt algorithm (the
@@ -10,13 +10,18 @@ You should see a notable speed-up compared to OpenCL based miners.
 Some numbers from my testing:
 
 GTX 260:    44  kHash/sec (maybe more on Linux/WinXP)
+GTX 640:    65  kHash/sec (if based on GK 208 chip)
 GTX 460:   100  kHash/sec
-GTX 640:    64  kHash/sec (if based on GK 208 chip)
-GTX 560Ti: 150  kHash/sec (or 225 kHash/sec on the 448 core edition)
+GTX 560Ti: 160  kHash/sec (or 228 kHash/sec on the 448 core edition)
 GTX 660Ti: 180  kHash/sec (close to 200 kHash/s with overclocking)
+GTX 780Ti: 450  kHash/sec (T30x16, 105% TDP allowance)
 
 NOTE: Compute 1.0 through 1.3 devices seem to run faster on Windows XP
 or Linux.
+
+NOTE: The 64bit cudaminer sometimes mines a bit slower than the 32 bit
+binary (increased register pressure, as pointers take two registers in
+a 64 bit CUDA build!). Try both versions and compare!
 
 Your nVidia cards will now suck a little less for mining! This tool
 will automatically use all nVidia GPUs found in your system, but the
@@ -108,6 +113,15 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+  The December 1st release reduces the likelyhood of autotune crashing
+  and offers a better parsing of the command line. The -l, -C, -i, -m
+  options can now be given less comma separated arguments than the number
+  of devices specified with either the -t or -d options. This facilitates
+  specifying identical launch configs or cache settings for several cards
+  at once. e.g. -d 0,1 -K30x8 -C 2  now specifies the same launch config
+  and cache settings for CUDA devices #0 and #1. The code now checks whether
+  the user specified non-existant CUDA devices via command line options.
 
 - the November 20 release removes a possible reason for crashing
   Legacy and Fermi kernels and adds some of the latest optimizations
@@ -228,12 +242,14 @@ L - Legacy cards (compute 1.x)
 F - Fermi cards (Compute 2.x)
 K - Kepler cards (Compute 3.0). The letter S (for "spinlock") also works
 T - Titan, GTX 780 and GK208 based cards (Compute 3.5)
+X - Experimental kernel. Currently requires Compute 3.5
 
 Examples:
 
 e.g. L27x3 is a launch configuration that works well on GTX 260
      F28x4 is a launch configuration that works on Geforce GTX 460
      K290x2 is a launch configuration that works on Geforce GTX 660Ti
+     T30x16 is a launch configuration that works on GTX 780Ti.
 
 You should wait through autotune to see what kernel is found best for
 your current hardware configuration. You can also override the autotune's
@@ -255,11 +271,14 @@ overriding the automatic selection.
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
 - add failover support between different pools
+- add an option to do the required SHA256 hashing for the
+  scrypt algorithm on the GPU (reducing CPU load to near 0)
 
 
 Further Optimization:
-- consider use of some inline assembly in CUDA
+- consider use of some more inline assembly in CUDA
 - investigate benefits of a LOOKUP_GAP implementation
+- get rid of shared memory on Kepler (see experimental Kernel)
 
 
 ***************************************************************

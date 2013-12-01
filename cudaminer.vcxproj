@@ -216,6 +216,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <CudaCompile Include="test_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_35,sm_35</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_35,sm_35</CodeGeneration>
     </CudaCompile>
     <CudaCompile Include="titan_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>
@@ -223,7 +224,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_35,sm_35</CodeGeneration>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">compute_35,sm_35</CodeGeneration>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
-      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">96</MaxRegCount>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">64</MaxRegCount>
       <AdditionalCompilerOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

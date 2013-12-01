@@ -7,7 +7,7 @@
 //
 // Does not yet run as fast as the shared memory based kernel, but there may
 // be further room for optimization! (417 kHash/s vs 450 kHash/s for T kernel)
-// The card also seems to run hotter, running into its thermal limits soon.
+// The card also seems to run hotter, running into its thermal limits sooner.
 //
 // NOTE: compile this .cu module for compute_35,sm_35 with --maxrregcount=64
 //

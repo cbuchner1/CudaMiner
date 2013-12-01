@@ -49,7 +49,7 @@ char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2013-11-20"
+#define PROGRAM_VERSION		"2013-12-01"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -1150,7 +1150,11 @@ static void parse_arg (int key, char *arg)
 		v = atoi(arg);
 		if (v < 1 || v > 9999)	/* sanity check */
 			show_usage_and_exit(1);
-		opt_n_threads = v;
+		if (v > num_gpus)
+		{
+			applog(LOG_ERR, "Threads in -t option (%d) > no. of CUDA devices (%d)!", v, num_gpus);
+			exit(1);
+		}
 		break;
 	case 'u':
 		free(rpc_user);
@@ -1248,7 +1252,12 @@ static void parse_arg (int key, char *arg)
 			char * pch = strtok (arg,",");
 			opt_n_threads = 0;
 			while (pch != NULL) {
-				device_map[opt_n_threads++] = atoi(pch);
+				if (atoi(pch) < num_gpus)
+					device_map[opt_n_threads++] = atoi(pch);
+				else {
+					applog(LOG_ERR, "Non-existant CUDA device #%d specified in -d option", atoi(pch));
+					exit(1);
+				}
 				pch = strtok (NULL, ",");
 			}
 		}
@@ -1428,7 +1437,7 @@ int main(int argc, char *argv[])
 
 	// CB
 	printf("\t   *** CudaMiner for nVidia GPUs by Christian Buchner ***\n");
-	printf("\t             This is version "PROGRAM_VERSION" (alpha)\n");
+	printf("\t             This is version "PROGRAM_VERSION" (beta)\n");
 	printf("\tbased on pooler-cpuminer 2.3.2 (c) 2010 Jeff Garzik, 2012 pooler\n");
 	printf("\t       Cuda additions Copyright 2013 Christian Buchner\n");
 	printf("\t   My donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm\n\n");
@@ -1437,10 +1446,17 @@ int main(int argc, char *argv[])
 	rpc_user = strdup("");
 	rpc_pass = strdup("");
 
+	pthread_mutex_init(&applog_lock, NULL);
+
+	num_gpus = cuda_num_devices(); // CB
+	if (num_gpus == 0) {
+		applog(LOG_ERR, "There are no CUDA devices in your system!");
+		exit(1);
+	}
+
 	/* parse command line */
 	parse_cmdline(argc, argv);
 
-	pthread_mutex_init(&applog_lock, NULL);
 	pthread_mutex_init(&stats_lock, NULL);
 	pthread_mutex_init(&g_work_lock, NULL);
 	pthread_mutex_init(&stratum.sock_lock, NULL);
@@ -1491,8 +1507,6 @@ int main(int argc, char *argv[])
 #endif
 	if (num_processors < 1)
 		num_processors = 1;
-
-	num_gpus = cuda_num_devices(); // CB
 
 	if (!opt_n_threads)
 		opt_n_threads = num_gpus; // CB
