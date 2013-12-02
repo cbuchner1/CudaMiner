@@ -757,8 +757,8 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 			n += 4;
 		}
 
-                if (parallel)
-                {
+			if (parallel)
+			{
 #ifdef WIN32
 			parallel_for (0, num_shares, [&](int share) {
 				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {

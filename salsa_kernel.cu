@@ -71,7 +71,8 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
     char kernelid = ' ';
     if (config != NULL)
     {
-        if (config[0] == 'T' || (config[0] == 'S' || config[0] == 'K') || config[0] == 'F' || config[0] == 'L') {
+        if (config[0] == 'T' || (config[0] == 'S' || config[0] == 'K') || config[0] == 'F' || config[0] == 'L' ||
+            config[0] == 'X') {
             kernelid = config[0];
             config++;
         }
