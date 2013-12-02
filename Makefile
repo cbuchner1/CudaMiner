@@ -260,7 +260,7 @@ EXTRA_DIST = autogen.sh README.txt LICENSE.txt \
 			  compat/gettimeofday.c compat/getopt/getopt_long.c cpuminer-config.h.in
 
 SUBDIRS = compat
-INCLUDES = $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
+AM_CPPFLAGS = [B
 cudaminer_SOURCES = elist.h miner.h compat.h \
 			  compat/inttypes.h compat/stdbool.h compat/unistd.h \
 			  compat/sys/time.h compat/getopt/getopt.h \
@@ -276,7 +276,7 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 
 cudaminer_LDFLAGS = $(PTHREAD_FLAGS) -L/usr/local/cuda/lib64
 cudaminer_LDADD = -L/usr/lib/x86_64-linux-gnu -lcurl -Wl,-Bsymbolic-functions -Wl,-z,relro compat/jansson/libjansson.a -lpthread  -lcudart -fopenmp 
-cudaminer_CPPFLAGS = -msse2  -fopenmp
+cudaminer_CPPFLAGS = -msse2  -fopenmp $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
 all: cpuminer-config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
@@ -930,10 +930,10 @@ spinlock_kernel.o: spinlock_kernel.cu
 	$(NVCC) -g -O2 -arch=compute_11 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
-	$(NVCC) -g -O2 -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
 
 test_kernel.o: test_kernel.cu
-	$(NVCC) -g -O2 -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.

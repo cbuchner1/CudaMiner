@@ -11,7 +11,7 @@ EXTRA_DIST		= autogen.sh README.txt LICENSE.txt \
 
 SUBDIRS		= compat
 
-INCLUDES	= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
+AM_CPPFLAGS	= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
 
 bin_PROGRAMS	= cudaminer
 
@@ -39,7 +39,7 @@ spinlock_kernel.o: spinlock_kernel.cu
 	$(NVCC) @CFLAGS@ -arch=compute_11 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
-	$(NVCC) @CFLAGS@ -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
 
 test_kernel.o: test_kernel.cu
-	$(NVCC) @CFLAGS@ -arch=compute_35 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
