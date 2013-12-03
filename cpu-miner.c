@@ -1168,12 +1168,15 @@ static void parse_arg (int key, char *arg)
 				show_usage_and_exit(1);
 			free(rpc_url);
 			rpc_url = strdup(arg);
+			if (strncasecmp(arg, "http://", 7)==0 || strncasecmp(arg, "https://", 8)==0) // CB
+				want_stratum = false;
 		} else {
 			if (!strlen(arg) || *arg == '/')
 				show_usage_and_exit(1);
 			free(rpc_url);
 			rpc_url = (char*)malloc(strlen(arg) + 8);
 			sprintf(rpc_url, "http://%s", arg);
+			want_stratum = false; // CB
 		}
 		p = strrchr(rpc_url, '@');
 		if (p) {

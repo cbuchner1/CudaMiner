@@ -151,25 +151,25 @@ a0^=ROTL(a00, 13); a1^=ROTL(a10, 13); a2^=ROTL(a20, 13); a3^=ROTL(a30, 13);\
 a0^=ROTL(a00, 18); a1^=ROTL(a10, 18); a2^=ROTL(a20, 18); a3^=ROTL(a30, 18);\
 };\
 
-static __device__ void xor_salsa8(uint32_t *B,uint32_t *C)
+static __device__ void xor_salsa8(uint4 *B, uint4 *C)
 {
 	uint32_t x[16];
-	x[0]=(B[0] ^= C[0]);
-	x[1]=(B[1] ^= C[1]);
-	x[2]=(B[2] ^= C[2]);
-	x[3]=(B[3] ^= C[3]);
-	x[4]=(B[4] ^= C[4]);
-	x[5]=(B[5] ^= C[5]);
-	x[6]=(B[6] ^= C[6]);
-	x[7]=(B[7] ^= C[7]);
-	x[8]=(B[8] ^= C[8]);
-	x[9]=(B[9] ^= C[9]);
-	x[10]=(B[10] ^= C[10]);
-	x[11]=(B[11] ^= C[11]);
-	x[12]=(B[12] ^= C[12]);
-	x[13]=(B[13] ^= C[13]);
-	x[14]=(B[14] ^= C[14]);
-	x[15]=(B[15] ^= C[15]);
+	x[0]=(B[0].x ^= C[0].x);
+	x[1]=(B[0].y ^= C[0].y);
+	x[2]=(B[0].z ^= C[0].z);
+	x[3]=(B[0].w ^= C[0].w);
+	x[4]=(B[1].x ^= C[1].x);
+	x[5]=(B[1].y ^= C[1].y);
+	x[6]=(B[1].z ^= C[1].z);
+	x[7]=(B[1].w ^= C[1].w);
+	x[8]=(B[2].x ^= C[2].x);
+	x[9]=(B[2].y ^= C[2].y);
+	x[10]=(B[2].z ^= C[2].z);
+	x[11]=(B[2].w ^= C[2].w);
+	x[12]=(B[3].x ^= C[3].x);
+	x[13]=(B[3].y ^= C[3].y);
+	x[14]=(B[3].z ^= C[3].z);
+	x[15]=(B[3].w ^= C[3].w);
 
     /* Operate on columns. */
 	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
@@ -219,8 +219,8 @@ static __device__ void xor_salsa8(uint32_t *B,uint32_t *C)
 	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
 	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
 
-    B[ 0] += x[0]; B[ 1] += x[1]; B[ 2] += x[2]; B[ 3] += x[3]; B[ 4] += x[4]; B[ 5] += x[5]; B[ 6] += x[6]; B[ 7] += x[7];
-    B[ 8] += x[8]; B[ 9] += x[9]; B[10] += x[10]; B[11] += x[11]; B[12] += x[12]; B[13] += x[13]; B[14] += x[14]; B[15] += x[15];
+    B[0].x += x[0]; B[0].y += x[1]; B[0].z += x[2];  B[0].w += x[3];  B[1].x += x[4];  B[1].y += x[5];  B[1].z += x[6];  B[1].w += x[7];
+    B[2].x += x[8]; B[2].y += x[9]; B[2].z += x[10]; B[2].w += x[11]; B[3].x += x[12]; B[3].y += x[13]; B[3].z += x[14]; B[3].w += x[15];
 }
 
 static __device__ __forceinline__ ulonglong2& operator^=(ulonglong2& left, const ulonglong2& right)
@@ -247,8 +247,13 @@ static __device__ __forceinline__ void unlock(int *mutex, int i)
     atomicExch( &mutex[i], 0 );
 }
 
+// Number of shared memory buffers and mapping between warp and buffer
+// I made this a #define so I could play with different parameters.
+#define SHARED_BUFFERS  (WARPS_PER_BLOCK+1)/2
+#define BUFFER_MAPPING  warpIdx/2
+
 ////////////////////////////////////////////////////////////////////////////////
-//! Scrypt core kernel using titans to cut shared memory use in half.
+//! Scrypt core kernel using spinlocks to cut shared memory use in half.
 //! Ideal for Kepler devices where shared memory use prevented optimal occupancy.
 //! @param g_idata  input data in global memory
 //! @param g_odata  output data in global memory
@@ -257,7 +262,7 @@ template <int WARPS_PER_BLOCK> __global__ void
 titan_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
 {
      // bank conflict mitigation:  +4 for alignment for ulonglong2 in PTX >=2.0 ISA
-    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
+    __shared__ uint32_t X[SHARED_BUFFERS][WU_PER_WARP][16+4];
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
@@ -272,52 +277,52 @@ titan_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
     uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
 
     // registers to store an entire work unit
-    uint32_t B[16], C[16];
+    uint4 B[4], C[4];
 
-    volatile int warpIdx_2      = warpIdx/2;
-    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_2][Y][Z];
-    uint32_t *XX = X[warpIdx_2][warpThread];
+    volatile int warpIdx_X = BUFFER_MAPPING;
+    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_X][Y][Z];
+    uint32_t *XX = X[warpIdx_X][warpThread];
 
-    if (warpThread == 0) lock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+    if (warpThread == 0) lock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
         *((ulonglong2*)(&V[SCRATCH*wu])) = *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&g_idata[32*(wu+Y)+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) B[idx] = *((uint4*)&XX[4*idx]);
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
         *((ulonglong2*)(&V[SCRATCH*wu+16])) = *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&g_idata[32*(wu+Y)+16+Z]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
 
     for (int i = 1; i < 1024; i++) {
 
-        if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+        if (warpThread == 0) unlock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
         xor_salsa8(B, C); xor_salsa8(C, B);
-        if (warpThread == 0) lock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+        if (warpThread == 0) lock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; ++idx) *((uint4*)&XX[4*idx]) = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
             *((ulonglong2*)(&V[SCRATCH*wu + i*32])) = *((ulonglong2*)XB[wu]);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; ++idx) *((uint4*)&XX[4*idx]) = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
             *((ulonglong2*)(&V[SCRATCH*wu + i*32 + 16])) = *((ulonglong2*)XB[wu]);
     }
-    if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+    if (warpThread == 0) unlock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
 }
 
 template <int WARPS_PER_BLOCK> __global__ void
 titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
 {
     // bank conflict mitigation:  +4 for alignment for ulonglong2 in PTX >=2.0 ISA
-    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
+    __shared__ uint32_t X[SHARED_BUFFERS][WU_PER_WARP][16+4];
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
@@ -332,66 +337,66 @@ titan_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
     uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
 
     // registers to store an entire work unit
-    uint32_t B[16], C[16];
+    uint4 B[4], C[4];
 
-    volatile int warpIdx_2      = warpIdx/2;
-    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_2][Y][Z];
-    uint32_t *XX = X[warpIdx_2][warpThread];
+    volatile int warpIdx_X = BUFFER_MAPPING;
+    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_X][Y][Z];
+    uint32_t *XX = X[warpIdx_X][warpThread];
 
-    if (warpThread == 0) lock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+    if (warpThread == 0) lock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
         *((ulonglong2*)XB[wu]) = __ldg((ulonglong2*)(&V[SCRATCH*wu + 1023*32]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) B[idx] = *((uint4*)&XX[4*idx]);
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
         *((ulonglong2*)XB[wu]) = __ldg((ulonglong2*)(&V[SCRATCH*wu + 1023*32 + 16]));
-#pragma unroll 16
-    for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
 
-    if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+    if (warpThread == 0) unlock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
     xor_salsa8(B, C); xor_salsa8(C, B);
-    if (warpThread == 0) lock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+    if (warpThread == 0) lock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
 
     for (int i = 0; i < 1024; i++) {
 
-        XX[16] = 32 * (C[0] & 1023);
+        XX[16] = 32 * (C[0].x & 1023);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; ++idx) *((uint4*)&XX[4*idx]) = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
             *((ulonglong2*)XB[wu]) ^= __ldg((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z]]));
-#pragma unroll 16
-        for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) B[idx] = *((uint4*)&XX[4*idx]);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; ++idx) *((uint4*)&XX[4*idx]) = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
             *((ulonglong2*)XB[wu]) ^= __ldg((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z] + 16]));
-#pragma unroll 16
-        for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
 
-        if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+        if (warpThread == 0) unlock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
         xor_salsa8(B, C); xor_salsa8(C, B);
-        if (warpThread == 0) lock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+        if (warpThread == 0) lock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
     }
 
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; ++idx) *((uint4*)&XX[4*idx]) = B[idx];
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
         *((ulonglong2*)(&g_odata[32*(wu+Y)+Z])) = *((ulonglong2*)XB[wu]);
 
-#pragma unroll 16
-    for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; ++idx) *((uint4*)&XX[4*idx]) = C[idx];
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
         *((ulonglong2*)(&g_odata[32*(wu+Y)+16+Z])) = *((ulonglong2*)XB[wu]);
 
-    if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
+    if (warpThread == 0) unlock(mutex, blockIdx.x * WARPS_PER_BLOCK + warpIdx_X);
 }
