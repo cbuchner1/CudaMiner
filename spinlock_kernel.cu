@@ -326,22 +326,6 @@ static __device__ void xor_salsa8(uint32_t *B,uint32_t *C)
     B[ 8] += x[8]; B[ 9] += x[9]; B[10] += x[10]; B[11] += x[11]; B[12] += x[12]; B[13] += x[13]; B[14] += x[14]; B[15] += x[15];
 }
 
-static __device__ uint4& operator^=(uint4& left, const uint4& right)
-{
-    left.x ^= right.x;
-    left.y ^= right.y;
-    left.z ^= right.z;
-    left.w ^= right.w;
-    return left;
-}
-
-static __device__ ulonglong2& operator^=(ulonglong2& left, const ulonglong2& right)
-{
-    left.x ^= right.x;
-    left.y ^= right.y;
-    return left;
-}
-
 static __device__ void lock(int *mutex, int i)
 {
     while( atomicCAS( &mutex[i], 0, 1 ) != 0 )
@@ -470,21 +454,17 @@ spinlock_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
 
         XX[16] = 32 * (C[0] & 1023);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulonglong2*)XB[wu]) ^= *((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z]]));
+            *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z]]));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) B[idx] ^= XX[idx];
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((ulonglong2*)XB[wu]) ^= *((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z] + 16]));
+            *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z] + 16]));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) C[idx] ^= XX[idx];
 
         if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
         xor_salsa8(B, C); xor_salsa8(C, B);
@@ -555,25 +535,21 @@ spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata, int *mutex)
 
         XX[16] = 32 * (C[0] & 1023);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)XB[wu]) ^= ((TEX_DIM == 1) ?
+            *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + Z)/4) :
                         tex2D(texRef2D_4_V, 0.5f + (XB[wu][16-Z] + Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) B[idx] ^= XX[idx];
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)XB[wu]) ^= ((TEX_DIM == 1) ?
+            *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + 16+Z)/4) :
                         tex2D(texRef2D_4_V, 0.5f + (XB[wu][16-Z] + 16+Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) C[idx] ^= XX[idx];
 
         if (warpThread == 0) unlock(mutex, blockIdx.x * (WARPS_PER_BLOCK+1)/2 + warpIdx_2);
         xor_salsa8(B, C); xor_salsa8(C, B);
