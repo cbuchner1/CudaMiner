@@ -11,8 +11,6 @@ EXTRA_DIST		= autogen.sh README.txt LICENSE.txt \
 
 SUBDIRS		= compat
 
-AM_CPPFLAGS	= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
-
 bin_PROGRAMS	= cudaminer
 
 cudaminer_SOURCES	= elist.h miner.h compat.h \
@@ -30,13 +28,14 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 
 cudaminer_LDFLAGS	= $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
 cudaminer_LDADD		= @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ @CUDA_LIBS@ @OPENMP_CFLAGS@ @LIBS@
-cudaminer_CPPFLAGS	= -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@
+cudaminer_CPPFLAGS	= -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@ $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
 
 .cu.o:
 	$(NVCC) @CFLAGS@ -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 spinlock_kernel.o: spinlock_kernel.cu
-	$(NVCC) @CFLAGS@ -arch=compute_11 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+#	$(NVCC) @CFLAGS@ -arch=compute_11 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<

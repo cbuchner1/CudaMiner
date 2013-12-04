@@ -199,7 +199,9 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="fermi_kernel.cu" />
+    <CudaCompile Include="fermi_kernel.cu">
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">64</MaxRegCount>
+    </CudaCompile>
     <CudaCompile Include="legacy_kernel.cu">
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">64</MaxRegCount>
@@ -208,10 +210,12 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     </CudaCompile>
     <CudaCompile Include="salsa_kernel.cu" />
     <CudaCompile Include="spinlock_kernel.cu">
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_11,sm_11</CodeGeneration>
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_11,sm_11</CodeGeneration>
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_11,sm_11</CodeGeneration>
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">compute_11,sm_11</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_30,sm_30</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_30,sm_30</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_30,sm_30</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">compute_30,sm_30</CodeGeneration>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">64</MaxRegCount>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">64</MaxRegCount>
     </CudaCompile>
     <CudaCompile Include="test_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>

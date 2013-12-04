@@ -275,13 +275,13 @@ titan_scrypt_core_kernelA(uint32_t *g_idata)
     // registers to store an entire work unit
     uint4 B[4], C[4];
 
-    volatile int warpIdx_X = BUFFER_MAPPING;
-    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_X][Y][Z];
-    uint32_t *XX = X[warpIdx_X][warpThread];
+    volatile int lockIdx = BUFFER_MAPPING;
+    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[lockIdx][Y][Z];
+    uint32_t *XX = X[lockIdx][warpThread];
 
     if (threadIdx.x < SHARED_BUFFERS) L[threadIdx.x] = 0;
     __syncthreads();
-    if (warpThread == 0) lock(L, warpIdx_X);
+    if (warpThread == 0) lock(L, lockIdx);
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
@@ -297,9 +297,9 @@ titan_scrypt_core_kernelA(uint32_t *g_idata)
 
     for (int i = 1; i < 1024; i++) {
 
-        if (warpThread == 0) unlock(L, warpIdx_X);
+        if (warpThread == 0) unlock(L, lockIdx);
         xor_salsa8(B, C); xor_salsa8(C, B);
-        if (warpThread == 0) lock(L, warpIdx_X);
+        if (warpThread == 0) lock(L, lockIdx);
 
 #pragma unroll 4
         for (int idx=0; idx < 4; ++idx) *((uint4*)&XX[4*idx]) = B[idx];
@@ -313,7 +313,7 @@ titan_scrypt_core_kernelA(uint32_t *g_idata)
         for (int wu=0; wu < 32; wu+=8)
             *((ulonglong2*)(&V[SCRATCH*wu + i*32 + 16])) = *((ulonglong2*)XB[wu]);
     }
-    if (warpThread == 0) unlock(L, warpIdx_X);
+    if (warpThread == 0) unlock(L, lockIdx);
 }
 
 template <int WARPS_PER_BLOCK> __global__ void
@@ -338,13 +338,13 @@ titan_scrypt_core_kernelB(uint32_t *g_odata)
     // registers to store an entire work unit
     uint4 B[4], C[4];
 
-    volatile int warpIdx_X = BUFFER_MAPPING;
-    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx_X][Y][Z];
-    uint32_t *XX = X[warpIdx_X][warpThread];
+    volatile int lockIdx = BUFFER_MAPPING;
+    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[lockIdx][Y][Z];
+    uint32_t *XX = X[lockIdx][warpThread];
 
     if (threadIdx.x < SHARED_BUFFERS) L[threadIdx.x] = 0;
     __syncthreads();
-    if (warpThread == 0) lock(L, warpIdx_X);
+    if (warpThread == 0) lock(L, lockIdx);
 
 #pragma unroll 4
     for (int wu=0; wu < 32; wu+=8)
@@ -358,9 +358,9 @@ titan_scrypt_core_kernelB(uint32_t *g_odata)
 #pragma unroll 4
     for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
 
-    if (warpThread == 0) unlock(L, warpIdx_X);
+    if (warpThread == 0) unlock(L, lockIdx);
     xor_salsa8(B, C); xor_salsa8(C, B);
-    if (warpThread == 0) lock(L, warpIdx_X);
+    if (warpThread == 0) lock(L, lockIdx);
 
     for (int i = 0; i < 1024; i++) {
 
@@ -378,9 +378,9 @@ titan_scrypt_core_kernelB(uint32_t *g_odata)
 #pragma unroll 4
         for (int idx=0; idx < 4; idx++) C[idx] ^= *((uint4*)&XX[4*idx]);
 
-        if (warpThread == 0) unlock(L, warpIdx_X);
+        if (warpThread == 0) unlock(L, lockIdx);
         xor_salsa8(B, C); xor_salsa8(C, B);
-        if (warpThread == 0) lock(L, warpIdx_X);
+        if (warpThread == 0) lock(L, lockIdx);
     }
 
 #pragma unroll 4
@@ -395,5 +395,5 @@ titan_scrypt_core_kernelB(uint32_t *g_odata)
     for (int wu=0; wu < 32; wu+=8)
         *((ulonglong2*)(&g_odata[32*(wu+Y)+16+Z])) = *((ulonglong2*)XB[wu]);
 
-    if (warpThread == 0) unlock(L, warpIdx_X);
+    if (warpThread == 0) unlock(L, lockIdx);
 }
