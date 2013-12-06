@@ -416,21 +416,17 @@ fermi_scrypt_core_kernelB(uint32_t *g_odata)
 
         XX[16] = 32 * (C[0] & 1023);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(XB[wu])) ^= *((uint4*)(&V[SCRATCH*(wu+Y) + X[warpIdx][wu+Y][16] + Z]));
+            *((uint4*)(XB[wu])) = *((uint4*)(&V[SCRATCH*(wu+Y) + X[warpIdx][wu+Y][16] + Z]));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) B[idx] ^= XX[idx];
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(XB[wu])) ^= *((uint4*)(&V[SCRATCH*(wu+Y) + X[warpIdx][wu+Y][16] + 16 + Z]));
+            *((uint4*)(XB[wu])) = *((uint4*)(&V[SCRATCH*(wu+Y) + X[warpIdx][wu+Y][16] + 16 + Z]));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) C[idx] ^= XX[idx];
 
         xor_salsa8(B, C); xor_salsa8(C, B);
     }
@@ -492,25 +488,21 @@ fermi_scrypt_core_kernelB_tex(uint32_t *g_odata)
 
         XX[16] = 32 * (C[0] & 1023);
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = B[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(XB[wu])) ^= ((TEX_DIM == 1) ?
+            *((uint4*)(XB[wu])) = ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + X[warpIdx][wu+Y][16] + Z)/4) :
                         tex2D(texRef2D_4_V, 0.5f + (X[warpIdx][wu+Y][16] + Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) B[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) B[idx] ^= XX[idx];
 
-#pragma unroll 16
-        for (int idx=0; idx < 16; ++idx) XX[idx] = C[idx];
 #pragma unroll 4
         for (int wu=0; wu < 32; wu+=8)
-            *((uint4*)(XB[wu])) ^= ((TEX_DIM == 1) ?
+            *((uint4*)(XB[wu])) = ((TEX_DIM == 1) ?
                         tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + X[warpIdx][wu+Y][16] + 16+Z)/4) :
                         tex2D(texRef2D_4_V, 0.5f + (X[warpIdx][wu+Y][16] + 16+Z)/4, 0.5f + (offset+wu+Y)));
 #pragma unroll 16
-        for (int idx=0; idx < 16; idx++) C[idx] = XX[idx];
+        for (int idx=0; idx < 16; idx++) C[idx] ^= XX[idx];
 
         xor_salsa8(B, C); xor_salsa8(C, B);
     }
