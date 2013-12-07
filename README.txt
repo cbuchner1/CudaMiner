@@ -1,5 +1,5 @@
 
-CudaMiner release December 1st 2013 - beta release
+CudaMiner release December 7th 2013 - beta release
 --------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin only.
@@ -113,6 +113,14 @@ the autotuning output of multiple cards will mix.
 
 
 >>> RELEASE HISTORY <<<
+
+  The December 7th release now targets SM_20 for the Fermi kernel and
+  SM_30 for the Spinlock (Kepler) kernel. This shortens the PTX code
+  (and hence the binary) and may also result in a few extra kHash/s.
+  Compatibility with CUDA 5.5 suffered unfortunately, so please compile
+  the code with the CUDA 5.0 toolkit. Also http:// and https:// URLs
+  are no longer opened with the stratum protocol handler, but rather
+  with getwork.
 
   The December 1st release reduces the likelyhood of autotune crashing
   and offers a better parsing of the command line. The -l, -C, -i, -m
@@ -274,11 +282,14 @@ Usability Improvements:
 - add an option to do the required SHA256 hashing for the
   scrypt algorithm on the GPU (reducing CPU load to near 0)
 
-
 Further Optimization:
 - consider use of some more inline assembly in CUDA
 - investigate benefits of a LOOKUP_GAP implementation
 - get rid of shared memory on Kepler (see experimental Kernel)
+- get rid of kernel templatization (shortening the binary a lot
+  because each template instance is its very own CUDA kernel
+  with its very own PTX code)
+- build a 1.5 MHash/s CUDA based miner (3 x GTX780 Ti)
 
 
 ***************************************************************

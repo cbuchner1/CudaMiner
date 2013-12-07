@@ -114,7 +114,6 @@ std::map<int, uint32_t *> context_idata[2];
 std::map<int, uint32_t *> context_odata[2];
 std::map<int, cudaStream_t> context_streams[2];
 std::map<int, uint32_t *> context_X[2];
-std::map<int, int *> context_mutex[2];
 std::map<int, cudaEvent_t> context_serialize[2];
 
 int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurrent, int &wpb);
@@ -153,12 +152,6 @@ extern "C" int cuda_throughput(int thr_id)
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_idata[1][thr_id] = tmp;
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_odata[0][thr_id] = tmp;
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_odata[1][thr_id] = tmp;
-
-        int *tmp3;
-        checkCudaErrors(cudaMalloc((void **) &tmp3, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK)); context_mutex[0][thr_id] = tmp3;
-        checkCudaErrors(cudaMalloc((void **) &tmp3, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK)); context_mutex[1][thr_id] = tmp3;
-        checkCudaErrors(cudaMemset(context_mutex[0][thr_id], 0, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK));
-        checkCudaErrors(cudaMemset(context_mutex[1][thr_id], 0, sizeof(int)*GRID_BLOCKS*WARPS_PER_BLOCK));
 
         // allocate pinned host memory
         checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[0][thr_id] = tmp;
@@ -282,6 +275,11 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             kernel = new LegacyKernel();
         else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'X'))
             kernel = new TestKernel();
+    }
+
+    if (kernel->get_major_version() > props.major || kernel->get_major_version() == props.major && kernel->get_minor_version() > props.minor)
+    {
+        applog(LOG_WARNING, "GPU #%d: the '%c' kernel requires %d.%d capability!", device_map[thr_id], kernel->get_identifier(), kernel->get_major_version(), kernel->get_minor_version());
     }
 
     // set whatever shared memory bank mode the kernel prefers
@@ -408,11 +406,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             checkCudaErrors(cudaMalloc((void **) &d_idata, mem_size));
             uint32_t *d_odata;
             checkCudaErrors(cudaMalloc((void **) &d_odata, mem_size));
-            int *d_mutex;
-            checkCudaErrors(cudaMalloc((void **) &d_mutex, sizeof(int)*MAXWARPS[thr_id]));
 
             // pre-initialize some device memory
-            checkCudaErrors(cudaMemset(d_mutex, 0, sizeof(int)*MAXWARPS[thr_id]));
             uint32_t *h_idata = (uint32_t*)malloc(mem_size);
             for (unsigned int i=0; i < mem_size/sizeof(uint32_t); ++i) h_idata[i] = i*2654435761UL; // knuth's method
             checkCudaErrors(cudaMemcpy(d_idata, h_idata, mem_size, cudaMemcpyHostToDevice));
@@ -449,7 +444,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             bool r = false;
                             while (repeat < 3)  // average up to 3 measurements for better exactness
                             {
-                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, d_mutex, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
@@ -501,7 +496,6 @@ skip2:              ;
 skip:           ;
             }
 
-            checkCudaErrors(cudaFree(d_mutex));
             checkCudaErrors(cudaFree(d_odata));
             checkCudaErrors(cudaFree(d_idata));
 
@@ -715,7 +709,7 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, bool flush)
 #endif
     }
 
-    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], context_mutex[stream][thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
+    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
 
     // record the serialization event in the current stream
     checkCudaErrors(cudaEventRecord(context_serialize[stream][thr_id], context_streams[stream][thr_id]));

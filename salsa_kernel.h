@@ -49,13 +49,15 @@ class KernelInterface
 {
 public:
     virtual void set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V) = 0;
-    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool interactive, bool benchmark, int texture_cache) = 0;
+    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, bool interactive, bool benchmark, int texture_cache) = 0;
     virtual bool bindtexture_1D(uint32_t *d_V, size_t size) { return true; }
     virtual bool bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch) { return true; }
     virtual bool unbindtexture_1D() { return true; }
     virtual bool unbindtexture_2D() { return true; }
 
     virtual char get_identifier() = 0;
+    virtual int get_major_version() { return 1; }
+    virtual int get_minor_version() { return 0; }
     virtual int max_warps_per_block() = 0;
     virtual int get_texel_width() = 0;
     virtual bool no_textures() { return false; };

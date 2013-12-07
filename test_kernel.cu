@@ -28,8 +28,8 @@
 static __device__ __inline__ unsigned int __laneId() { unsigned int laneId; asm( "mov.u32 %0, %%laneid;" : "=r"( laneId ) ); return laneId; }
 
 // forward references
-__global__ void test_scrypt_core_kernelA(uint32_t *g_idata, int *mutex);
-__global__ void test_scrypt_core_kernelB(uint32_t *g_odata, int *mutex);
+__global__ void test_scrypt_core_kernelA(uint32_t *g_idata);
+__global__ void test_scrypt_core_kernelB(uint32_t *g_odata);
 
 // scratchbuf constants (pointers to scratch buffer for each work unit)
 __constant__ uint32_t* c_V[1024];
@@ -43,7 +43,7 @@ void TestKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
-bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, int *mutex, bool interactive, bool benchmark, int texture_cache)
+bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 
@@ -52,7 +52,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // First phase: Sequential writes to scratchpad.
 
-    test_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata, mutex);
+    test_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata);
 
     // Optional millisecond sleep in between kernels
 
@@ -67,7 +67,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // Second phase: Random read access from scratchpad.
 
-    test_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata, mutex);
+    test_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
@@ -297,7 +297,7 @@ static __device__ void xor_salsa8(uint4 *B, uint4 *C)
 //! @param g_idata  input data in global memory
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
-__global__ void test_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
+__global__ void test_scrypt_core_kernelA(uint32_t *g_idata)
 {
     // add warp specific offsets
     int offset = blockIdx.x * blockDim.x + threadIdx.x / warpSize * warpSize;
@@ -322,7 +322,7 @@ __global__ void test_scrypt_core_kernelA(uint32_t *g_idata, int *mutex)
     }
 }
 
-__global__ void test_scrypt_core_kernelB(uint32_t *g_odata, int *mutex)
+__global__ void test_scrypt_core_kernelB(uint32_t *g_odata)
 {
     // add warp specific offsets
     int offset = blockIdx.x * blockDim.x + threadIdx.x / warpSize * warpSize;
