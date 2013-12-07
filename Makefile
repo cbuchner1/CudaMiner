@@ -139,7 +139,7 @@ AMTAR = $${TAR-tar}
 AUTOCONF = ${SHELL} /home/buchner/CudaMiner/missing --run autoconf
 AUTOHEADER = ${SHELL} /home/buchner/CudaMiner/missing --run autoheader
 AUTOMAKE = ${SHELL} /home/buchner/CudaMiner/missing --run automake-1.11
-AWK = gawk
+AWK = mawk
 CC = gcc -std=gnu99
 CCAS = gcc -std=gnu99
 CCASDEPMODE = depmode=gcc3
@@ -184,10 +184,10 @@ OPENMP_CFLAGS = -fopenmp
 PACKAGE = cudaminer
 PACKAGE_BUGREPORT = 
 PACKAGE_NAME = cudaminer
-PACKAGE_STRING = cudaminer 2013.12.01
+PACKAGE_STRING = cudaminer 2013.12.07
 PACKAGE_TARNAME = cudaminer
 PACKAGE_URL = 
-PACKAGE_VERSION = 2013.12.01
+PACKAGE_VERSION = 2013.12.07
 PATH_SEPARATOR = :
 PTHREAD_FLAGS = -pthread
 PTHREAD_LIBS = -lpthread
@@ -195,7 +195,7 @@ RANLIB = ranlib
 SET_MAKE = 
 SHELL = /bin/bash
 STRIP = 
-VERSION = 2013.12.01
+VERSION = 2013.12.07
 WS2_LIBS = 
 _libcurl_config = 
 abs_builddir = /home/buchner/CudaMiner
@@ -260,7 +260,6 @@ EXTRA_DIST = autogen.sh README.txt LICENSE.txt \
 			  compat/gettimeofday.c compat/getopt/getopt_long.c cpuminer-config.h.in
 
 SUBDIRS = compat
-AM_CPPFLAGS = [B
 cudaminer_SOURCES = elist.h miner.h compat.h \
 			  compat/inttypes.h compat/stdbool.h compat/unistd.h \
 			  compat/sys/time.h compat/getopt/getopt.h \
@@ -926,8 +925,11 @@ uninstall-am: uninstall-binPROGRAMS
 .cu.o:
 	$(NVCC) -g -O2 -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
+fermi_kernel.o: fermi_kernel.cu
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+
 spinlock_kernel.o: spinlock_kernel.cu
-	$(NVCC) -g -O2 -arch=compute_11 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
 	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
