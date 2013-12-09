@@ -264,7 +264,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     cudaDeviceProp props;
     cudaGetDeviceProperties(&props, device_map[thr_id]);
-    concurrent = (props.concurrentKernels > 1);
+    concurrent = (props.concurrentKernels > 0);
 
     device_name[thr_id] = strdup(props.name);
     applog(LOG_INFO, "GPU #%d: %s with compute capability %d.%d", device_map[thr_id], props.name, props.major, props.minor);
