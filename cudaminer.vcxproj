@@ -213,7 +213,10 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">64</MaxRegCount>
     </CudaCompile>
-    <CudaCompile Include="salsa_kernel.cu" />
+    <CudaCompile Include="salsa_kernel.cu">
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">124</MaxRegCount>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">124</MaxRegCount>
+    </CudaCompile>
     <CudaCompile Include="spinlock_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_30,sm_30</CodeGeneration>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_30,sm_30</CodeGeneration>

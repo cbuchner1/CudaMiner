@@ -114,7 +114,13 @@ std::map<int, uint32_t *> context_idata[2];
 std::map<int, uint32_t *> context_odata[2];
 std::map<int, cudaStream_t> context_streams[2];
 std::map<int, uint32_t *> context_X[2];
+std::map<int, uint32_t *> context_H[2];
 std::map<int, cudaEvent_t> context_serialize[2];
+
+// for SHA256 hashing on GPU
+std::map<int, uint32_t *> context_tstate[2];
+std::map<int, uint32_t *> context_ostate[2];
+std::map<int, uint32_t *> context_hash[2];
 
 int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurrent, int &wpb);
 
@@ -145,17 +151,35 @@ extern "C" int cuda_throughput(int thr_id)
         KernelInterface *kernel;
         bool concurrent; GRID_BLOCKS = find_optimal_blockcount(thr_id, kernel, concurrent, WARPS_PER_BLOCK);
         unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
+        unsigned int state_size = WU_PER_LAUNCH * sizeof(uint32_t) * 8;
 
-        // allocate device memory
+        // allocate device memory for scrypt_core inputs and outputs
         uint32_t *tmp;
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_idata[0][thr_id] = tmp;
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_idata[1][thr_id] = tmp;
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_odata[0][thr_id] = tmp;
         checkCudaErrors(cudaMalloc((void **) &tmp, mem_size)); context_odata[1][thr_id] = tmp;
 
-        // allocate pinned host memory
-        checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[0][thr_id] = tmp;
-        checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[1][thr_id] = tmp;
+        // allocate pinned host memory for scrypt hashes
+        checkCudaErrors(cudaHostAlloc((void **) &tmp, state_size, cudaHostAllocDefault)); context_H[0][thr_id] = tmp;
+        checkCudaErrors(cudaHostAlloc((void **) &tmp, state_size, cudaHostAllocDefault)); context_H[1][thr_id] = tmp;
+
+        if (parallel < 2)
+        {
+            // allocate pinned host memory for scrypt_core input/output
+            checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[0][thr_id] = tmp;
+            checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[1][thr_id] = tmp;
+        }
+        else
+        {
+            // allocate tstate, ostate, scrypt hash device memory
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_tstate[0][thr_id] = tmp;
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_tstate[1][thr_id] = tmp;
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_ostate[0][thr_id] = tmp;
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_ostate[1][thr_id] = tmp;
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[0][thr_id] = tmp;
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[1][thr_id] = tmp;
+        }
 
         // create two CUDA streams
         cudaStream_t tmp2;
@@ -279,7 +303,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     if (kernel->get_major_version() > props.major || kernel->get_major_version() == props.major && kernel->get_minor_version() > props.minor)
     {
-        applog(LOG_WARNING, "GPU #%d: the '%c' kernel requires %d.%d capability!", device_map[thr_id], kernel->get_identifier(), kernel->get_major_version(), kernel->get_minor_version());
+        applog(LOG_ERR, "GPU #%d: the '%c' kernel requires %d.%d capability!", device_map[thr_id], kernel->get_identifier(), kernel->get_major_version(), kernel->get_minor_version());
     }
 
     // set whatever shared memory bank mode the kernel prefers
@@ -287,7 +311,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     // some kernels (e.g. Titan) do not support the texture cache
     if (kernel->no_textures() && device_texturecache[thr_id]) {
-        applog(LOG_INFO, "GPU #%d: the '%c' kernel ignores the texture cache argument", device_map[thr_id], kernel->get_identifier());
+        applog(LOG_WARNING, "GPU #%d: the '%c' kernel ignores the texture cache argument", device_map[thr_id], kernel->get_identifier());
         device_texturecache[thr_id] = 0;
     }
 
@@ -338,7 +362,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
                 {
                     if ( optimal_blocks * WARPS_PER_BLOCK > MW_1D )
-                        applog(LOG_INFO, "GPU #%d: Given launch config '%s' exceeds limits for 1D cache.", device_map[thr_id], device_config[thr_id]);
+                        applog(LOG_ERR, "GPU #%d: Given launch config '%s' exceeds limits for 1D cache.", device_map[thr_id], device_config[thr_id]);
                 }
                 // bind linear memory to a 1D texture reference
                 if (kernel->get_texel_width() == 2)
@@ -389,12 +413,12 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
     {
         if (optimal_blocks * WARPS_PER_BLOCK > MAXWARPS[thr_id])
-            applog(LOG_INFO, "GPU #%d: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
+            applog(LOG_ERR, "GPU #%d: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
     }
     else
     {
         if (device_config[thr_id] != NULL && strcasecmp("auto", device_config[thr_id]))
-            applog(LOG_INFO, "GPU #%d: Given launch config '%s' does not validate.", device_map[thr_id], device_config[thr_id]);
+            applog(LOG_WARNING, "GPU #%d: Given launch config '%s' does not validate.", device_map[thr_id], device_config[thr_id]);
 
         if (autotune)
         {
@@ -632,6 +656,10 @@ skip:           ;
                 // update pointers to scratch buffer in constant memory after reallocation
                 kernel->set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
             }
+            else
+            {
+                applog(LOG_ERR, "GPU #%d: Unable to allocate enough memory for launch config '%s'.", device_map[thr_id], device_config[thr_id]);
+            }
         }
     }
     else
@@ -672,7 +700,7 @@ cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
     return result;
 }
 
-extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream, bool flush)
+extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream)
 {
     int GRID_BLOCKS = context_blocks[thr_id];
     int WARPS_PER_BLOCK = context_wpb[thr_id];
@@ -681,12 +709,29 @@ extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream, bool flush
     // copy host memory to device
     checkCudaErrors(cudaMemcpyAsync(context_idata[stream][thr_id], X, mem_size,
                                cudaMemcpyHostToDevice, context_streams[stream][thr_id]));
-
-    // flush the work queue
-    if (flush) checkCudaErrors(cudaStreamQuery(context_streams[stream][thr_id]));
 }
 
-extern "C" void cuda_scrypt_core(int thr_id, int stream, bool flush)
+extern "C" void cuda_scrypt_serialize(int thr_id, int stream)
+{
+    // if the device can concurrently execute multiple kernels, then we must
+    // wait for the serialization event recorded by the other stream
+    if (context_concurrent[thr_id] || device_interactive[thr_id])
+        checkCudaErrors(cudaStreamWaitEvent(context_streams[stream][thr_id], context_serialize[(stream+1)&1][thr_id], 0));
+}
+
+extern "C" void cuda_scrypt_done(int thr_id, int stream)
+{
+    // record the serialization event in the current stream
+    checkCudaErrors(cudaEventRecord(context_serialize[stream][thr_id], context_streams[stream][thr_id]));
+}
+
+extern "C" void cuda_scrypt_flush(int thr_id, int stream)
+{
+    // flush the work queue (required for WDDM drivers)
+    checkCudaErrors(cudaStreamQuery(context_streams[stream][thr_id]));
+}
+
+extern "C" void cuda_scrypt_core(int thr_id, int stream)
 {
     int GRID_BLOCKS = context_blocks[thr_id];
     int WARPS_PER_BLOCK = context_wpb[thr_id];
@@ -694,11 +739,6 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, bool flush)
     // setup execution parameters
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(WU_PER_BLOCK, 1, 1);
-
-    // if the device can concurrently execute multiple kernels, then we must
-    // wait for the serialization event recorded by the other stream
-    if (context_concurrent[thr_id] || device_interactive[thr_id])
-        checkCudaErrors(cudaStreamWaitEvent(context_streams[stream][thr_id], context_serialize[(stream+1)&1][thr_id], 0));
 
     if (device_interactive[thr_id]) {
 //        checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 2, thr_id));
@@ -710,15 +750,9 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, bool flush)
     }
 
     context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
-
-    // record the serialization event in the current stream
-    checkCudaErrors(cudaEventRecord(context_serialize[stream][thr_id], context_streams[stream][thr_id]));
-
-    // flush the work queue
-    if (flush) checkCudaErrors(cudaStreamQuery(context_streams[stream][thr_id]));
 }
 
-extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream, bool flush)
+extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
 {
     int GRID_BLOCKS = context_blocks[thr_id];
     int WARPS_PER_BLOCK = context_wpb[thr_id];
@@ -727,9 +761,6 @@ extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream, bool flush
     // copy result from device to host (asynchronously)
     checkCudaErrors(cudaMemcpyAsync(X, context_odata[stream][thr_id], mem_size,
                                cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
-
-    // flush the work queue
-    if (flush) checkCudaErrors(cudaStreamQuery(context_streams[stream][thr_id]));
 }
 
 extern "C" void cuda_scrypt_sync(int thr_id, int stream)
@@ -740,6 +771,11 @@ extern "C" void cuda_scrypt_sync(int thr_id, int stream)
 extern "C" uint32_t* cuda_transferbuffer(int thr_id, int stream)
 {
     return context_X[stream][thr_id];
+}
+
+extern "C" uint32_t* cuda_hashbuffer(int thr_id, int stream)
+{
+    return context_H[stream][thr_id];
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -834,4 +870,410 @@ static void xor_salsa8(uint32_t * const B, const uint32_t * const C)
 
     B[ 0] += x0; B[ 1] += x1; B[ 2] += x2; B[ 3] += x3; B[ 4] += x4; B[ 5] += x5; B[ 6] += x6; B[ 7] += x7;
     B[ 8] += x8; B[ 9] += x9; B[10] += xa; B[11] += xb; B[12] += xc; B[13] += xd; B[14] += xe; B[15] += xf;
+}
+
+//
+//  =============== SHA256 part ======================
+//
+
+static const uint32_t host_sha256_h[8] = {
+	0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+	0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+};
+
+static const uint32_t host_sha256_k[64] = {
+	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+	0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+	0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+	0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+	0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+	0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+	0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+	0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+	0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+	0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+	0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+	0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+	0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+	0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+	0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+};
+
+/* Elementary functions used by SHA256 */
+#define Ch(x, y, z)     ((x & (y ^ z)) ^ z)
+#define Maj(x, y, z)    ((x & (y | z)) | (y & z))
+#define ROTR(x, n)      ((x >> n) | (x << (32 - n)))
+#define S0(x)           (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+#define S1(x)           (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+#define s0(x)           (ROTR(x, 7) ^ ROTR(x, 18) ^ (x >> 3))
+#define s1(x)           (ROTR(x, 17) ^ ROTR(x, 19) ^ (x >> 10))
+
+/* SHA256 round function */
+#define RND(a, b, c, d, e, f, g, h, k) \
+	do { \
+		t0 = h + S1(e) + Ch(e, f, g) + k; \
+		t1 = S0(a) + Maj(a, b, c); \
+		d += t0; \
+		h  = t0 + t1; \
+	} while (0)
+
+/* Adjusted round function for rotating state */
+#define RNDr(S, W, i) \
+	RND(S[(64 - i) % 8], S[(65 - i) % 8], \
+	    S[(66 - i) % 8], S[(67 - i) % 8], \
+	    S[(68 - i) % 8], S[(69 - i) % 8], \
+	    S[(70 - i) % 8], S[(71 - i) % 8], \
+	    W[i] + sha256_k[i])
+
+static const uint32_t host_keypad[12] = {
+	0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000280
+};
+
+static const uint32_t host_innerpad[11] = {
+	0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x000004a0
+};
+
+static const uint32_t host_outerpad[8] = {
+	0x80000000, 0, 0, 0, 0, 0, 0, 0x00000300
+};
+
+static const uint32_t host_finalblk[16] = {
+	0x00000001, 0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000620
+};
+
+//
+// CUDA code
+//
+
+__constant__ uint32_t sha256_h[8];
+__constant__ uint32_t sha256_k[64];
+__constant__ uint32_t keypad[12];
+__constant__ uint32_t innerpad[11];
+__constant__ uint32_t outerpad[8];
+__constant__ uint32_t finalblk[16];
+__constant__ uint32_t pdata[20];
+__constant__ uint32_t midstate[8];
+
+__device__ void mycpy16(uint32_t *d, const uint32_t *s) {
+#pragma unroll 4
+    for (int k=0; k < 4; k++) d[k] = s[k];
+}
+
+__device__ void mycpy32(uint32_t *d, const uint32_t *s) {
+#pragma unroll 8
+    for (int k=0; k < 8; k++) d[k] = s[k];
+}
+
+__device__ void mycpy44(uint32_t *d, const uint32_t *s) {
+#pragma unroll 11
+    for (int k=0; k < 11; k++) d[k] = s[k];
+}
+
+__device__ void mycpy48(uint32_t *d, const uint32_t *s) {
+#pragma unroll 12
+    for (int k=0; k < 12; k++) d[k] = s[k];
+}
+
+__device__ void mycpy64(uint32_t *d, const uint32_t *s) {
+#pragma unroll 16
+    for (int k=0; k < 16; k++) d[k] = s[k];
+}
+
+__device__ void mycpy76(uint32_t *d, const uint32_t *s) {
+#pragma unroll 19
+    for (int k=0; k < 19; k++) d[k] = s[k];
+}
+
+__device__ void mycpy128(uint32_t *d, const uint32_t *s) {
+#pragma unroll 32
+    for (int k=0; k < 32; k++) d[k] = s[k];
+}
+
+__device__ void cuda_sha256_init(uint32_t *state)
+{
+	mycpy32(state, sha256_h);
+}
+
+__device__ uint32_t cuda_swab32(uint32_t x)
+{
+    return ((((x) << 24) & 0xff000000u) | (((x) << 8) & 0x00ff0000u) \
+          | (((x) >> 8) & 0x0000ff00u) | (((x) >> 24) & 0x000000ffu));
+}
+
+/*
+ * SHA256 block compression function.  The 256-bit state is transformed via
+ * the 512-bit input block to produce a new state.
+ */
+__device__ void cuda_sha256_transform(uint32_t *state, const uint32_t *block, int swap)
+{
+	uint32_t W[64];
+	uint32_t S[8];
+	uint32_t t0, t1;
+	int i;
+
+	/* 1. Prepare message schedule W. */
+	if (swap) {
+#pragma unroll 16
+		for (i = 0; i < 16; i++)
+			W[i] = cuda_swab32(block[i]);
+	} else
+		mycpy64(W, block);
+#pragma unroll 24
+	for (i = 16; i < 64; i += 2) {
+		W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
+		W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15];
+	}
+
+	/* 2. Initialize working variables. */
+	mycpy32(S, state);
+
+	/* 3. Mix. */
+	RNDr(S, W,  0);
+	RNDr(S, W,  1);
+	RNDr(S, W,  2);
+	RNDr(S, W,  3);
+	RNDr(S, W,  4);
+	RNDr(S, W,  5);
+	RNDr(S, W,  6);
+	RNDr(S, W,  7);
+	RNDr(S, W,  8);
+	RNDr(S, W,  9);
+	RNDr(S, W, 10);
+	RNDr(S, W, 11);
+	RNDr(S, W, 12);
+	RNDr(S, W, 13);
+	RNDr(S, W, 14);
+	RNDr(S, W, 15);
+	RNDr(S, W, 16);
+	RNDr(S, W, 17);
+	RNDr(S, W, 18);
+	RNDr(S, W, 19);
+	RNDr(S, W, 20);
+	RNDr(S, W, 21);
+	RNDr(S, W, 22);
+	RNDr(S, W, 23);
+	RNDr(S, W, 24);
+	RNDr(S, W, 25);
+	RNDr(S, W, 26);
+	RNDr(S, W, 27);
+	RNDr(S, W, 28);
+	RNDr(S, W, 29);
+	RNDr(S, W, 30);
+	RNDr(S, W, 31);
+	RNDr(S, W, 32);
+	RNDr(S, W, 33);
+	RNDr(S, W, 34);
+	RNDr(S, W, 35);
+	RNDr(S, W, 36);
+	RNDr(S, W, 37);
+	RNDr(S, W, 38);
+	RNDr(S, W, 39);
+	RNDr(S, W, 40);
+	RNDr(S, W, 41);
+	RNDr(S, W, 42);
+	RNDr(S, W, 43);
+	RNDr(S, W, 44);
+	RNDr(S, W, 45);
+	RNDr(S, W, 46);
+	RNDr(S, W, 47);
+	RNDr(S, W, 48);
+	RNDr(S, W, 49);
+	RNDr(S, W, 50);
+	RNDr(S, W, 51);
+	RNDr(S, W, 52);
+	RNDr(S, W, 53);
+	RNDr(S, W, 54);
+	RNDr(S, W, 55);
+	RNDr(S, W, 56);
+	RNDr(S, W, 57);
+	RNDr(S, W, 58);
+	RNDr(S, W, 59);
+	RNDr(S, W, 60);
+	RNDr(S, W, 61);
+	RNDr(S, W, 62);
+	RNDr(S, W, 63);
+
+	/* 4. Mix local working variables into global state */
+#pragma unroll 8
+	for (i = 0; i < 8; i++)
+		state[i] += S[i];
+}
+
+//
+// Original scrypt.cpp HMAC SHA256 functions
+//
+
+__device__ void cuda_HMAC_SHA256_80_init(const uint32_t *key,
+	uint32_t *tstate, uint32_t *ostate)
+{
+	uint32_t ihash[8];
+	uint32_t pad[16];
+	int i;
+
+	/* tstate is assumed to contain the midstate of key */
+	mycpy16(pad, key + 16);
+	mycpy48(pad + 4, keypad);
+	cuda_sha256_transform(tstate, pad, 0);
+	mycpy32(ihash, tstate);
+
+	cuda_sha256_init(ostate);
+#pragma unroll 8
+	for (i = 0; i < 8; i++)
+		pad[i] = ihash[i] ^ 0x5c5c5c5c;
+#pragma unroll 8
+	for (i=8; i < 16; i++)
+		pad[i] = 0x5c5c5c5c;
+	cuda_sha256_transform(ostate, pad, 0);
+
+	cuda_sha256_init(tstate);
+#pragma unroll 8
+	for (i = 0; i < 8; i++)
+		pad[i] = ihash[i] ^ 0x36363636;
+#pragma unroll 8
+	for (i=8; i < 16; i++)
+		pad[i] = 0x36363636;
+	cuda_sha256_transform(tstate, pad, 0);
+}
+
+__device__ void cuda_PBKDF2_SHA256_80_128(const uint32_t *tstate,
+	const uint32_t *ostate, const uint32_t *salt, uint32_t *output)
+{
+	uint32_t istate[8], ostate2[8];
+	uint32_t ibuf[16], obuf[16];
+	int j;
+
+	mycpy32(istate, tstate);
+	cuda_sha256_transform(istate, salt, 0);
+	
+	mycpy16(ibuf, salt + 16);
+	mycpy44(ibuf + 5, innerpad);
+	mycpy32(obuf + 8, outerpad);
+
+	mycpy32(obuf, istate);
+	ibuf[4] = 1;
+	cuda_sha256_transform(obuf, ibuf, 0);
+
+	mycpy32(ostate2, ostate);
+	cuda_sha256_transform(ostate2, obuf, 0);
+#pragma unroll 8
+	for (j = 0; j < 8; j++)
+		output[0 + j] = cuda_swab32(ostate2[j]); // TODO: coalescing!
+
+	mycpy32(obuf, istate);
+	ibuf[4] = 2;
+	cuda_sha256_transform(obuf, ibuf, 0);
+
+	mycpy32(ostate2, ostate);
+	cuda_sha256_transform(ostate2, obuf, 0);
+#pragma unroll 8
+	for (j = 0; j < 8; j++)
+		output[8 + j] = cuda_swab32(ostate2[j]); // TODO: coalescing!
+
+	mycpy32(obuf, istate);
+	ibuf[4] = 3;
+	cuda_sha256_transform(obuf, ibuf, 0);
+
+	mycpy32(ostate2, ostate);
+	cuda_sha256_transform(ostate2, obuf, 0);
+#pragma unroll 8
+	for (j = 0; j < 8; j++)
+		output[16 + j] = cuda_swab32(ostate2[j]); // TODO: coalescing!
+
+	mycpy32(obuf, istate);
+	ibuf[4] = 4;
+	cuda_sha256_transform(obuf, ibuf, 0);
+
+	mycpy32(ostate2, ostate);
+	cuda_sha256_transform(ostate2, obuf, 0);
+#pragma unroll 8
+	for (j = 0; j < 8; j++)
+		output[24 + j] = cuda_swab32(ostate2[j]); // TODO: coalescing!
+}
+
+extern "C" void prepare_sha256(int thr_id, uint32_t host_pdata[20], uint32_t host_midstate[8])
+{
+    static bool init[8] = {false, false, false, false, false, false, false, false};
+    if (!init[thr_id])
+    {
+        cudaMemcpyToSymbol(sha256_h, host_sha256_h, sizeof(host_sha256_h), 0, cudaMemcpyHostToDevice);
+        cudaMemcpyToSymbol(sha256_k, host_sha256_k, sizeof(host_sha256_k), 0, cudaMemcpyHostToDevice);
+        cudaMemcpyToSymbol(keypad, host_keypad, sizeof(host_keypad), 0, cudaMemcpyHostToDevice);
+        cudaMemcpyToSymbol(innerpad, host_innerpad, sizeof(host_innerpad), 0, cudaMemcpyHostToDevice);
+        cudaMemcpyToSymbol(outerpad, host_outerpad, sizeof(host_outerpad), 0, cudaMemcpyHostToDevice);
+        cudaMemcpyToSymbol(finalblk, host_finalblk, sizeof(host_finalblk), 0, cudaMemcpyHostToDevice);
+        init[thr_id] = true;
+    }
+    cudaMemcpyToSymbol(pdata, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(midstate, host_midstate, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+}
+
+__global__ void cuda_pre_sha256(uint32_t inp[32], uint32_t tstate_ext[8], uint32_t ostate_ext[8], uint32_t nonce)
+{
+	nonce += (blockIdx.x * blockDim.x) + threadIdx.x; 
+	inp += 32 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+	tstate_ext += 8 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+	ostate_ext += 8 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+
+	uint32_t ldata[20], tstate[8], ostate[8];
+	mycpy76(ldata, pdata); ldata[19] = nonce;
+	mycpy32(tstate, midstate);
+	cuda_HMAC_SHA256_80_init(ldata, tstate, ostate);
+	cuda_PBKDF2_SHA256_80_128(tstate, ostate, ldata, inp);
+
+	// TODO: coalescing would be desired
+	mycpy32(tstate_ext, tstate);
+	mycpy32(ostate_ext, ostate);
+}
+
+extern "C" void pre_sha256(int thr_id, int stream, uint32_t nonce, int throughput)
+{
+    dim3 block(32);
+    dim3 grid((throughput+31)/32);
+
+    cuda_pre_sha256<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_idata[stream][thr_id], context_tstate[stream][thr_id], context_ostate[stream][thr_id], nonce);
+}
+
+__global__ void cuda_post_sha256(uint32_t output[8], uint32_t tstate_ext[8], uint32_t ostate_ext[8], uint32_t salt_ext[32])
+{
+	output += 8 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+	tstate_ext += 8 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+	ostate_ext += 8 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+	salt_ext += 32 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+
+	uint32_t tstate[16];
+	uint32_t salt[32];
+	uint32_t buf[16];
+	uint32_t ostate[16];
+	int i;
+	
+	// TODO: coalescing would be desired
+	mycpy32(tstate, tstate_ext);
+	mycpy32(ostate, ostate_ext);
+	mycpy128(salt, salt_ext);
+	
+	cuda_sha256_transform(tstate, salt, 1);
+	cuda_sha256_transform(tstate, salt + 16, 1);
+	cuda_sha256_transform(tstate, finalblk, 0);
+	mycpy32(buf, tstate);
+	mycpy32(buf + 8, outerpad);
+
+	cuda_sha256_transform(ostate, buf, 0);
+#pragma unroll 8
+	for (i = 0; i < 8; i++)
+		output[i] = cuda_swab32(ostate[i]); // TODO: coalescing
+}
+
+extern "C" void post_sha256(int thr_id, int stream, uint32_t hash[8], int throughput)
+{
+    dim3 block(32);
+    dim3 grid((throughput+31)/32);
+
+    cuda_post_sha256<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_hash[stream][thr_id], context_tstate[stream][thr_id], context_ostate[stream][thr_id], context_odata[stream][thr_id]);
+
+    unsigned int mem_size = throughput * sizeof(uint32_t) * 8;
+
+    // copy device memory to host
+    checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
+                    cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
 }

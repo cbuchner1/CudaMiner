@@ -24,10 +24,20 @@ extern void cuda_shutdown(int thr_id);
 extern int cuda_throughput(int thr_id);
 
 extern uint32_t *cuda_transferbuffer(int thr_id, int stream);
-extern void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream, bool flush);
-extern void cuda_scrypt_core(int thr_id, int stream, bool flush);
-extern void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream, bool flush);
+extern uint32_t *cuda_hashbuffer(int thr_id, int stream);
+
+extern void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream);
+extern void cuda_scrypt_serialize(int thr_id, int stream);
+extern void cuda_scrypt_core(int thr_id, int stream);
+extern void cuda_scrypt_done(int thr_id, int stream);
+extern void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream);
 extern void cuda_scrypt_sync(int thr_id, int stream);
+extern void cuda_scrypt_flush(int thr_id, int stream);
+
+extern void prepare_sha256(int thr_id, uint32_t cpu_pdata[20], uint32_t cpu_midstate[8]);
+extern void pre_sha256(int thr_id, int stream, uint32_t nonce, int throughput);
+extern void post_sha256(int thr_id, int stream, uint32_t hash_z[8], int throughput);
+
 extern void computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V);
 
 #ifdef __NVCC__

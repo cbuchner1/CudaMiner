@@ -150,7 +150,7 @@ static enum sha256_algos opt_algo = ALGO_SCRYPT;
 static int opt_n_threads;
 int num_processors; // CB
 static int num_gpus; // CB
-int parallel = 0; // CB
+int parallel = 2; // CB
 static char *rpc_url;
 static char *rpc_userpass;
 static char *rpc_user, *rpc_pass;

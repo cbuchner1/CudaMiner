@@ -9,7 +9,7 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-D -H 1 -d 1 -C 2 -l F28x8 -i 0 -m 0 -o stratum+tcp://stratum.mine-litecoin.com -O cbuchner1.3:z</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-d 0 -l T30x16 -C 0 -i 0 -m 1 -H 2 -o stratum+tcp://coinotron.com:3334 -O cbuchner1.3:z</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerWorkingDirectory>$(ProjectDir)\x64</LocalDebuggerWorkingDirectory>
   </PropertyGroup>

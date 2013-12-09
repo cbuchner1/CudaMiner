@@ -700,168 +700,217 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 	int i;
 
 	uint32_t nonce[2];
-	uint32_t* hash[2]   = { new uint32_t[throughput * 8],  new uint32_t[throughput * 8]  };
+	uint32_t* hash[2]   = { cuda_hashbuffer(thr_id,0), cuda_hashbuffer(thr_id,1) };
 	uint32_t* X[2]      = { cuda_transferbuffer(thr_id,0), cuda_transferbuffer(thr_id,1) };
 
-	uint32x4_t* datax4[2]   = { new uint32x4_t[throughput/4 * 20], new uint32x4_t[throughput/4 * 20] };
-	uint32x4_t* hashx4[2]   = { new uint32x4_t[throughput/4 * 8],  new uint32x4_t[throughput/4 * 8]  };
-	uint32x4_t* tstatex4[2] = { new uint32x4_t[throughput/4 * 8],  new uint32x4_t[throughput/4 * 8]  };
-	uint32x4_t* ostatex4[2] = { new uint32x4_t[throughput/4 * 8],  new uint32x4_t[throughput/4 * 8]  };
-	uint32x4_t* Xx4[2]      = { new uint32x4_t[throughput/4 * 32], new uint32x4_t[throughput/4 * 32] };
+	bool a = parallel < 2;
+	uint32x4_t* datax4[2]   = { a ? new uint32x4_t[throughput/4 * 20] : NULL, a ? new uint32x4_t[throughput/4 * 20] : NULL };
+	uint32x4_t* hashx4[2]   = { a ? new uint32x4_t[throughput/4 * 8]  : NULL, a ? new uint32x4_t[throughput/4 * 8]  : NULL };
+	uint32x4_t* tstatex4[2] = { a ? new uint32x4_t[throughput/4 * 8]  : NULL, a ? new uint32x4_t[throughput/4 * 8]  : NULL };
+	uint32x4_t* ostatex4[2] = { a ? new uint32x4_t[throughput/4 * 8]  : NULL, a ? new uint32x4_t[throughput/4 * 8]  : NULL };
+	uint32x4_t* Xx4[2]      = { a ? new uint32x4_t[throughput/4 * 32] : NULL, a ? new uint32x4_t[throughput/4 * 32] : NULL };
 
 	uint32_t midstate[8];
 	sha256_init(midstate);
 	sha256_transform(midstate, pdata, 0);
-	
-	for (i = 0; i < throughput/4; ++i) {
-		for (int j = 0; j < 20; j++) {
-			datax4[0][20*i+j] = uint32x4_t(pdata[j]);
-			datax4[1][20*i+j] = uint32x4_t(pdata[j]);
+
+	if (parallel < 2) {
+		for (i = 0; i < throughput/4; ++i) {
+			for (int j = 0; j < 20; j++) {
+				datax4[0][20*i+j] = uint32x4_t(pdata[j]);
+				datax4[1][20*i+j] = uint32x4_t(pdata[j]);
+			}
 		}
 	}
+	else prepare_sha256(thr_id, pdata, midstate);
 	
-	int z = 0, zz = 1;
+	int cur = 0, nxt = 1;
 
-	nonce[z] = n+1;
-	for (i = 0; i < throughput/4; i++) {
-		datax4[z][i * 20 + 19] = uint32x4_t(n+1, n+2, n+3, n+4);
-		n += 4;
-	}
+	nonce[cur] = n+1;
 
-	for (i = 0; i < throughput/4; i++) {
-		for (int j = 0; j < 8; j++)
-			tstatex4[z][i * 8 + j] = uint32x4_t(midstate[j]);
-		HMAC_SHA256_80_initx4(&datax4[z][i * 20], &tstatex4[z][i * 8], &ostatex4[z][i * 8]);
-		PBKDF2_SHA256_80_128x4(&tstatex4[z][i * 8], &ostatex4[z][i * 8], &datax4[z][i * 20], &Xx4[z][i * 32]);
-	}
-
-	for (i = 0; i < throughput/4; i++) {
-		for (int j = 0; j < 32; j++) {
-			uint32x4_t &t = Xx4[z][i * 32 + j];
-			X[z][(4*i+0) * 32 + j] = t[0]; X[z][(4*i+1) * 32 + j] = t[1];
-			X[z][(4*i+2) * 32 + j] = t[2]; X[z][(4*i+3) * 32 + j] = t[3];
+	if (parallel < 2) {
+		for (i = 0; i < throughput/4; i++) {
+			datax4[cur][i * 20 + 19] = uint32x4_t(n+1, n+2, n+3, n+4);
+			n += 4;
 		}
+		for (i = 0; i < throughput/4; i++) {
+			for (int j = 0; j < 8; j++)
+				tstatex4[cur][i * 8 + j] = uint32x4_t(midstate[j]);
+			HMAC_SHA256_80_initx4(&datax4[cur][i * 20], &tstatex4[cur][i * 8], &ostatex4[cur][i * 8]);
+			PBKDF2_SHA256_80_128x4(&tstatex4[cur][i * 8], &ostatex4[cur][i * 8], &datax4[cur][i * 20], &Xx4[cur][i * 32]);
+		}
+
+		for (i = 0; i < throughput/4; i++) {
+			for (int j = 0; j < 32; j++) {
+				uint32x4_t &t = Xx4[cur][i * 32 + j];
+				X[cur][(4*i+0) * 32 + j] = t[0]; X[cur][(4*i+1) * 32 + j] = t[1];
+				X[cur][(4*i+2) * 32 + j] = t[2]; X[cur][(4*i+3) * 32 + j] = t[3];
+			}
+		}
+		cuda_scrypt_HtoD(thr_id, X[cur], cur);
+		cuda_scrypt_serialize(thr_id, cur);
+	}
+	else {
+		n += throughput;
+		cuda_scrypt_serialize(thr_id, cur);
+		pre_sha256(thr_id, cur, nonce[cur], throughput);
 	}
 
-	cuda_scrypt_HtoD(thr_id, X[z], z, false);
-	cuda_scrypt_core(thr_id, z, false);
-	cuda_scrypt_DtoH(thr_id, X[z], z, true);
+	cuda_scrypt_core(thr_id, cur);
+
+	if (parallel < 2) {
+		cuda_scrypt_done(thr_id, cur);
+		cuda_scrypt_DtoH(thr_id, X[cur], cur);
+	}
+	else {
+		post_sha256(thr_id, cur, hash[cur], throughput);
+		cuda_scrypt_done(thr_id, cur);
+	}
+	cuda_scrypt_flush(thr_id, cur);
 
 	int num_shares = 4*num_processors;
 	int share_workload = ((((throughput + num_shares-1) / num_shares) + 3) / 4) * 4;
 	do {
 
-		nonce[zz] = n+1;
-		for (i = 0; i < throughput/4; i++) {
-			datax4[zz][i * 20 + 19] = uint32x4_t(n+1, n+2, n+3, n+4);
-			n += 4;
+		nonce[nxt] = n+1;
+
+		if (parallel < 2) {
+			for (i = 0; i < throughput/4; i++) {
+				datax4[nxt][i * 20 + 19] = uint32x4_t(n+1, n+2, n+3, n+4);
+				n += 4;
+			}
+			if (parallel)
+			{
+#ifdef WIN32
+				parallel_for (0, num_shares, [&](int share) {
+					for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
+						for (int l = 0; l < 8; l++)
+							tstatex4[nxt][k * 8 + l] = uint32x4_t(midstate[l]);
+							HMAC_SHA256_80_initx4(&datax4[nxt][k * 20], &tstatex4[nxt][k * 8], &ostatex4[nxt][k * 8]);
+							PBKDF2_SHA256_80_128x4(&tstatex4[nxt][k * 8], &ostatex4[nxt][k * 8], &datax4[nxt][k * 20], &Xx4[nxt][k * 32]);
+					}
+				} );
+#else
+			#pragma omp parallel for
+				for (int share = 0; share < num_shares; share++) {
+					for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
+						for (int l = 0; l < 8; l++)
+							tstatex4[nxt][k * 8 + l] = uint32x4_t(midstate[l]);
+							HMAC_SHA256_80_initx4(&datax4[nxt][k * 20], &tstatex4[nxt][k * 8], &ostatex4[nxt][k * 8]);
+							PBKDF2_SHA256_80_128x4(&tstatex4[nxt][k * 8], &ostatex4[nxt][k * 8], &datax4[nxt][k * 20], &Xx4[nxt][k * 32]);
+					}
+				}
+#endif
+			}
+			else
+			{
+				for (int k = 0; k < throughput/4; k++) {
+					for (int l = 0; l < 8; l++)
+						tstatex4[nxt][k * 8 + l] = uint32x4_t(midstate[l]);
+						HMAC_SHA256_80_initx4(&datax4[nxt][k * 20], &tstatex4[nxt][k * 8], &ostatex4[nxt][k * 8]);
+						PBKDF2_SHA256_80_128x4(&tstatex4[nxt][k * 8], &ostatex4[nxt][k * 8], &datax4[nxt][k * 20], &Xx4[nxt][k * 32]);
+				}
+			}
+
+			for (i = 0; i < throughput/4; i++) {
+				for (int j = 0; j < 32; j++) {
+					uint32x4_t &t = Xx4[nxt][i * 32 + j];
+					X[nxt][(4*i+0)*32+j] = t[0]; X[nxt][(4*i+1)*32+j] = t[1];
+					X[nxt][(4*i+2)*32+j] = t[2]; X[nxt][(4*i+3)*32+j] = t[3];
+				}
+			}
+
+			cuda_scrypt_HtoD(thr_id, X[nxt], nxt);
+			cuda_scrypt_serialize(thr_id, nxt);
 		}
+		else {
+			n += throughput;
+			cuda_scrypt_serialize(thr_id, nxt);
+			pre_sha256(thr_id, nxt, nonce[nxt], throughput);
+		}
+
+		cuda_scrypt_core(thr_id, nxt);
+		if (parallel < 2) {
+			cuda_scrypt_done(thr_id, nxt);
+			cuda_scrypt_DtoH(thr_id, X[nxt], nxt);
+		}
+		else {
+			post_sha256(thr_id, nxt, hash[nxt], throughput);
+			cuda_scrypt_done(thr_id, nxt);
+		}
+		cuda_scrypt_flush(thr_id, nxt);
+
+		cuda_scrypt_sync(thr_id, cur);
+
+		if (parallel < 2) {
+			for (i = 0; i < throughput/4; i++) {
+				for (int j = 0; j < 32; j++) {
+					Xx4[cur][i * 32 + j] = uint32x4_t(X[cur][(4*i+0)*32+j], X[cur][(4*i+1)*32+j],
+													X[cur][(4*i+2)*32+j], X[cur][(4*i+3)*32+j] );
+				}
+			}
 
 			if (parallel)
 			{
 #ifdef WIN32
-			parallel_for (0, num_shares, [&](int share) {
-				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
-					for (int l = 0; l < 8; l++)
-						tstatex4[zz][k * 8 + l] = uint32x4_t(midstate[l]);
-						HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
-						PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
-				}
-			} );
+				parallel_for (0, num_shares, [&](int share) { 
+					for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
+						PBKDF2_SHA256_128_32x4(&tstatex4[cur][k * 8], &ostatex4[cur][k * 8], &Xx4[cur][k * 32], &hashx4[cur][k * 8]);
+					}
+				} );
 #else
-		#pragma omp parallel for
-			for (int share = 0; share < num_shares; share++) {
-				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
-					for (int l = 0; l < 8; l++)
-						tstatex4[zz][k * 8 + l] = uint32x4_t(midstate[l]);
-						HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
-						PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
+				#pragma omp parallel for
+				for (int share = 0; share < num_shares; share++) {
+					for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++)
+						PBKDF2_SHA256_128_32x4(&tstatex4[cur][k * 8], &ostatex4[cur][k * 8], &Xx4[cur][k * 32], &hashx4[cur][k * 8]);
 				}
-			}
 #endif
-		}
-		else
-		{
-			for (int k = 0; k < throughput/4; k++) {
-				for (int l = 0; l < 8; l++)
-					tstatex4[zz][k * 8 + l] = uint32x4_t(midstate[l]);
-					HMAC_SHA256_80_initx4(&datax4[zz][k * 20], &tstatex4[zz][k * 8], &ostatex4[zz][k * 8]);
-					PBKDF2_SHA256_80_128x4(&tstatex4[zz][k * 8], &ostatex4[zz][k * 8], &datax4[zz][k * 20], &Xx4[zz][k * 32]);
 			}
-		}
-
-		for (i = 0; i < throughput/4; i++) {
-			for (int j = 0; j < 32; j++) {
-				uint32x4_t &t = Xx4[zz][i * 32 + j];
-				X[zz][(4*i+0)*32+j] = t[0]; X[zz][(4*i+1)*32+j] = t[1];
-				X[zz][(4*i+2)*32+j] = t[2]; X[zz][(4*i+3)*32+j] = t[3];
+			else
+			{
+				for (int k = 0; k < throughput/4; k++)
+					PBKDF2_SHA256_128_32x4(&tstatex4[cur][k * 8], &ostatex4[cur][k * 8], &Xx4[cur][k * 32], &hashx4[cur][k * 8]);
 			}
-		}
 
-		cuda_scrypt_HtoD(thr_id, X[zz], zz, false);
-		cuda_scrypt_core(thr_id, zz, false);
-		cuda_scrypt_DtoH(thr_id, X[zz], zz, true);
-
-		cuda_scrypt_sync(thr_id, z);
-
-		for (i = 0; i < throughput/4; i++) {
-			for (int j = 0; j < 32; j++) {
-				Xx4[z][i * 32 + j] = uint32x4_t(X[z][(4*i+0)*32+j], X[z][(4*i+1)*32+j],
-												X[z][(4*i+2)*32+j], X[z][(4*i+3)*32+j] );
-			}
-		}
-
-		if (parallel)
-		{
-#ifdef WIN32
-			parallel_for (0, num_shares, [&](int share) { 
-				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++) {
-					PBKDF2_SHA256_128_32x4(&tstatex4[z][k * 8], &ostatex4[z][k * 8], &Xx4[z][k * 32], &hashx4[z][k * 8]);
+			for (i = 0; i < throughput/4; i++) {
+				for (int j = 0; j < 8; j++) {
+					uint32x4_t &t = hashx4[cur][i * 8 + j];
+					hash[cur][(4*i+0)*8+j] = t[0]; hash[cur][(4*i+1)*8+j] = t[1];
+					hash[cur][(4*i+2)*8+j] = t[2]; hash[cur][(4*i+3)*8+j] = t[3];
 				}
-			} );
-#else
-			#pragma omp parallel for
-			for (int share = 0; share < num_shares; share++) {
-				for (int k = (share_workload*share)/4; k < (share_workload*(share+1))/4 && k < throughput/4; k++)
-					PBKDF2_SHA256_128_32x4(&tstatex4[z][k * 8], &ostatex4[z][k * 8], &Xx4[z][k * 32], &hashx4[z][k * 8]);
-			}
-#endif
-		}
-		else
-		{
-			for (int k = 0; k < throughput/4; k++)
-				PBKDF2_SHA256_128_32x4(&tstatex4[z][k * 8], &ostatex4[z][k * 8], &Xx4[z][k * 32], &hashx4[z][k * 8]);
-		}
-
-		for (i = 0; i < throughput/4; i++) {
-			for (int j = 0; j < 8; j++) {
-				uint32x4_t &t = hashx4[z][i * 8 + j];
-				hash[z][(4*i+0)*8+j] = t[0]; hash[z][(4*i+1)*8+j] = t[1];
-				hash[z][(4*i+2)*8+j] = t[2]; hash[z][(4*i+3)*8+j] = t[3];
 			}
 		}
 
 		for (i = 0; i < throughput; i++) {
-			if (hash[z][i * 8 + 7] <= Htarg && fulltest(hash[z] + i * 8, ptarget)) {
+			if (hash[cur][i * 8 + 7] <= Htarg && fulltest(hash[cur] + i * 8, ptarget)) {
 
 				// CPU based validation to rule out GPU errors (scalar CPU code)
-				uint32_t ldata[20], tstate[8], ostate[8], inp[32], ref[32], scratch[32768];
-				memcpy(ldata, pdata, 80); ldata[19] = nonce[z]+i;
+				uint32_t ldata[20], tstate[8], ostate[8], inp[32], ref[32], scratch[32768], refhash[8];
+				memcpy(ldata, pdata, 80); ldata[19] = nonce[cur]+i;
 				memcpy(tstate, midstate, 32);
 				HMAC_SHA256_80_init(ldata, tstate, ostate);
 				PBKDF2_SHA256_80_128(tstate, ostate, ldata, inp);
 				computeGold(inp, ref, scratch);
 
-				if (memcmp(&X[z][i * 32], ref, 32*sizeof(uint32_t)) != 0)
-					applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU!", device_map[thr_id], device_name[thr_id]);
+				bool good = true;
+				if (parallel < 2) {
+					if (memcmp(&X[cur][i * 32], ref, 32*sizeof(uint32_t)) != 0) good = false;
+				} else
+				{
+					PBKDF2_SHA256_128_32(tstate, ostate, ref, refhash);
+					if (memcmp(&hash[cur][i * 8], refhash, 8*sizeof(uint32_t)) != 0) good = false;
+				}
+
+				if (!good)
+					applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], i, cur);
 				else {
 					*hashes_done = (n-throughput) - pdata[19] + 1;
-					pdata[19] = nonce[z]+i;
+					pdata[19] = nonce[cur]+i;
 					result = 1; goto byebye;
 				}
 			}
 		}
-		z = (z+1)&1; zz = (zz+1)&1;
+		cur = (cur+1)&1; nxt = (nxt+1)&1;
 	} while ((n-throughput) < max_nonce && !work_restart[thr_id].restart);
 	
 	*hashes_done = (n-throughput) - pdata[19] + 1;
@@ -869,6 +918,6 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 byebye:
 	delete[] datax4[0]; delete[] datax4[1]; delete[] hashx4[0]; delete[] hashx4[1];
 	delete[] tstatex4[0]; delete[] tstatex4[1]; delete[] ostatex4[0]; delete[] ostatex4[1];
-	delete[] Xx4[0]; delete[] Xx4[1]; delete[] hash[0]; delete[] hash[1];
+	delete[] Xx4[0]; delete[] Xx4[1];
 	return result;
 }
