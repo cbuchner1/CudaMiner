@@ -923,7 +923,7 @@ uninstall-am: uninstall-binPROGRAMS
 
 
 .cu.o:
-	$(NVCC) -g -O2 -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -arch=compute_10 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 fermi_kernel.o: fermi_kernel.cu
 	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
