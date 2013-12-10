@@ -1,10 +1,11 @@
 
-CudaMiner release December 7th 2013 - beta release
---------------------------------------------------
+CudaMiner release December 10th 2013 - beta release
+---------------------------------------------------
 
-this is a CUDA accelerated mining application for litecoin only.
-The most computationally heavy parts of the scrypt algorithm (the
-Salsa 20/8 iterations) are run on the GPU.
+this is a CUDA accelerated mining application for litecoin and
+scrypt based altcoins only. The computationally heavy parts of
+the scrypt algorithm (the Salsa 20/8 iterations and optionally
+the SHA256 based message digest) are run on the GPU.
 
 You should see a notable speed-up compared to OpenCL based miners.
 Some numbers from my testing:
@@ -12,18 +13,12 @@ Some numbers from my testing:
 GTX 260:    44  kHash/sec (maybe more on Linux/WinXP)
 GTX 640:    65  kHash/sec (if based on GK 208 chip)
 GTX 460:   100  kHash/sec
-GTX 560Ti: 160  kHash/sec (or 228 kHash/sec on the 448 core edition)
-GTX 660Ti: 180  kHash/sec (close to 200 kHash/s with overclocking)
-GTX 780Ti: 450  kHash/sec (T30x16, 105% TDP allowance)
+GTX 560Ti: 160  kHash/sec (or 235 kHash/sec on the 448 core edition)
+GTX 660Ti: 186  kHash/sec (close to 200 kHash/s with overclocking)
+GTX 780Ti: 480  kHash/sec (T30x16, 105% TDP allowance)
 
-NOTE: Compute 1.0 through 1.3 devices seem to run faster on Windows XP
-or Linux.
 
-NOTE: The 64bit cudaminer sometimes mines a bit slower than the 32 bit
-binary (increased register pressure, as pointers take two registers in
-a 64 bit CUDA build!). Try both versions and compare!
-
-Your nVidia cards will now suck a little less for mining! This tool
+Your nVidia cards will no longer suck so bad for mining! This tool
 will automatically use all nVidia GPUs found in your system, but the
 used device count can be limited to a lower number using the "-t"
 option, or even selected individually with the "-d" option
@@ -65,17 +60,18 @@ Additional command line options are:
                  this may lead to a smaller memory size being used.
                  When using the texture cache this option is implied.
 
---hash-parallel  [-H] 1 to enable parallel hashing on the CPU. May
-                 use more CPU but distributes hashing load neatly
-                 across all CPU cores. Use 0 otherwise, which is now
-                 the default.
+--hash-parallel  [-H] scrypt also has a small SHA256 component to it:
+                      0 hashes this single threaded on the CPU.
+                      1 to enable multithreaded hashing on the CPU.
+                      2 offloads everything to the GPU (default)
 
 >>> Example command line options, advanced use <<<
 
-cudaminer.exe -H 1 -d 0,1,2 -i 1,0,0 -l auto,F27x3,K28x4 -C 0,2,1
+cudaminer.exe -H 2 -d 0,1,2 -i 1,0,0 -l auto,F27x3,K28x4 -C 0,2,1
 -o stratum+tcp://coinotron.com:3334 -O workername:password  
 
-The option -H 1 distributes the CPU load across all available cores.
+The option -H 2 uses the GPU for all hashing work, which puts very little
+load on the CPU.
 
 I instruct cudaminer to use devices 0,1 and 2. Because I have the display
 attached to device 0, I set that device to run in interactive mode so
@@ -95,24 +91,34 @@ protocol.
 
 >>> Additional Notes <<<
 
-The HMAC SHA-256 parts of scrypt are still executed on the CPU, and so
-any BitCoin mining will NOT be GPU accelerated. This tool is for LTC.
+This tool is for LTC and other scrypt based altcois only.
 
-There is also some SHA256 hashing required to do Scrypt hashing, and
-this part is also done by the CPU, in parallel to the work done by
-the GPU(s).
+Compute 1.0 through 1.3 devices seem to run faster on Windows XP or Linux
+because these OS'es use a more efficient driver model.
+
+The 64bit cudaminer sometimes mines a bit slower than the 32 bit binary
+(increased register pressure, as pointers take two registers in a 64 bit
+CUDA build!). Try both versions and compare!
+
+There is also some SHA256 computation required to do scrypt hashing, which
+can be done by the CPU as well as your GPU.
 
 This code should be fine on nVidia GPUs ranging from compute
-capability 1.1 up to compute capability 3.5. The Geforce Titan has
-received experimental and untested support.
+capability 1.1 up to compute capability 3.5.
 
 To see what autotuning does, enable the debug option (-D) switch.
 You will get a table of kHash/s for a variety of launch configurations.
 You may only want to do this when running on a single GPU, otherwise
-the autotuning output of multiple cards will mix.
+the autotuning output of multiple cards will get all mixed up.
 
 
 >>> RELEASE HISTORY <<<
+
+  The December 10th milestone marks the release that allows doing serious
+  mining with weak single/dual core CPUs. -H 2 offloads everything to
+  the graphics chip, putting CPU utilization close to idle. It also fixes
+  a bug that caused a small percentage of hashes to not validate on the
+  CPU (especially on Kepler devices with Compute 3.5).
 
   The December 7th release now targets SM_20 for the Fermi kernel and
   SM_30 for the Spinlock (Kepler) kernel. This shortens the PTX code
@@ -279,11 +285,11 @@ overriding the automatic selection.
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
 - add failover support between different pools
-- add an option to do the required SHA256 hashing for the
-  scrypt algorithm on the GPU (reducing CPU load to near 0)
 
 Further Optimization:
-- consider use of some more inline assembly in CUDA
+- further optimize the SHA256 part (achieve memory coalescing)
+- fix a bug that prevents overlapping of memory transfers and
+  kernel launches (this could bring 5% more speed when fixed!)
 - investigate benefits of a LOOKUP_GAP implementation
 - get rid of shared memory on Kepler (see experimental Kernel)
 - get rid of kernel templatization (shortening the binary a lot
