@@ -46,7 +46,7 @@ static const int SCRYPT_SCRATCH_PER_BLOCK = (32*1024);
  */
 
 __device__ __forceinline__
-inline void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
+void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
 
   uint4 t, t2;
   t.x = b[0]; t.y = b[1]; t.z = b[2]; t.w = b[3];
@@ -68,14 +68,14 @@ inline void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_
 }
 
 __device__ __forceinline__
-inline void write_keys(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
+void write_keys(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + (32*start) + 8*(threadIdx.x%4);
   write_keys_direct(b, bx, scratch, start);
 }
 
 
-inline __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
+__device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
 
   uint4 t, t2;
 
@@ -107,14 +107,14 @@ inline __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint
 }
 
 
-inline __device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
+__device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + (32*start);
   read_xor_keys_direct(b, bx, scratch, start);
 }
 
 
-inline __device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t bx[4]) {
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
@@ -138,7 +138,7 @@ inline __device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uin
  * in internal processing order.
  */
 
-inline __device__  __forceinline__ void load_key(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void load_key(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
@@ -160,7 +160,7 @@ inline __device__  __forceinline__ void load_key(const uint32_t *B, uint32_t b[4
  * region of B in external order.
  */
 
-inline __device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
@@ -184,7 +184,7 @@ inline __device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], ui
  * call to avoid unnecessary data movement.
  */
 
-inline __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4], uint32_t x[4],
+__device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4], uint32_t x[4],
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
