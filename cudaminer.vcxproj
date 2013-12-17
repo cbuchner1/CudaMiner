@@ -206,6 +206,9 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">63</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">63</MaxRegCount>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_20,sm_20</CodeGeneration>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CInterleavedPTX>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
     </CudaCompile>
     <CudaCompile Include="legacy_kernel.cu">
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
@@ -228,6 +231,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">63</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">63</MaxRegCount>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CInterleavedPTX>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
     </CudaCompile>
     <CudaCompile Include="test_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>
@@ -235,6 +240,10 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_35,sm_35</CodeGeneration>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</CInterleavedPTX>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CInterleavedPTX>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
     </CudaCompile>
     <CudaCompile Include="titan_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>
