@@ -1,8 +1,13 @@
 /* Copyright (C) 2013 David G. Andersen. All rights reserved.
+ * with modifications by Christian Buchner
  *
  * Use of this code is covered under the Apache 2.0 license, which
  * can be found in the file "LICENSE"
  */
+
+// TODO: support for chunked memory allocation
+//       support for 1D and 2D texture cache on Compute 3.0 devices
+//       attempt V.Volkov style ILP (factor 4)
 
 #ifdef WIN32
 #include <windows.h>
@@ -11,15 +16,24 @@
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <cuda.h>
 
 #include "test_kernel.h"
 
-#include <inttypes.h>
-
 static const int THREADS_PER_SCRYPT_BLOCK = 4;
 static const int SCRYPT_SCRATCH_PER_BLOCK = (32*1024);
+
+#if __CUDA_ARCH__ < 350 
+    // Kepler (Compute 3.0)
+    #define __ldg(x) (*(x))
+    #define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); }
+#else
+    // Kepler (Compute 3.5)
+    #define ROTL(a, b) __funnelshift_l( a, a, b );
+    #define XOR_ROTATE_ADD(dst, s1, s2, amt) x[dst] ^= ROTL(x[s1]+x[s2], amt);
+#endif
 
 /* write_keys writes the 8 keys being processed by a warp to the global
  * scratchpad. To effectively use memory bandwidth, it performs the writes
@@ -72,6 +86,38 @@ void write_keys(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, ui
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + (32*start) + 8*(threadIdx.x%4);
   write_keys_direct(b, bx, scratch, start);
+}
+
+
+__device__  __forceinline__ void read_keys_direct(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
+
+  uint4 t, t2;
+
+  // Tricky bit: We do the work on behalf of thread+4, but then when
+  // we steal, we have to steal from (thread+28)%32 to get the right
+  // stuff back.
+  start = __shfl((int)start, (threadIdx.x & 0x7c)) + 8*(threadIdx.x%4);
+
+  int target_thread = (threadIdx.x + 4)%32;
+  int t2_start = __shfl((int)start, target_thread) + 4;
+
+  bool c = (threadIdx.x & 0x4);
+
+  int loc = c ? t2_start : start;
+  t = __ldg((uint4 *)(&scratch[loc]));
+  loc = c ? start : t2_start;
+  t2 = __ldg((uint4 *)(&scratch[loc]));
+
+  uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
+  
+  b[0] = t.x; b[1] = t.y; b[2] = t.z; b[3] = t.w;
+
+  int steal_target = (threadIdx.x + 28)%32;
+
+  bx[0] = __shfl((int)t2.x, steal_target);
+  bx[1] = __shfl((int)t2.y, steal_target);
+  bx[2] = __shfl((int)t2.z, steal_target);
+  bx[3] = __shfl((int)t2.w, steal_target);
 }
 
 
@@ -184,19 +230,17 @@ __device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t 
  * call to avoid unnecessary data movement.
  */
 
-__device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4], uint32_t x[4],
+__device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
+    uint32_t x[4];
+
 #pragma unroll 4
     for (int i = 0; i < 4; i++) {
       b[i] ^= bx[i];
       x[i] = b[i];
     }
-
-//#define XOR_ROTATE_ADD(dst, s1, s2, amt) do { tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); } while(0)
-#define ROTL(a, b) __funnelshift_l( a, a, b );
-#define XOR_ROTATE_ADD(dst, s1, s2, amt) x[dst] ^= ROTL(x[s1]+x[s2], amt);
 
     // Enter in "column" mode (t0 has 0, 4, 8, 12)
 
@@ -295,16 +339,16 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4], u
  */
 
 __global__
-void hasher_gen_kernel(uint32_t *B, uint32_t *scratch) {
+void test_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
 
   /* Each thread operates on four of the sixteen B and Bx variables. Thus,
    * each key is processed by four threads in parallel. salsa_scrypt_core
    * internally shuffles the variables between threads (and back) as
    * needed.
    */
-  uint32_t b[4], bx[4], x[4];
+  uint32_t b[4], bx[4];
 
-  load_key(B, b, bx);
+  load_key(d_idata, b, bx);
   
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -314,12 +358,11 @@ void hasher_gen_kernel(uint32_t *B, uint32_t *scratch) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + 8*(threadIdx.x%4);
 
-  for (int i = 0; i < 1024; i++) {
+  write_keys_direct(b, bx, scratch, start);
+  for (int i = 1; i < 1024; i++) {
+    salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
     write_keys_direct(b, bx, scratch, start+32*i);
-    salsa_xor_core(b, bx, x, x1_target_lane, x2_target_lane, x3_target_lane);
   }
-
-  store_key(B, b, bx);
 }
 
 
@@ -330,19 +373,24 @@ void hasher_gen_kernel(uint32_t *B, uint32_t *scratch) {
  */
 
 __global__
-void hasher_hash_kernel(uint32_t *B, uint32_t *d_odata, const uint32_t *scratch) {
+void test_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
 
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
    */
-  uint32_t b[4], bx[4], x[4];
+  uint32_t b[4], bx[4];
 
-  load_key(B, b, bx);
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + 8*(threadIdx.x%4);
+
+  read_keys_direct(b, bx, scratch, start+32*1023);
 
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
   int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+
+  salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
 
   for (int i = 0; i < 1024; i++) {
 
@@ -351,7 +399,7 @@ void hasher_hash_kernel(uint32_t *B, uint32_t *d_odata, const uint32_t *scratch)
     // X[16] in the original is bx[0]
     int slot = bx[0] & 1023;
     read_xor_keys(b, bx, scratch, slot);
-    salsa_xor_core(b, bx, x, x1_target_lane, x2_target_lane, x3_target_lane);
+    salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
   }
 
   store_key(d_odata, b, bx);
@@ -383,7 +431,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // First phase: Sequential writes to scratchpad.
 
-    hasher_gen_kernel<<< grid, threads, 0, stream >>>(d_idata, d_scratch);
+    test_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata, d_scratch);
 
     // Optional millisecond sleep in between kernels
 
@@ -398,7 +446,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // Second phase: Random read access from scratchpad.
 
-    hasher_hash_kernel<<< grid, threads, 0, stream >>>(d_idata, d_odata, d_scratch);
+    test_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata, d_scratch);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
