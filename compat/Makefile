@@ -93,7 +93,7 @@ AMTAR = $${TAR-tar}
 AUTOCONF = ${SHELL} /home/buchner/CudaMiner/missing --run autoconf
 AUTOHEADER = ${SHELL} /home/buchner/CudaMiner/missing --run autoheader
 AUTOMAKE = ${SHELL} /home/buchner/CudaMiner/missing --run automake-1.11
-AWK = mawk
+AWK = gawk
 CC = gcc -std=gnu99
 CCAS = gcc -std=gnu99
 CCASDEPMODE = depmode=gcc3
@@ -138,10 +138,10 @@ OPENMP_CFLAGS = -fopenmp
 PACKAGE = cudaminer
 PACKAGE_BUGREPORT = 
 PACKAGE_NAME = cudaminer
-PACKAGE_STRING = cudaminer 2013.12.07
+PACKAGE_STRING = cudaminer 2013.12.18
 PACKAGE_TARNAME = cudaminer
 PACKAGE_URL = 
-PACKAGE_VERSION = 2013.12.07
+PACKAGE_VERSION = 2013.12.18
 PATH_SEPARATOR = :
 PTHREAD_FLAGS = -pthread
 PTHREAD_LIBS = -lpthread
@@ -149,7 +149,7 @@ RANLIB = ranlib
 SET_MAKE = 
 SHELL = /bin/bash
 STRIP = 
-VERSION = 2013.12.07
+VERSION = 2013.12.18
 WS2_LIBS = 
 _libcurl_config = 
 abs_builddir = /home/buchner/CudaMiner/compat

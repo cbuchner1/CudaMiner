@@ -57,8 +57,8 @@ am_cudaminer_OBJECTS = cudaminer-cpu-miner.$(OBJEXT) \
 	cudaminer-util.$(OBJEXT) cudaminer-sha2.$(OBJEXT) \
 	cudaminer-scrypt.$(OBJEXT) salsa_kernel.$(OBJEXT) \
 	spinlock_kernel.$(OBJEXT) legacy_kernel.$(OBJEXT) \
-	fermi_kernel.$(OBJEXT) test_kernel.$(OBJEXT) \
-	titan_kernel.$(OBJEXT)
+	fermi_kernel.$(OBJEXT) kepler_kernel.$(OBJEXT) \
+	test_kernel.$(OBJEXT) titan_kernel.$(OBJEXT)
 cudaminer_OBJECTS = $(am_cudaminer_OBJECTS)
 cudaminer_DEPENDENCIES =
 cudaminer_LINK = $(CXXLD) $(AM_CXXFLAGS) $(CXXFLAGS) \
@@ -139,7 +139,7 @@ AMTAR = $${TAR-tar}
 AUTOCONF = ${SHELL} /home/buchner/CudaMiner/missing --run autoconf
 AUTOHEADER = ${SHELL} /home/buchner/CudaMiner/missing --run autoheader
 AUTOMAKE = ${SHELL} /home/buchner/CudaMiner/missing --run automake-1.11
-AWK = mawk
+AWK = gawk
 CC = gcc -std=gnu99
 CCAS = gcc -std=gnu99
 CCASDEPMODE = depmode=gcc3
@@ -184,10 +184,10 @@ OPENMP_CFLAGS = -fopenmp
 PACKAGE = cudaminer
 PACKAGE_BUGREPORT = 
 PACKAGE_NAME = cudaminer
-PACKAGE_STRING = cudaminer 2013.12.07
+PACKAGE_STRING = cudaminer 2013.12.18
 PACKAGE_TARNAME = cudaminer
 PACKAGE_URL = 
-PACKAGE_VERSION = 2013.12.07
+PACKAGE_VERSION = 2013.12.18
 PATH_SEPARATOR = :
 PTHREAD_FLAGS = -pthread
 PTHREAD_LIBS = -lpthread
@@ -195,7 +195,7 @@ RANLIB = ranlib
 SET_MAKE = 
 SHELL = /bin/bash
 STRIP = 
-VERSION = 2013.12.07
+VERSION = 2013.12.18
 WS2_LIBS = 
 _libcurl_config = 
 abs_builddir = /home/buchner/CudaMiner
@@ -270,6 +270,7 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 			  spinlock_kernel.cu spinlock_kernel.h \
 			  legacy_kernel.cu legacy_kernel.h \
 			  fermi_kernel.cu fermi_kernel.h \
+			  kepler_kernel.cu kepler_kernel.h \
 			  test_kernel.cu test_kernel.h \
 			  titan_kernel.cu titan_kernel.h
 
@@ -925,17 +926,20 @@ uninstall-am: uninstall-binPROGRAMS
 .cu.o:
 	$(NVCC) -g -O2 -arch=compute_10 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
-fermi_kernel.o: fermi_kernel.cu
-	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
-
 spinlock_kernel.o: spinlock_kernel.cu
-	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_12 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
+
+fermi_kernel.o: fermi_kernel.cu
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=sm_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+
+kepler_kernel.o: kepler_kernel.cu
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
-	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=sm_35 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
 
 test_kernel.o: test_kernel.cu
-	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.
