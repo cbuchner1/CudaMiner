@@ -1,24 +1,9 @@
 
 IMPORTANT PUBLIC SERVICE ANNOUNCEMENT:
 
-This has been developed and tested under the CUDA 5.0 toolkit. I am not
-testing against CUDA 5.5.
+This has recently been ugpraded to use the CUDA 5.5 toolkit.
 
-Reasons: CUDA 5.0 is the lowest version to fully support the full range
-         of nVidia GPUs on the market!
+If you keep using CUDA 5.0, you will not see the amazing 30%
+speed gains with David Andersen's new Kepler, Titan kernels.
 
-         CUDA 5.0 has lower minimum driver requirements than CUDA 5.5
-         and is hence compatible with a larger install base.
-
-         CUDA 5.0 has all the features I require for this project.
-
-Recent commits have shown to either not compile on CUDA 5.5 (PTXAS
-throwing some error) or to not run properly on Kepler devices (e.g.
-the K520 grid GPU). I have no time to debug or fix this (if it is
-fixable at all).
-
-Do yourself a favor and please get the CUDA 5.0 toolkit!
-
-Otherwise...
-
-See README.txt
+Also see README.txt
