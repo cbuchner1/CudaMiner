@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <LocalDebuggerCommandArguments>-d 0 -l X30x6 -C 0 -i 0 -m 1 -H 2 -o stratum+tcp://coinotron.com:3334 -O cbuchner1.3:z</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-d 0 -l X -C 0 -i 0 -m 1 -H 2 -o stratum+tcp://coinotron.com:3334 -O cbuchner1.3:z</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -9,7 +9,7 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-d 0 -l X30x16 -C 0 -i 0 -m 1 -H 1 -o stratum+tcp://coinotron.com:3334 -O cbuchner1.3:z</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-d 0 -l X -C 0 -i 0 -m 1 -H 2 -o stratum+tcp://coinotron.com:3334 -O cbuchner1.3:z</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerWorkingDirectory>$(ProjectDir)\x64</LocalDebuggerWorkingDirectory>
   </PropertyGroup>

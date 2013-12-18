@@ -23,6 +23,7 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  spinlock_kernel.cu spinlock_kernel.h \
 			  legacy_kernel.cu legacy_kernel.h \
 			  fermi_kernel.cu fermi_kernel.h \
+			  kepler_kernel.cu kepler_kernel.h \
 			  test_kernel.cu test_kernel.h \
 			  titan_kernel.cu titan_kernel.h
 
@@ -33,14 +34,17 @@ cudaminer_CPPFLAGS	= -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@ $(PTHREAD_FLAGS) 
 .cu.o:
 	$(NVCC) @CFLAGS@ -arch=compute_10 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
-fermi_kernel.o: fermi_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
-
 spinlock_kernel.o: spinlock_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_12 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
+
+fermi_kernel.o: fermi_kernel.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+
+kepler_kernel.o: kepler_kernel.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
 
 titan_kernel.o: titan_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_35 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
 
 test_kernel.o: test_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_35 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<

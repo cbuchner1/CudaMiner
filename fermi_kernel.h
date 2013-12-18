@@ -21,6 +21,7 @@ public:
     virtual int max_warps_per_block() { return 16; };
     virtual int get_texel_width() { return 4; };
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeFourByte; }
+    virtual cudaFuncCache cache_config() { return cudaFuncCachePreferShared; }
 };
 
 #endif // #ifndef FERMI_KERNEL_H

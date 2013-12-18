@@ -1,5 +1,5 @@
 
-CudaMiner release December 10th 2013 - beta release
+CudaMiner release December 18th 2013 - beta release
 ---------------------------------------------------
 
 this is a CUDA accelerated mining application for litecoin and
@@ -14,8 +14,11 @@ GTX 260:    44  kHash/sec (maybe more on Linux/WinXP)
 GTX 640:    65  kHash/sec (if based on GK 208 chip)
 GTX 460:   100  kHash/sec
 GTX 560Ti: 160  kHash/sec (or 235 kHash/sec on the 448 core edition)
-GTX 660Ti: 186  kHash/sec (close to 200 kHash/s with overclocking)
-GTX 780Ti: 480  kHash/sec (T30x16, 105% TDP allowance)
+
+and now thanks to David Andersen's work:
+GT 750M:    80  kHash/sec (formerly 55 kHash/s)
+GTX 660Ti: 250  kHash/sec (formerly 186 kHhash/s)
+GTX 780Ti: 500  kHash/sec (formerly 450 kHash/s non overclocked)
 
 
 Your nVidia cards will no longer suck so bad for mining! This tool
@@ -113,6 +116,13 @@ the autotuning output of multiple cards will get all mixed up.
 
 
 >>> RELEASE HISTORY <<<
+
+  The December 18th milestone transitions cudaminer to CUDA 5.5, which
+  makes it require newer nVidia drivers unfortunately. However users of
+  Kepler devices will see a significant speed boost of 30% for Compute 3.0
+  devices and around 10% for Compute 3.5 devices. This was made possible
+  by David Andersen who posted his more efficient miner code under Apache
+  license. This release marks a first step of integrating his work.
 
   The December 10th milestone marks the release that allows doing serious
   mining with weak single/dual core CPUs. -H 2 offloads everything to
@@ -254,7 +264,8 @@ launch configurations are given as a character string, e.g. F27x3
 Available kernel prefixes are:
 L - Legacy cards (compute 1.x)
 F - Fermi cards (Compute 2.x)
-K - Kepler cards (Compute 3.0). The letter S (for "spinlock") also works
+S - Kepler cards (currently compiled for Compute 1.2) - formerly best for Kepler
+K - Kepler cards (Compute 3.0) - based on Dave Andersen's work. Now best for Kepler.
 T - Titan, GTX 780 and GK208 based cards (Compute 3.5)
 X - Experimental kernel. Currently requires Compute 3.5
 
@@ -285,13 +296,13 @@ overriding the automatic selection.
 Usability Improvements:
 - add reasonable error checking for CUDA API calls
 - add failover support between different pools
+- smarter autotune algorithm
 
 Further Optimization:
 - further optimize the SHA256 part (achieve memory coalescing)
 - fix a bug that prevents overlapping of memory transfers and
   kernel launches (this could bring 5% more speed when fixed!)
 - investigate benefits of a LOOKUP_GAP implementation
-- get rid of shared memory on Kepler (see experimental Kernel)
 - get rid of kernel templatization (shortening the binary a lot
   because each template instance is its very own CUDA kernel
   with its very own PTX code)

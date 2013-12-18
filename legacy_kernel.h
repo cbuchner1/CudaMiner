@@ -25,6 +25,7 @@ public:
 #endif
     virtual int get_texel_width() { return 2; };
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeFourByte; }
+    virtual cudaFuncCache cache_config() { return cudaFuncCachePreferShared; }
 };
 
 #endif // #ifndef LEGACY_KERNEL_H

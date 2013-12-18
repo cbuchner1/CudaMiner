@@ -20,7 +20,7 @@
 
 #include <cuda.h>
 
-#include "test_kernel.h"
+#include "kepler_kernel.h"
 
 static const int THREADS_PER_SCRYPT_BLOCK = 4;
 static const int SCRYPT_SCRATCH_PER_BLOCK = (32*1024);
@@ -339,7 +339,7 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
  */
 
 __global__
-void test_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
+void kepler_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
 
   /* Each thread operates on four of the sixteen B and Bx variables. Thus,
    * each key is processed by four threads in parallel. salsa_scrypt_core
@@ -373,7 +373,7 @@ void test_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
  */
 
 __global__
-void test_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
+void kepler_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
 
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
@@ -407,19 +407,19 @@ void test_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
 
 // scratchbuf constants (pointers to scratch buffer for each work unit)
 
-TestKernel::TestKernel() : KernelInterface()
+KeplerKernel::KeplerKernel() : KernelInterface()
 {
 }
 
 static uint32_t *d_scratch;
 
-void TestKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
+void KeplerKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
 {
     // this currently REQUIRES single memory allocation mode (-m 1 flag)
     d_scratch = h_V[0];
 }
 
-bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, bool interactive, bool benchmark, int texture_cache)
+bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 
@@ -431,7 +431,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // First phase: Sequential writes to scratchpad.
 
-    test_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata, d_scratch);
+    kepler_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata, d_scratch);
 
     // Optional millisecond sleep in between kernels
 
@@ -446,7 +446,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
     // Second phase: Random read access from scratchpad.
 
-    test_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata, d_scratch);
+    kepler_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata, d_scratch);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;

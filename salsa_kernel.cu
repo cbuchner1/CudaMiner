@@ -25,12 +25,13 @@
 #include "fermi_kernel.h"
 #include "legacy_kernel.h"
 #include "test_kernel.h"
+#include "kepler_kernel.h"
 
 #include "miner.h"
 
-// require CUDA 5.0 driver API
+// require CUDA 5.5 driver API
 #define DMAJ 5
-#define DMIN 0
+#define DMIN 5
 
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
@@ -71,7 +72,7 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
     char kernelid = ' ';
     if (config != NULL)
     {
-        if (config[0] == 'T' || (config[0] == 'S' || config[0] == 'K') || config[0] == 'F' || config[0] == 'L' ||
+        if (config[0] == 'T' || config[0] == 'S' || config[0] == 'K' || config[0] == 'F' || config[0] == 'L' ||
             config[0] == 'X') {
             kernelid = config[0];
             config++;
@@ -86,7 +87,8 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
             switch (kernelid)
             {
                 case 'T': *kernel = new TitanKernel(); break;
-                case 'K': case 'S': *kernel = new SpinlockKernel(); break;
+                case 'S': *kernel = new SpinlockKernel(); break;
+                case 'K': *kernel = new KeplerKernel(); break;
                 case 'F': *kernel = new FermiKernel(); break;
                 case 'L': *kernel = new LegacyKernel(); break;
                 case 'X': *kernel = new TestKernel(); break;
@@ -94,7 +96,7 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
                      if (props->major == 3 && props->minor == 5)
                     *kernel = new TitanKernel();
                 else if (props->major == 3 && props->minor == 0)
-                    *kernel = new SpinlockKernel();
+                    *kernel = new KeplerKernel();
                 else if (props->major == 2)
                     *kernel = new FermiKernel();
                 else if (props->major == 1)
@@ -140,11 +142,9 @@ extern "C" int cuda_throughput(int thr_id)
         CUcontext ctx;
         cuCtxCreate( &ctx, CU_CTX_SCHED_YIELD, device_map[thr_id] );
         cuCtxSetCurrent(ctx);
-        cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_Shared);
 #else
         cudaSetDeviceFlags(cudaDeviceScheduleYield);
         cudaSetDevice(device_map[thr_id]);
-        cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
         cudaFree(0);
 #endif
 
@@ -288,9 +288,11 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
              if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'T') ||
                  ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && (props.major == 3 && props.minor == 5)))
             kernel = new TitanKernel();
-        else if ((device_config[thr_id] != NULL && (device_config[thr_id][0] == 'K' || device_config[thr_id][0] == 'S')) ||
-                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && (props.major == 3 && props.minor == 0)))
+        else if  (device_config[thr_id] != NULL && device_config[thr_id][0] == 'S')
             kernel = new SpinlockKernel();
+        else if  ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'K') ||
+                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && (props.major == 3 && props.minor == 0)))
+            kernel = new KeplerKernel();
         else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'F') ||
                  ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && props.major == 2))
             kernel = new FermiKernel();
@@ -306,7 +308,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         applog(LOG_ERR, "GPU #%d: the '%c' kernel requires %d.%d capability!", device_map[thr_id], kernel->get_identifier(), kernel->get_major_version(), kernel->get_minor_version());
     }
 
-    // set whatever shared memory bank mode the kernel prefers
+    // set whatever cache configuration and shared memory bank mode the kernel prefers
+    cudaDeviceSetCacheConfig(kernel->cache_config());
     cudaDeviceSetSharedMemConfig(kernel->shared_mem_config());
 
     // some kernels (e.g. Titan) do not support the texture cache
@@ -317,6 +320,11 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     // Texture caching only works with single memory allocation
     if (device_texturecache[thr_id]) device_singlememory[thr_id] = 1;
+
+    if (kernel->single_memory() && !device_singlememory[thr_id]) {
+        applog(LOG_WARNING, "GPU #%d: the '%c' kernel requires single memory allocation", device_map[thr_id], kernel->get_identifier());
+        device_singlememory[thr_id] = 1;
+    }
 
     applog(LOG_INFO, "GPU #%d: interactive: %d, tex-cache: %d%c, single-alloc: %d", device_map[thr_id],
            (device_interactive[thr_id]  != 0) ? 1 : 0,
