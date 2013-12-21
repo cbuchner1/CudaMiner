@@ -19,7 +19,7 @@ public:
     virtual int get_major_version() { return 3; };
     virtual int get_minor_version() { return 0; };
 #endif
-    virtual int max_warps_per_block() { return 24; };
+    virtual int max_warps_per_block() { return 32; };
     virtual int get_texel_width() { return 4; };
     virtual bool no_textures() { return true; };
     virtual bool single_memory() { return true; };

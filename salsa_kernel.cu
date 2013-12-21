@@ -351,7 +351,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 checkCudaErrors(cudaMalloc((void **)&d_V, SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t)));
                 if (cudaGetLastError() == cudaSuccess) {
                     checkCudaErrors(cudaFree(d_V)); d_V = NULL;
-                    MAXWARPS[thr_id] = 90*warp/100; // Windows needs some breathing room to operate safely
+                    MAXWARPS[thr_id] = 94*warp/100; // Windows needs some breathing room to operate safely
                                                     // in particular when binding large 1D or 2D textures
                     break;
                 }
@@ -386,6 +386,10 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 else
                     kernel->bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
             }
+        }
+        else
+        {
+            applog(LOG_ERR, "GPU #%d:Launch config '%s' requires too much memory!", device_map[thr_id], device_config[thr_id]);
         }
     }
     else
@@ -422,6 +426,9 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     {
         if (optimal_blocks * WARPS_PER_BLOCK > MAXWARPS[thr_id])
             applog(LOG_ERR, "GPU #%d: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
+
+        if (WARPS_PER_BLOCK > kernel->max_warps_per_block())
+            applog(LOG_ERR, "GPU #%d: Given launch config '%s' exceeds warp limit for '%c' kernel.", device_map[thr_id], device_config[thr_id], kernel->get_identifier());
     }
     else
     {
@@ -457,7 +464,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
                 for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
                 {
-                    double kHash[24+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+                    double kHash[32+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
                     for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= kernel->max_warps_per_block(); ++WARPS_PER_BLOCK)
                     {
                         double khash_sec = 0;
@@ -505,9 +512,10 @@ skip2:              ;
                         if (GRID_BLOCKS == 1) {
                             char line[256] = "    ";
                             for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
-                                char tmp[16]; sprintf(tmp, "   x%-2d", i);
+                                char tmp[16]; sprintf(tmp, i < 10 ? "   x%-2d" : "  x%-2d ", i);
                                 strcat(line, tmp);
-                                if (cw == 80 && (i == 8 || i == 16)) strcat(line, "\n                          ");
+                                if (cw == 80 && (i % 8 == 0 && i != kernel->max_warps_per_block()))
+                                    strcat(line, "\n                          ");
                             }
                             applog(LOG_DEBUG, line);
                         }
@@ -519,7 +527,8 @@ skip2:              ;
                             else
                                 sprintf(tmp, "     %c", (i<kernel->max_warps_per_block())?'|':' ');
                             strcat(line, tmp);
-                            if (cw == 80 && (i == 8 || i == 16)) strcat(line, "\n                          ");
+                            if (cw == 80 && (i % 8 == 0 && i != kernel->max_warps_per_block()))
+                                strcat(line, "\n                          ");
                         }
                         strcat(line, "kH/s");
                         applog(LOG_DEBUG, line);
