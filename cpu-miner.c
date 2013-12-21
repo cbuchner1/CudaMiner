@@ -851,6 +851,7 @@ static void *miner_thread(void *userdata)
 				sprintf(s, hashrate >= 1e6 ? "%.0f" : "%.2f", 1e-3 * hashrate);
 				applog(LOG_INFO, "Total: %s khash/s", s);
 			}
+//			static int count = 0; if (++count >= 2) { abort_flag = true; workio_abort(); }
 		}
 
 		/* if nonce found, submit work */
@@ -1606,8 +1607,11 @@ int main(int argc, char *argv[])
 		opt_n_threads,
 		algo_names[opt_algo]);
 
-	/* main loop - simply wait for workio thread to exit */
-	pthread_join(thr_info[work_thr_id].pth, NULL);
+	/* main loop - simply wait for stratum / workio thread to exit */
+	if (want_stratum)
+		pthread_join(thr_info[stratum_thr_id].pth, NULL);
+	else
+		pthread_join(thr_info[work_thr_id].pth, NULL);
 
 	applog(LOG_INFO, "workio thread dead, waiting for workers..."); // CB
 

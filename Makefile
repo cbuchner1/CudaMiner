@@ -924,7 +924,7 @@ uninstall-am: uninstall-binPROGRAMS
 
 
 .cu.o:
-	$(NVCC) -g -O2 -arch=compute_10 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 spinlock_kernel.o: spinlock_kernel.cu
 	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_12 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<

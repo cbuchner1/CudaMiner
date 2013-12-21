@@ -1109,6 +1109,7 @@ config.status:949: creating Makefile
 config.status:949: creating compat/Makefile
 config.status:949: creating compat/jansson/Makefile
 config.status:949: creating cpuminer-config.h
+config.status:1130: cpuminer-config.h is unchanged
 config.status:1178: executing depfiles commands
 
 ## ---------------- ##
