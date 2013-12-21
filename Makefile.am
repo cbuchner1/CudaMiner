@@ -32,7 +32,7 @@ cudaminer_LDADD		= @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ @CUDA_LIBS
 cudaminer_CPPFLAGS	= -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@ $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
 
 .cu.o:
-	$(NVCC) @CFLAGS@ -arch=compute_10 --maxrregcount=124 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 spinlock_kernel.o: spinlock_kernel.cu
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_12 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
