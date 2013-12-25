@@ -43,7 +43,11 @@ using namespace Concurrency;
 #include <string.h>
 
 #include <emmintrin.h>
+#ifdef __APPLE__
+#include <sys/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <new>
 
 // A thin wrapper around the builtin __m128i type
