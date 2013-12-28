@@ -5,9 +5,7 @@
  * can be found in the file "LICENSE"
  */
 
-// TODO: support for chunked memory allocation
-//       support for 1D and 2D texture cache on Compute 3.0 devices
-//       attempt V.Volkov style ILP (factor 4)
+// TODO: attempt V.Volkov style ILP (factor 4)
 
 #ifdef WIN32
 #include <windows.h>
@@ -22,18 +20,14 @@
 
 #include "kepler_kernel.h"
 
-static const int THREADS_PER_SCRYPT_BLOCK = 4;
-static const int SCRYPT_SCRATCH_PER_BLOCK = (32*1024);
+// scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
+__constant__ uint32_t* c_V[1024];
 
-#if __CUDA_ARCH__ < 350 
-    // Kepler (Compute 3.0)
-    #define __ldg(x) (*(x))
-    #define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); }
-#else
-    // Kepler (Compute 3.5)
-    #define ROTL(a, b) __funnelshift_l( a, a, b );
-    #define XOR_ROTATE_ADD(dst, s1, s2, amt) x[dst] ^= ROTL(x[s1]+x[s2], amt);
-#endif
+// using texture references for the "tex" variants of the B kernels
+texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
+texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
+
+static const int THREADS_PER_SCRYPT_BLOCK = 4;
 
 /* write_keys writes the 8 keys being processed by a warp to the global
  * scratchpad. To effectively use memory bandwidth, it performs the writes
@@ -60,7 +54,7 @@ static const int SCRYPT_SCRATCH_PER_BLOCK = (32*1024);
  */
 
 __device__ __forceinline__
-void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
+void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t start) {
 
   uint4 t, t2;
   t.x = b[0]; t.y = b[1]; t.z = b[2]; t.w = b[3];
@@ -75,21 +69,15 @@ void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t *scra
 
   bool c = (threadIdx.x & 0x4);
 
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+
   int loc = c ? t2_start : start;
-  *((uint4 *)(&scratch[loc])) = (c ? t2 : t);
+  *((uint4 *)(&scratch[loc%(SCRATCH*WU_PER_WARP)])) = (c ? t2 : t);
   loc = c ? start : t2_start;
-  *((uint4 *)(&scratch[loc])) = (c ? t : t2);
+  *((uint4 *)(&scratch[loc%(SCRATCH*WU_PER_WARP)])) = (c ? t : t2);
 }
 
-__device__ __forceinline__
-void write_keys(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + (32*start) + 8*(threadIdx.x%4);
-  write_keys_direct(b, bx, scratch, start);
-}
-
-
-__device__  __forceinline__ void read_keys_direct(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
+template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint32_t b[4], uint32_t bx[4], uint32_t start) {
 
   uint4 t, t2;
 
@@ -103,10 +91,16 @@ __device__  __forceinline__ void read_keys_direct(uint32_t b[4], uint32_t bx[4],
 
   bool c = (threadIdx.x & 0x4);
 
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+
   int loc = c ? t2_start : start;
-  t = __ldg((uint4 *)(&scratch[loc]));
+       if (TEX_DIM == 0) t = *((uint4 *)(&scratch[loc%(SCRATCH*WU_PER_WARP)]));
+  else if (TEX_DIM == 1) t = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%SCRATCH)/4, 0.5f + loc/SCRATCH);
   loc = c ? start : t2_start;
-  t2 = __ldg((uint4 *)(&scratch[loc]));
+       if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(SCRATCH*WU_PER_WARP)]));
+  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%SCRATCH)/4, 0.5f + loc/SCRATCH);
 
   uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
   
@@ -121,7 +115,7 @@ __device__  __forceinline__ void read_keys_direct(uint32_t b[4], uint32_t bx[4],
 }
 
 
-__device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
+template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx[4], uint32_t start) {
 
   uint4 t, t2;
 
@@ -135,10 +129,16 @@ __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx
 
   bool c = (threadIdx.x & 0x4);
 
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+
   int loc = c ? t2_start : start;
-  t = __ldg((uint4 *)(&scratch[loc]));
+       if (TEX_DIM == 0) t = *((uint4 *)(&scratch[loc%(SCRATCH*WU_PER_WARP)]));
+  else if (TEX_DIM == 1) t = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%SCRATCH)/4, 0.5f + loc/SCRATCH);
   loc = c ? start : t2_start;
-  t2 = __ldg((uint4 *)(&scratch[loc]));
+       if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(SCRATCH*WU_PER_WARP)]));
+  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%SCRATCH)/4, 0.5f + loc/SCRATCH);
 
   uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
   
@@ -153,10 +153,10 @@ __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx
 }
 
 
-__device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
+template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], uint32_t start) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + (32*start);
-  read_xor_keys_direct(b, bx, scratch, start);
+  start = scrypt_block*SCRATCH + (32*start);
+  read_xor_keys_direct<TEX_DIM>(b, bx, start);
 }
 
 
@@ -229,6 +229,8 @@ __device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t 
  * This version is unrolled to handle both of these loops in a single
  * call to avoid unnecessary data movement.
  */
+
+#define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); }
 
 __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
                                  const int x1_target_lane,
@@ -339,7 +341,7 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
  */
 
 __global__
-void kepler_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
+void kepler_scrypt_core_kernelA(const uint32_t *d_idata) {
 
   /* Each thread operates on four of the sixteen B and Bx variables. Thus,
    * each key is processed by four threads in parallel. salsa_scrypt_core
@@ -356,12 +358,12 @@ void kepler_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
   int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + 8*(threadIdx.x%4);
+  int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
 
-  write_keys_direct(b, bx, scratch, start);
+  write_keys_direct(b, bx, start);
   for (int i = 1; i < 1024; i++) {
     salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
-    write_keys_direct(b, bx, scratch, start+32*i);
+    write_keys_direct(b, bx, start+32*i);
   }
 }
 
@@ -372,8 +374,8 @@ void kepler_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
  * the scratch buffer in pseudorandom order, mixing the key as it goes.
  */
 
-__global__
-void kepler_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
+template <int TEX_DIM> __global__
+void kepler_scrypt_core_kernelB(uint32_t *d_odata) {
 
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
@@ -381,9 +383,9 @@ void kepler_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
   uint32_t b[4], bx[4];
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + 8*(threadIdx.x%4);
+  int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
 
-  read_keys_direct(b, bx, scratch, start+32*1023);
+  read_keys_direct<TEX_DIM>(b, bx, start+32*1023);
 
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -398,25 +400,54 @@ void kepler_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
     // Critical thing: (X[16] & 1023) tells us the next slot to read.
     // X[16] in the original is bx[0]
     int slot = bx[0] & 1023;
-    read_xor_keys(b, bx, scratch, slot);
+    read_xor_keys<TEX_DIM>(b, bx, slot);
     salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
   }
 
   store_key(d_odata, b, bx);
 }
 
-// scratchbuf constants (pointers to scratch buffer for each work unit)
-
 KeplerKernel::KeplerKernel() : KernelInterface()
 {
 }
 
-static uint32_t *d_scratch;
+bool KeplerKernel::bindtexture_1D(uint32_t *d_V, size_t size)
+{
+    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
+    texRef1D_4_V.normalized = 0;
+    texRef1D_4_V.filterMode = cudaFilterModePoint;
+    texRef1D_4_V.addressMode[0] = cudaAddressModeClamp;
+    checkCudaErrors(cudaBindTexture(NULL, &texRef1D_4_V, d_V, &channelDesc4, size));
+    return true;
+}
+
+bool KeplerKernel::bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch)
+{
+    cudaChannelFormatDesc channelDesc4 = cudaCreateChannelDesc<uint4>();
+    texRef2D_4_V.normalized = 0;
+    texRef2D_4_V.filterMode = cudaFilterModePoint;
+    texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;
+    texRef2D_4_V.addressMode[1] = cudaAddressModeClamp;
+    checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_4_V, d_V, &channelDesc4, width, height, pitch));
+    return true;
+}
+
+bool KeplerKernel::unbindtexture_1D()
+{
+    checkCudaErrors(cudaUnbindTexture(texRef1D_4_V));
+    return true;
+}
+
+bool KeplerKernel::unbindtexture_2D()
+{
+    checkCudaErrors(cudaUnbindTexture(texRef2D_4_V));
+    return true;
+}
 
 void KeplerKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
 {
     // this currently REQUIRES single memory allocation mode (-m 1 flag)
-    d_scratch = h_V[0];
+    checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
 bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, bool interactive, bool benchmark, int texture_cache)
@@ -431,7 +462,7 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
 
     // First phase: Sequential writes to scratchpad.
 
-    kepler_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata, d_scratch);
+    kepler_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata);
 
     // Optional millisecond sleep in between kernels
 
@@ -446,7 +477,15 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
 
     // Second phase: Random read access from scratchpad.
 
-    kepler_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata, d_scratch);
+    if (texture_cache)
+    {
+        if (texture_cache == 1)
+            kepler_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata);
+        else if (texture_cache == 2)
+            kepler_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata);
+    }
+    else
+        kepler_scrypt_core_kernelB<0><<< grid, threads, 0, stream >>>(d_odata);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
