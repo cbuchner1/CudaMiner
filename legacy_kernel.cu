@@ -38,7 +38,7 @@ template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelA(uint32
 template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelB(uint32_t *g_odata);
 template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void legacy_scrypt_core_kernelB_tex(uint32_t *g_odata);
 
-// scratchbuf constants (pointers to scratch buffer for each work unit)
+// scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[1024];
 
 // using texture references for the "tex" variants of the B kernels

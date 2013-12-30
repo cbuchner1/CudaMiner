@@ -1,8 +1,9 @@
 //
 // Contains the autotuning logic and some utility functions.
-// Note that all CUDA kernels have been moved to other .cu files
+// Note that most CUDA kernels have been moved to other .cu files
+// except SHA-256, which remains here.
 //
-// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=124
+// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
 //
 
 #ifdef WIN32
@@ -464,7 +465,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
                 for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
                 {
-                    double kHash[32+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+                    double kHash[32+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
                     for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= kernel->max_warps_per_block(); ++WARPS_PER_BLOCK)
                     {
                         double khash_sec = 0;
@@ -510,7 +511,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 skip2:              ;
                     if (opt_debug) {
                         if (GRID_BLOCKS == 1) {
-                            char line[256] = "    ";
+                            char line[512] = "    ";
                             for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
                                 char tmp[16]; sprintf(tmp, i < 10 ? "   x%-2d" : "  x%-2d ", i);
                                 strcat(line, tmp);
@@ -519,7 +520,7 @@ skip2:              ;
                             }
                             applog(LOG_DEBUG, line);
                         }
-                        char line[256]; sprintf(line, "%3d:", GRID_BLOCKS);
+                        char line[512]; sprintf(line, "%3d:", GRID_BLOCKS);
                         for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
                             char tmp[16];
                             if (kHash[i]>0)

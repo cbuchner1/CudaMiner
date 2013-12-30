@@ -446,7 +446,6 @@ bool KeplerKernel::unbindtexture_2D()
 
 void KeplerKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
 {
-    // this currently REQUIRES single memory allocation mode (-m 1 flag)
     checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 

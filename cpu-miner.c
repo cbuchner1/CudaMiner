@@ -840,8 +840,8 @@ static void *miner_thread(void *userdata)
 		if (!opt_quiet && !abort_flag) { // CB
 			sprintf(s, thr_hashrates[thr_id] >= 1e6 ? "%.0f" : "%.2f",
 				1e-3 * thr_hashrates[thr_id]);
-			applog(LOG_INFO, "GPU #%d: %s, %lu hashes, %s khash/s",
-				device_map[thr_id], device_name[thr_id], hashes_done, s);
+			applog(LOG_INFO, "GPU #%d: %s, %s khash/s",
+				device_map[thr_id], device_name[thr_id], s);
 		}
 		if (opt_benchmark && thr_id == opt_n_threads - 1) {
 			double hashrate = 0.;

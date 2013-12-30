@@ -1,15 +1,14 @@
 //
-// Kernel that runs best on Kepler (Compute 3.0) devices
+// Kernel that used to run best on Kepler (Compute 3.0) devices
+// before Dave Andersen published his new Kepler optimized kernels
 //
 // - makes use of 8 byte of Kepler's shared memory bank mode
 // - does memory transfers with ulonglong2 vectors whereever possible
 // - further halves shared memory consumption over Fermi kernel by sharing
 //   the same shared memory buffers among two neighbor warps. Uses spinlocks
-//   based on shared memory atomics and Compute 3.0
+//   based on shared memory atomics
 //  
 // NOTE: compile this .cu module for compute_30,sm_30 with --maxrregcount=63
-//       but for compatibility with CUDA 5.5 tookit, we use compute_12,sm_12
-//       and we limit the maximum. no. of warps to 12
 //
 
 #ifdef WIN32
@@ -25,11 +24,11 @@
 #include "spinlock_kernel.h"
 
 // forward references
-template <int WARPS_PER_BLOCK> __global__ void spinlock_scrypt_core_kernelA(uint32_t *g_idata);
-template <int WARPS_PER_BLOCK> __global__ void spinlock_scrypt_core_kernelB(uint32_t *g_odata);
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata);
+__global__ void spinlock_scrypt_core_kernelA(uint32_t *g_idata);
+__global__ void spinlock_scrypt_core_kernelB(uint32_t *g_odata);
+template <int TEX_DIM> __global__ void spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata);
 
-// scratchbuf constants (pointers to scratch buffer for each work unit)
+// scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[1024];
 
 // using texture references for the "tex" variants of the B kernels
@@ -85,35 +84,11 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
     // clear CUDA's error variable
     cudaGetLastError();
 
+    int shared = (WARPS_PER_BLOCK+1)/2 * WU_PER_WARP * (16+4) * sizeof(uint32_t);
+
     // First phase: Sequential writes to scratchpad.
 
-    switch (WARPS_PER_BLOCK) {
-        case 1: spinlock_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 2: spinlock_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 3: spinlock_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 4: spinlock_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 5: spinlock_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 6: spinlock_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 7: spinlock_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 8: spinlock_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 9: spinlock_scrypt_core_kernelA<9><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 10: spinlock_scrypt_core_kernelA<10><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 11: spinlock_scrypt_core_kernelA<11><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 12: spinlock_scrypt_core_kernelA<12><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 13: spinlock_scrypt_core_kernelA<13><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 14: spinlock_scrypt_core_kernelA<14><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 15: spinlock_scrypt_core_kernelA<15><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 16: spinlock_scrypt_core_kernelA<16><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 17: spinlock_scrypt_core_kernelA<17><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 18: spinlock_scrypt_core_kernelA<18><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 19: spinlock_scrypt_core_kernelA<19><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 20: spinlock_scrypt_core_kernelA<20><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 21: spinlock_scrypt_core_kernelA<21><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 22: spinlock_scrypt_core_kernelA<22><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 23: spinlock_scrypt_core_kernelA<23><<< grid, threads, 0, stream >>>(d_idata); break;
-//        case 24: spinlock_scrypt_core_kernelA<24><<< grid, threads, 0, stream >>>(d_idata); break;
-        default: success = false; break;
-    }
+    spinlock_scrypt_core_kernelA<<< grid, threads, shared, stream >>>(d_idata);
 
     // Optional millisecond sleep in between kernels
 
@@ -131,96 +106,13 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
     if (texture_cache)
     {
         if (texture_cache == 1)
-        {
-            switch (WARPS_PER_BLOCK) {
-                case 1: spinlock_scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: spinlock_scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: spinlock_scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 4: spinlock_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 5: spinlock_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 6: spinlock_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 7: spinlock_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 8: spinlock_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 9: spinlock_scrypt_core_kernelB_tex<9,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 10: spinlock_scrypt_core_kernelB_tex<10,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 11: spinlock_scrypt_core_kernelB_tex<11,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 12: spinlock_scrypt_core_kernelB_tex<12,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 13: spinlock_scrypt_core_kernelB_tex<13,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 14: spinlock_scrypt_core_kernelB_tex<14,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 15: spinlock_scrypt_core_kernelB_tex<15,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 16: spinlock_scrypt_core_kernelB_tex<16,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 17: spinlock_scrypt_core_kernelB_tex<17,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 18: spinlock_scrypt_core_kernelB_tex<18,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 19: spinlock_scrypt_core_kernelB_tex<19,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 20: spinlock_scrypt_core_kernelB_tex<20,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 21: spinlock_scrypt_core_kernelB_tex<21,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 22: spinlock_scrypt_core_kernelB_tex<22,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 23: spinlock_scrypt_core_kernelB_tex<23,1><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 24: spinlock_scrypt_core_kernelB_tex<24,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                default: success = false; break;
-            }
-        }
+            spinlock_scrypt_core_kernelB_tex<1><<< grid, threads, shared, stream >>>(d_odata);
         else if (texture_cache == 2)
-        {
-            switch (WARPS_PER_BLOCK) {
-                case 1: spinlock_scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: spinlock_scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: spinlock_scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 4: spinlock_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 5: spinlock_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 6: spinlock_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 7: spinlock_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 8: spinlock_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 9: spinlock_scrypt_core_kernelB_tex<9,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 10: spinlock_scrypt_core_kernelB_tex<10,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 11: spinlock_scrypt_core_kernelB_tex<11,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 12: spinlock_scrypt_core_kernelB_tex<12,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 13: spinlock_scrypt_core_kernelB_tex<13,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 14: spinlock_scrypt_core_kernelB_tex<14,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 15: spinlock_scrypt_core_kernelB_tex<15,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 16: spinlock_scrypt_core_kernelB_tex<16,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 17: spinlock_scrypt_core_kernelB_tex<17,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 18: spinlock_scrypt_core_kernelB_tex<18,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 19: spinlock_scrypt_core_kernelB_tex<19,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 20: spinlock_scrypt_core_kernelB_tex<20,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 21: spinlock_scrypt_core_kernelB_tex<21,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 22: spinlock_scrypt_core_kernelB_tex<22,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 23: spinlock_scrypt_core_kernelB_tex<23,2><<< grid, threads, 0, stream >>>(d_odata); break;
-//                case 24: spinlock_scrypt_core_kernelB_tex<24,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                default: success = false; break;
-            }
-        } else success = false;
+            spinlock_scrypt_core_kernelB_tex<2><<< grid, threads, shared, stream >>>(d_odata);
+        else success = false;
     }
     else
-    {
-        switch (WARPS_PER_BLOCK) {
-            case 1: spinlock_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 2: spinlock_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 3: spinlock_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 4: spinlock_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 5: spinlock_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 6: spinlock_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 7: spinlock_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 8: spinlock_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 9: spinlock_scrypt_core_kernelB<9><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 10: spinlock_scrypt_core_kernelB<10><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 11: spinlock_scrypt_core_kernelB<11><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 12: spinlock_scrypt_core_kernelB<12><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 13: spinlock_scrypt_core_kernelB<13><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 14: spinlock_scrypt_core_kernelB<14><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 15: spinlock_scrypt_core_kernelB<15><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 16: spinlock_scrypt_core_kernelB<16><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 17: spinlock_scrypt_core_kernelB<17><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 18: spinlock_scrypt_core_kernelB<18><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 19: spinlock_scrypt_core_kernelB<19><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 20: spinlock_scrypt_core_kernelB<20><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 21: spinlock_scrypt_core_kernelB<21><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 22: spinlock_scrypt_core_kernelB<22><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 23: spinlock_scrypt_core_kernelB<23><<< grid, threads, 0, stream >>>(d_odata); break;
-//            case 24: spinlock_scrypt_core_kernelB<24><<< grid, threads, 0, stream >>>(d_odata); break;
-            default: success = false; break;
-        }
-    }
+        spinlock_scrypt_core_kernelB<<< grid, threads, shared, stream >>>(d_odata);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
@@ -353,11 +245,12 @@ static __device__ void unlock(int *mutex, int i)
 //! @param g_idata  input data in global memory
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
-template <int WARPS_PER_BLOCK> __global__ void
+__global__ void
 spinlock_scrypt_core_kernelA(uint32_t *g_idata)
 {
-    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
-    __shared__ int      L[(WARPS_PER_BLOCK+1)/2];
+    extern __shared__ unsigned char x[];
+    uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
+    __shared__ int      L[32/2];
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
@@ -367,6 +260,7 @@ spinlock_scrypt_core_kernelA(uint32_t *g_idata)
     unsigned int Z = 4*(warpThread%4);
 
     // add block specific offsets
+    int WARPS_PER_BLOCK = blockDim.x / 32;
     int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_idata += 32 * offset;
     uint32_t * V = c_V[offset / WU_PER_WARP]  + SCRATCH*Y + Z;
@@ -415,11 +309,12 @@ spinlock_scrypt_core_kernelA(uint32_t *g_idata)
     if (warpThread == 0) unlock(L, warpIdx_2);
 }
 
-template <int WARPS_PER_BLOCK> __global__ void
+__global__ void
 spinlock_scrypt_core_kernelB(uint32_t *g_odata)
 {
-    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
-    __shared__ int      L[(WARPS_PER_BLOCK+1)/2];
+    extern __shared__ unsigned char x[];
+    uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
+    __shared__ int      L[32/2];
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
@@ -429,6 +324,7 @@ spinlock_scrypt_core_kernelB(uint32_t *g_odata)
     unsigned int Z = 4*(warpThread%4);
 
     // add block specific offsets
+    int WARPS_PER_BLOCK = blockDim.x / 32;
     int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_odata += 32 * offset;
     uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
@@ -496,11 +392,12 @@ spinlock_scrypt_core_kernelB(uint32_t *g_odata)
     if (warpThread == 0) unlock(L, warpIdx_2);
 }
 
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
+template <int TEX_DIM> __global__ void
 spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata)
 {
-    __shared__ uint32_t X[(WARPS_PER_BLOCK+1)/2][WU_PER_WARP][16+4];
-    __shared__ int      L[(WARPS_PER_BLOCK+1)/2];
+    extern __shared__ unsigned char x[];
+    uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
+    __shared__ int      L[32/2];
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
@@ -510,6 +407,7 @@ spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata)
     unsigned int Z = 4*(warpThread%4);
 
     // add block specific offsets
+    int WARPS_PER_BLOCK = blockDim.x / 32;
     int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
     g_odata += 32 * offset;
 

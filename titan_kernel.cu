@@ -405,7 +405,7 @@ void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
   store_key(d_odata, b, bx);
 }
 
-// scratchbuf constants (pointers to scratch buffer for each work unit)
+// scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 
 TitanKernel::TitanKernel() : KernelInterface()
 {

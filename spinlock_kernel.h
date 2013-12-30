@@ -16,9 +16,9 @@ public:
     virtual bool unbindtexture_2D();
 
     virtual char get_identifier() { return 'S'; };
-    virtual int get_major_version() { return 1; }
-    virtual int get_minor_version() { return 2; }
-    virtual int max_warps_per_block() { return 12; };
+    virtual int get_major_version() { return 3; }
+    virtual int get_minor_version() { return 0; }
+    virtual int max_warps_per_block() { return 32; };
     virtual int get_texel_width() { return 4; };
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeEightByte; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferShared; }
