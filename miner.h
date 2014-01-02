@@ -152,6 +152,8 @@ extern int scanhash_sha256d(int thr_id, uint32_t *pdata,
 extern unsigned char *scrypt_buffer_alloc();
 extern int scanhash_scrypt(int thr_id, uint32_t *pdata, // CB
 	const uint32_t *ptarget, uint32_t max_nonce, unsigned long *hashes_done);
+extern int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,  // CB
+	const uint32_t *ptarget, uint32_t max_nonce, unsigned long *hashes_done);
 
 struct thr_info {
 	int		id;
