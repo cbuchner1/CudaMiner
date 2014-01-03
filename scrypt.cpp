@@ -756,7 +756,7 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 		pre_sha256(thr_id, cur, nonce[cur], throughput);
 	}
 
-	cuda_scrypt_core(thr_id, cur);
+	cuda_scrypt_core(thr_id, cur, 1024);
 
 	if (parallel < 2) {
 		cuda_scrypt_done(thr_id, cur);
@@ -829,7 +829,7 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 			pre_sha256(thr_id, nxt, nonce[nxt], throughput);
 		}
 
-		cuda_scrypt_core(thr_id, nxt);
+		cuda_scrypt_core(thr_id, nxt, 1024);
 		if (parallel < 2) {
 			cuda_scrypt_done(thr_id, nxt);
 			cuda_scrypt_DtoH(thr_id, X[nxt], nxt);

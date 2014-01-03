@@ -327,7 +327,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	uint32_t *hash = new uint32_t[8*throughput];
 
 	uint32_t n = pdata[19] - 1;
-	scrypt_aligned_alloc Ybuf, Xbuf, Vbuf;
 	uint32_t N;
 //	int i;
 	
@@ -351,14 +350,16 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	
 	N = (1 << (Nfactor + 1));
 	
-	Vbuf = scrypt_alloc((uint64_t)N * 128 * throughput);
-	Ybuf = scrypt_alloc(128 * throughput);
+	scrypt_aligned_alloc Xbuf;
 	Xbuf = scrypt_alloc(128 * throughput);
-	
+
+	uint32_t* cuda_X[2]      = { cuda_transferbuffer(thr_id,0), cuda_transferbuffer(thr_id,1) };
+
 #if !defined(SCRYPT_CHOOSE_COMPILETIME)
 	scrypt_ROMixfn scrypt_ROMix = scrypt_getROMix();
 #endif
 
+	int cur = 0;
 	do {
 		for(int i=0;i<throughput;++i) 
 			data[20*i + 19] = ++n;
@@ -367,9 +368,51 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		for(int i=0;i<throughput;++i)
 			scrypt_pbkdf2_1((unsigned char *)&data[20*i], 80, (unsigned char *)&data[20*i], 80, Xbuf.ptr + 128 * i, 128);
 
+#if 1
+		/* 2: X = ROMix(X) in CUDA */
+		memcpy(cuda_X[cur], Xbuf.ptr, 128 * throughput);
+		cuda_scrypt_HtoD(thr_id, cuda_X[cur], cur);
+		cuda_scrypt_serialize(thr_id, cur);
+		cuda_scrypt_core(thr_id, cur, N);
+		cuda_scrypt_done(thr_id, cur);
+		cuda_scrypt_DtoH(thr_id, cuda_X[cur], cur);
+		cuda_scrypt_flush(thr_id, cur);
+		memcpy(Xbuf.ptr, cuda_X[cur], 128 * throughput);
+#else
+		scrypt_aligned_alloc Ybuf, Vbuf;
+		Vbuf = scrypt_alloc((uint64_t)N * 128);
+		Ybuf = scrypt_alloc(128);
+
 		/* 2: X = ROMix(X) */
 		for(int i=0;i<throughput;++i)
-			scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr + 128 * i), (scrypt_mix_word_t *)(Vbuf.ptr + (uint64_t)N * 128 * i), N);
+			scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
+
+		scrypt_free(&Vbuf);
+		scrypt_free(&Ybuf);
+#endif
+
+#if 1
+		{
+			scrypt_aligned_alloc Ybuf, Vbuf;
+			Vbuf = scrypt_alloc((uint64_t)N * 128);
+			Ybuf = scrypt_alloc(128);
+
+			/* 2: X = ROMix(X) */
+			for(int i=0;i<throughput;++i)
+				scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
+
+			unsigned int err = 0;
+			for(int i=0;i<throughput;++i) {
+				unsigned char *ref = (Xbuf.ptr + 128 * i);
+				unsigned char *dat = (unsigned char*)(cuda_X[cur] + 32 * i);
+				if (memcmp(ref, dat, 128) != 0) err++;
+			}
+			fprintf(stderr, "%d out of %d hashes differ.\n", err, throughput);
+
+			scrypt_free(&Vbuf);
+			scrypt_free(&Ybuf);
+		}
+#endif
 
 		/* 3: Out = PBKDF2(password, X) */
 		for(int i=0;i<throughput;++i)
@@ -391,21 +434,41 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 #endif
 
 				if(fulltest(&hash[8*i], ptarget)) {
-					*hashes_done = n - pdata[19] + 1;
-					pdata[19] = bswap_32x4(data[20*i + 19]);
+
+					uint32_t nonce = bswap_32x4(data[20*i + 19]);
+
+					uint32_t thash[8], tdata[20];
+					for(int z=0;z<20;z++) tdata[z] = bswap_32x4(pdata[z]);
+					tdata[19] = nonce;
+					scrypt_aligned_alloc Ybuf, Vbuf;
+					Vbuf = scrypt_alloc((uint64_t)N * 128);
+					Ybuf = scrypt_alloc(128);
+					scrypt_pbkdf2_1((unsigned char *)tdata, 80, (unsigned char *)tdata, 80, Xbuf.ptr + 128 * i, 128);
+					scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr), (scrypt_mix_word_t *)(Vbuf.ptr), N);
+					scrypt_pbkdf2_1((unsigned char *)tdata, 80, Xbuf.ptr + 128 * i, 128, (unsigned char *)thash, 32);
+					if (memcmp(thash, &hash[8*i], 32) == 0)
+					{
+						*hashes_done = n - pdata[19] + 1;
+						pdata[19] = bswap_32x4(data[20*i + 19]);
+						scrypt_free(&Vbuf);
+						scrypt_free(&Ybuf);
+						scrypt_free(&Xbuf);
+						delete[] data;
+						delete[] hash;
+						return 1;
+					}
+					else
+					{
+						applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], i, cur);
+					}
 					scrypt_free(&Vbuf);
 					scrypt_free(&Ybuf);
-					scrypt_free(&Xbuf);
-					delete[] data;
-					delete[] hash;
-					return 1;
 				}
 			}
 		}
+		cur = (cur+1)%2;
 	} while (n < max_nonce && !work_restart[thr_id].restart);
 	
-	scrypt_free(&Vbuf);
-	scrypt_free(&Ybuf);
 	scrypt_free(&Xbuf);
 	delete[] data;
 	delete[] hash;

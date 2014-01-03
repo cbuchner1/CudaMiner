@@ -1,15 +1,15 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <LocalDebuggerCommandArguments>-d 1 -D -l S -C 1 -i 0 -m 1 -H 1 -o stratum+tcp://coinotron.com:3334 -O cbuchner1.2:y</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>--algo=scrypt-jane -d 1 -l S7x2 -H 0 -o stratum+tcp://yac.coinmine.pl:9088 -O cbuchner1.1:x</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <LocalDebuggerCommandArguments>-H 1 -D -d 0 -l T -i 0 -m 1 -o stratum+tcp://stratum.mine-litecoin.com -O cbuchner1.3:z</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>--algo=scrypt-jane -d 0 -l S1x1 -o stratum+tcp://yac.coinmine.pl:9088 -O cbuchner1.1:x</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-d 0 -l X15x32 -C 0 -i 0 -m 1 -H 2 -o stratum+tcp://coinotron.com:3334 -O cbuchner1.3:z</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>--algo=scrypt-jane -d 1 -l S21x1 -H 0 -o stratum+tcp://yac.coinmine.pl:9088 -O cbuchner1.1:x</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerWorkingDirectory>$(ProjectDir)\x64</LocalDebuggerWorkingDirectory>
   </PropertyGroup>

@@ -9,7 +9,7 @@ public:
     TestKernel();
 
     virtual void set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V);
-    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, bool interactive, bool benchmark, int texture_cache);
+    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache);
 
     virtual char get_identifier() { return 'X'; };
 #if __CUDA_ARCH__ >= 350

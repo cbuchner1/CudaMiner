@@ -28,7 +28,7 @@ extern uint32_t *cuda_hashbuffer(int thr_id, int stream);
 
 extern void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream);
 extern void cuda_scrypt_serialize(int thr_id, int stream);
-extern void cuda_scrypt_core(int thr_id, int stream);
+extern void cuda_scrypt_core(int thr_id, int stream, unsigned int N);
 extern void cuda_scrypt_done(int thr_id, int stream);
 extern void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream);
 extern void cuda_scrypt_sync(int thr_id, int stream);
@@ -59,7 +59,7 @@ class KernelInterface
 {
 public:
     virtual void set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V) = 0;
-    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, bool interactive, bool benchmark, int texture_cache) = 0;
+    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache) = 0;
     virtual bool bindtexture_1D(uint32_t *d_V, size_t size) { return true; }
     virtual bool bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch) { return true; }
     virtual bool unbindtexture_1D() { return true; }
@@ -80,6 +80,7 @@ public:
 #define WU_PER_WARP 32
 #define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
+
 #define SCRATCH (32768+64)
 
 // Not performing error checking is actually bad, but...

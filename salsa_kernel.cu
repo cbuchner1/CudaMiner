@@ -484,7 +484,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             bool r = false;
                             while (repeat < 3)  // average up to 3 measurements for better exactness
                             {
-                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, 1024, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
@@ -749,7 +749,7 @@ extern "C" void cuda_scrypt_flush(int thr_id, int stream)
     checkCudaErrors(cudaStreamQuery(context_streams[stream][thr_id]));
 }
 
-extern "C" void cuda_scrypt_core(int thr_id, int stream)
+extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
 {
     int GRID_BLOCKS = context_blocks[thr_id];
     int WARPS_PER_BLOCK = context_wpb[thr_id];
@@ -767,7 +767,7 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream)
 #endif
     }
 
-    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
+    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, device_interactive[thr_id], false, device_texturecache[thr_id]);
 }
 
 extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
