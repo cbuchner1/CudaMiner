@@ -19,7 +19,7 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  cpu-miner.c util.c \
 			  sha2.c \
 			  scrypt.cpp \
-			  scrypt-jane.c scrypt-jane.h \
+			  scrypt-jane.cpp scrypt-jane.h \
 			  salsa_kernel.cu salsa_kernel.h \
 			  spinlock_kernel.cu spinlock_kernel.h \
 			  legacy_kernel.cu legacy_kernel.h \

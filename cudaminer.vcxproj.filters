@@ -31,6 +31,12 @@
     <Filter Include="Header Files\CUDA">
       <UniqueIdentifier>{a0f072d0-a831-4c23-8d64-7a026521df9c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\code">
+      <UniqueIdentifier>{16a4344a-d523-41f3-b728-406f32fd9f8c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\code">
+      <UniqueIdentifier>{fe39ded0-754b-415f-a284-038a15a0aa55}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="compat\jansson\dump.c">
@@ -67,6 +73,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="scrypt.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="scrypt-jane.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -118,6 +127,45 @@
     </ClInclude>
     <ClInclude Include="kepler_kernel.h">
       <Filter>Header Files\CUDA</Filter>
+    </ClInclude>
+    <ClInclude Include="scrypt-jane.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-conf.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-chacha.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-hash.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-hash_keccak.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-mix_chacha.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-pbkdf2.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-portable.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-portable-x86.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-romix.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-romix-basic.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-romix-template.h">
+      <Filter>Header Files\code</Filter>
+    </ClInclude>
+    <ClInclude Include="code\scrypt-jane-test-vectors.h">
+      <Filter>Header Files\code</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
