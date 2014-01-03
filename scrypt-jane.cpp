@@ -6,6 +6,7 @@
 
 #include "cpuminer-config.h"
 #include "miner.h"
+#include "salsa_kernel.h"
 
 #include <string.h>
 
@@ -192,51 +193,52 @@ const unsigned char minNfactor = 4;
 const unsigned char maxNfactor = 30;
 
 unsigned char GetNfactor(unsigned int nTimestamp) {
-    int l = 0;
+	int l = 0;
 
-    if (nTimestamp <= 1367991200)
-        return 4;
+	if (nTimestamp <= 1367991200)
+		return 4;
 
-    unsigned long int s = nTimestamp - 1367991200;
-    while ((s >> 1) > 3) {
-      l += 1;
-      s >>= 1;
-    }
+	unsigned long int s = nTimestamp - 1367991200;
+	while ((s >> 1) > 3) {
+		l += 1;
+		s >>= 1;
+	}
 
-    s &= 3;
+	s &= 3;
 
-    int n = (l * 170 + s * 25 - 2320) / 100;
+	int n = (l * 170 + s * 25 - 2320) / 100;
 
-    if (n < 0) n = 0;
+	if (n < 0) n = 0;
 
-    if (n > 255)
-        printf("GetNfactor(%d) - something wrong(n == %d)\n", nTimestamp, n);
+	if (n > 255)
+		printf("GetNfactor(%d) - something wrong(n == %d)\n", nTimestamp, n);
 
-    unsigned char N = (unsigned char)n;
+	unsigned char N = (unsigned char)n;
     //printf("GetNfactor: %d -> %d %d : %d / %d\n", nTimestamp - nChainStartTime, l, s, n, min(max(N, minNfactor), maxNfactor));
 
 //    return min(max(N, minNfactor), maxNfactor);
 
-    if(N<minNfactor) return minNfactor;
-    if(N>maxNfactor) return maxNfactor;
-    return N;
+	if(N<minNfactor) return minNfactor;
+	if(N>maxNfactor) return maxNfactor;
+	return N;
 }
 
+#if 0
 int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	const uint32_t *ptarget,
 	uint32_t max_nonce, unsigned long *hashes_done)
 {
-	uint32_t data[20], hash[8], target_swap[8];
-        volatile unsigned char *hashc = (unsigned char *) hash;
-        volatile unsigned char *datac = (unsigned char *) data;
-        volatile unsigned char *pdatac = (unsigned char *) pdata;
+	uint32_t data[20], hash[8]/*, target_swap[8]*/;
+	volatile unsigned char *hashc = (unsigned char *) hash;
+	volatile unsigned char *datac = (unsigned char *) data;
+	volatile unsigned char *pdatac = (unsigned char *) pdata;
 	uint32_t n = pdata[19] - 1;
 	scrypt_aligned_alloc YX, V;
 	uint8_t *X, *Y;
 	uint32_t N, chunk_bytes;
 	const uint32_t r = SCRYPT_R;
 	const uint32_t p = SCRYPT_P;
-	int i;
+//	int i;
 	
 #if !defined(SCRYPT_TEST)
 	static int power_on_self_test = 0;
@@ -247,13 +249,13 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	}
 #endif
 
-        /* byte swap it */
-        for(int z=0;z<20;z++) {
-            datac[(z*4)  ] = pdatac[(z*4)+3];
-            datac[(z*4)+1] = pdatac[(z*4)+2];
-            datac[(z*4)+2] = pdatac[(z*4)+1];
-            datac[(z*4)+3] = pdatac[(z*4)  ];
-        }
+	/* byte swap it */
+	for(int z=0;z<20;z++) {
+		datac[(z*4)  ] = pdatac[(z*4)+3];
+		datac[(z*4)+1] = pdatac[(z*4)+2];
+		datac[(z*4)+2] = pdatac[(z*4)+1];
+		datac[(z*4)+3] = pdatac[(z*4)  ];
+	}
 
 	int Nfactor = GetNfactor(data[17]);
 	if (Nfactor > scrypt_maxN) {
@@ -279,26 +281,26 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		if (hashc[31] == 0 && hashc[30] == 0) {
 
 #if 0
-                    for(int z=7;z>=0;z--)
-                       fprintf(stderr, "%08x ", hash[z]);
-                    fprintf(stderr, "\n");
+			for(int z=7;z>=0;z--)
+				fprintf(stderr, "%08x ", hash[z]);
+			fprintf(stderr, "\n");
 
-                    for(int z=7;z>=0;z--)
-                       fprintf(stderr, "%08x ", ptarget[z]);
-                    fprintf(stderr, "\n");
+			for(int z=7;z>=0;z--)
+				fprintf(stderr, "%08x ", ptarget[z]);
+			fprintf(stderr, "\n");
 #endif
 
-                    if(fulltest(hash, ptarget)) {
-			*hashes_done = n - pdata[19] + 1;
-			pdatac[76] = datac[79];
-                        pdatac[77] = datac[78];
-                        pdatac[78] = datac[77];
-                        pdatac[79] = datac[76];
+			if(fulltest(hash, ptarget)) {
+				*hashes_done = n - pdata[19] + 1;
+				pdatac[76] = datac[79];
+				pdatac[77] = datac[78];
+				pdatac[78] = datac[77];
+				pdatac[79] = datac[76];
 			
-			scrypt_free(&V);
-			scrypt_free(&YX);
-			return 1;
-                   }
+				scrypt_free(&V);
+				scrypt_free(&YX);
+				return 1;
+			}
 		}
 	} while (n < max_nonce && !work_restart[thr_id].restart);
 	
@@ -309,3 +311,107 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	pdata[19] = n;
 	return 0;
 }
+
+#else
+
+#define bswap_32x4(x) ((((x) << 24) & 0xff000000u) | (((x) << 8) & 0x00ff0000u) \
+                     | (((x) >> 8) & 0x0000ff00u) | (((x) >> 24) & 0x000000ffu))
+
+int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
+	const uint32_t *ptarget,
+	uint32_t max_nonce, unsigned long *hashes_done)
+{
+	int throughput = cuda_throughput(thr_id);
+
+	uint32_t *data = new uint32_t[20*throughput];
+	uint32_t *hash = new uint32_t[8*throughput];
+
+	uint32_t n = pdata[19] - 1;
+	scrypt_aligned_alloc Ybuf, Xbuf, Vbuf;
+	uint32_t N;
+//	int i;
+	
+#if !defined(SCRYPT_TEST)
+	static int power_on_self_test = 0;
+	if (!power_on_self_test) {
+		power_on_self_test = 1;
+		if (!scrypt_power_on_self_test())
+			scrypt_fatal_error("scrypt: power on self test failed");
+	}
+#endif
+
+	/* byte swap it */
+	for(int z=0;z<20;z++) data[z] = bswap_32x4(pdata[z]);
+	for(int i=1;i<throughput;++i) memcpy(&data[20*i], data, 20*sizeof(uint32_t));
+
+	int Nfactor = GetNfactor(data[17]);
+	if (Nfactor > scrypt_maxN) {
+		scrypt_fatal_error("scrypt: N out of range");
+	}
+	
+	N = (1 << (Nfactor + 1));
+	
+	Vbuf = scrypt_alloc((uint64_t)N * 128 * throughput);
+	Ybuf = scrypt_alloc(128 * throughput);
+	Xbuf = scrypt_alloc(128 * throughput);
+	
+#if !defined(SCRYPT_CHOOSE_COMPILETIME)
+	scrypt_ROMixfn scrypt_ROMix = scrypt_getROMix();
+#endif
+
+	do {
+		for(int i=0;i<throughput;++i) 
+			data[20*i + 19] = ++n;
+
+		/* 1: X = PBKDF2(password, salt) */
+		for(int i=0;i<throughput;++i)
+			scrypt_pbkdf2_1((unsigned char *)&data[20*i], 80, (unsigned char *)&data[20*i], 80, Xbuf.ptr + 128 * i, 128);
+
+		/* 2: X = ROMix(X) */
+		for(int i=0;i<throughput;++i)
+			scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr + 128 * i), (scrypt_mix_word_t *)(Vbuf.ptr + (uint64_t)N * 128 * i), N);
+
+		/* 3: Out = PBKDF2(password, X) */
+		for(int i=0;i<throughput;++i)
+			scrypt_pbkdf2_1((unsigned char *)&data[20*i], 80, Xbuf.ptr + 128 * i, 128, (unsigned char *)&hash[8*i], 32);
+
+		for(int i=0;i<throughput;++i) {
+			volatile unsigned char *hashc = (unsigned char *)&hash[8*i];
+			if (hashc[31] == 0 && hashc[30] == 0) {
+
+#if 0
+				fprintf(stderr, "hash %d\n", i);
+				for(int z=7;z>=0;z--)
+					fprintf(stderr, "%08x ", hash[z]);
+				fprintf(stderr, "\n");
+
+				for(int z=7;z>=0;z--)
+					fprintf(stderr, "%08x ", ptarget[z]);
+				fprintf(stderr, "\n");
+#endif
+
+				if(fulltest(&hash[8*i], ptarget)) {
+					*hashes_done = n - pdata[19] + 1;
+					pdata[19] = bswap_32x4(data[20*i + 19]);
+					scrypt_free(&Vbuf);
+					scrypt_free(&Ybuf);
+					scrypt_free(&Xbuf);
+					delete[] data;
+					delete[] hash;
+					return 1;
+				}
+			}
+		}
+	} while (n < max_nonce && !work_restart[thr_id].restart);
+	
+	scrypt_free(&Vbuf);
+	scrypt_free(&Ybuf);
+	scrypt_free(&Xbuf);
+	delete[] data;
+	delete[] hash;
+	
+	*hashes_done = n - pdata[19] + 1;
+	pdata[19] = n;
+	return 0;
+}
+#endif

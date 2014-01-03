@@ -126,8 +126,8 @@ scrypt_pbkdf2_1(const uint8_t *password, size_t password_len, const uint8_t *sal
 	scrypt_hmac_state hmac_pw, hmac_pw_salt, work;
 	scrypt_hash_digest ti, u;
 	uint8_t be[4];
-	uint32_t i, j, blocks;
-	uint64_t c;
+	uint32_t i, /*j,*/ blocks;
+//	uint64_t c;
 	
 	/* bytes must be <= (0xffffffff - (SCRYPT_HASH_DIGEST_SIZE - 1)), which they will always be under scrypt */
 
