@@ -21,19 +21,13 @@
 
 #include <cuda.h>
 
+#include "miner.h"
 #include "spinlock_kernel.h"
 
-#undef SCRATCH
-// make scratchpad size dependent on N
-#define SCRATCH (N*32+64)
-
-//#define MIXER(a,b) xor_salsa8(a,b)
-#define MIXER(a,b) xor_chacha8(a,b)
-
 // forward references
-__global__ void spinlock_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
-__global__ void spinlock_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N);
-template <int TEX_DIM> __global__ void spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N);
+template <int ALGO> __global__ void spinlock_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
+template <int ALGO> __global__ void spinlock_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N);
+template <int ALGO, int TEX_DIM> __global__ void spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N);
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[1024];
@@ -95,7 +89,11 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
 
     // First phase: Sequential writes to scratchpad.
 
-    spinlock_scrypt_core_kernelA<<< grid, threads, shared, stream >>>(d_idata, N);
+    switch(opt_algo)
+    {
+      case ALGO_SCRYPT:      spinlock_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_idata, N); break;
+      case ALGO_SCRYPT_JANE: spinlock_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, N); break;
+    }
 
     // Optional millisecond sleep in between kernels
 
@@ -113,13 +111,26 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
     if (texture_cache)
     {
         if (texture_cache == 1)
-            spinlock_scrypt_core_kernelB_tex<1><<< grid, threads, shared, stream >>>(d_odata, N);
+            switch(opt_algo)
+            {
+                case ALGO_SCRYPT:      spinlock_scrypt_core_kernelB_tex<ALGO_SCRYPT,1><<< grid, threads, shared, stream >>>(d_odata, N); break;
+                case ALGO_SCRYPT_JANE: spinlock_scrypt_core_kernelB_tex<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, N); break;
+            }
         else if (texture_cache == 2)
-            spinlock_scrypt_core_kernelB_tex<2><<< grid, threads, shared, stream >>>(d_odata, N);
+            switch(opt_algo)
+            {
+                case ALGO_SCRYPT:      spinlock_scrypt_core_kernelB_tex<ALGO_SCRYPT,2><<< grid, threads, shared, stream >>>(d_odata, N); break;
+                case ALGO_SCRYPT_JANE: spinlock_scrypt_core_kernelB_tex<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, N); break;
+            }
         else success = false;
     }
-    else
-        spinlock_scrypt_core_kernelB<<< grid, threads, shared, stream >>>(d_odata, N);
+    else {
+        switch(opt_algo)
+        {
+            case ALGO_SCRYPT:      spinlock_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_odata, N); break;
+            case ALGO_SCRYPT_JANE: spinlock_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_odata, N); break;
+        }
+    }
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
@@ -137,71 +148,71 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
 
 static __device__ void xor_chacha8(uint4 *B, uint4 *C)
 {
-	uint32_t x[16];
-	x[0]=(B[0].x ^= C[0].x);
-	x[1]=(B[0].y ^= C[0].y);
-	x[2]=(B[0].z ^= C[0].z);
-	x[3]=(B[0].w ^= C[0].w);
-	x[4]=(B[1].x ^= C[1].x);
-	x[5]=(B[1].y ^= C[1].y);
-	x[6]=(B[1].z ^= C[1].z);
-	x[7]=(B[1].w ^= C[1].w);
-	x[8]=(B[2].x ^= C[2].x);
-	x[9]=(B[2].y ^= C[2].y);
-	x[10]=(B[2].z ^= C[2].z);
-	x[11]=(B[2].w ^= C[2].w);
-	x[12]=(B[3].x ^= C[3].x);
-	x[13]=(B[3].y ^= C[3].y);
-	x[14]=(B[3].z ^= C[3].z);
-	x[15]=(B[3].w ^= C[3].w);
+    uint32_t x[16];
+    x[0]=(B[0].x ^= C[0].x);
+    x[1]=(B[0].y ^= C[0].y);
+    x[2]=(B[0].z ^= C[0].z);
+    x[3]=(B[0].w ^= C[0].w);
+    x[4]=(B[1].x ^= C[1].x);
+    x[5]=(B[1].y ^= C[1].y);
+    x[6]=(B[1].z ^= C[1].z);
+    x[7]=(B[1].w ^= C[1].w);
+    x[8]=(B[2].x ^= C[2].x);
+    x[9]=(B[2].y ^= C[2].y);
+    x[10]=(B[2].z ^= C[2].z);
+    x[11]=(B[2].w ^= C[2].w);
+    x[12]=(B[3].x ^= C[3].x);
+    x[13]=(B[3].y ^= C[3].y);
+    x[14]=(B[3].z ^= C[3].z);
+    x[15]=(B[3].w ^= C[3].w);
 
     /* Operate on columns. */
-	QUARTER( x[0], x[4], x[ 8], x[12] )
-	QUARTER( x[1], x[5], x[ 9], x[13] )
-	QUARTER( x[2], x[6], x[10], x[14] )
-	QUARTER( x[3], x[7], x[11], x[15] )
+    QUARTER( x[0], x[4], x[ 8], x[12] )
+    QUARTER( x[1], x[5], x[ 9], x[13] )
+    QUARTER( x[2], x[6], x[10], x[14] )
+    QUARTER( x[3], x[7], x[11], x[15] )
 
     /* Operate on diagonals */
-	QUARTER( x[0], x[5], x[10], x[15] )
-	QUARTER( x[1], x[6], x[11], x[12] )
-	QUARTER( x[2], x[7], x[ 8], x[13] )
-	QUARTER( x[3], x[4], x[ 9], x[14] )
+    QUARTER( x[0], x[5], x[10], x[15] )
+    QUARTER( x[1], x[6], x[11], x[12] )
+    QUARTER( x[2], x[7], x[ 8], x[13] )
+    QUARTER( x[3], x[4], x[ 9], x[14] )
 
     /* Operate on columns. */
-	QUARTER( x[0], x[4], x[ 8], x[12] )
-	QUARTER( x[1], x[5], x[ 9], x[13] )
-	QUARTER( x[2], x[6], x[10], x[14] )
-	QUARTER( x[3], x[7], x[11], x[15] )
+    QUARTER( x[0], x[4], x[ 8], x[12] )
+    QUARTER( x[1], x[5], x[ 9], x[13] )
+    QUARTER( x[2], x[6], x[10], x[14] )
+    QUARTER( x[3], x[7], x[11], x[15] )
 
     /* Operate on diagonals */
-	QUARTER( x[0], x[5], x[10], x[15] )
-	QUARTER( x[1], x[6], x[11], x[12] )
-	QUARTER( x[2], x[7], x[ 8], x[13] )
-	QUARTER( x[3], x[4], x[ 9], x[14] )
+    QUARTER( x[0], x[5], x[10], x[15] )
+    QUARTER( x[1], x[6], x[11], x[12] )
+    QUARTER( x[2], x[7], x[ 8], x[13] )
+    QUARTER( x[3], x[4], x[ 9], x[14] )
 
     /* Operate on columns. */
-	QUARTER( x[0], x[4], x[ 8], x[12] )
-	QUARTER( x[1], x[5], x[ 9], x[13] )
-	QUARTER( x[2], x[6], x[10], x[14] )
-	QUARTER( x[3], x[7], x[11], x[15] )
+    QUARTER( x[0], x[4], x[ 8], x[12] )
+    QUARTER( x[1], x[5], x[ 9], x[13] )
+    QUARTER( x[2], x[6], x[10], x[14] )
+    QUARTER( x[3], x[7], x[11], x[15] )
 
     /* Operate on diagonals */
-	QUARTER( x[0], x[5], x[10], x[15] )
-	QUARTER( x[1], x[6], x[11], x[12] )
-	QUARTER( x[2], x[7], x[ 8], x[13] )
-	QUARTER( x[3], x[4], x[ 9], x[14] )
+    QUARTER( x[0], x[5], x[10], x[15] )
+    QUARTER( x[1], x[6], x[11], x[12] )
+    QUARTER( x[2], x[7], x[ 8], x[13] )
+    QUARTER( x[3], x[4], x[ 9], x[14] )
 
     /* Operate on columns. */
-	QUARTER( x[0], x[4], x[ 8], x[12] )
-	QUARTER( x[1], x[5], x[ 9], x[13] )
-	QUARTER( x[2], x[6], x[10], x[14] )
-	QUARTER( x[3], x[7], x[11], x[15] )
+    QUARTER( x[0], x[4], x[ 8], x[12] )
+    QUARTER( x[1], x[5], x[ 9], x[13] )
+    QUARTER( x[2], x[6], x[10], x[14] )
+    QUARTER( x[3], x[7], x[11], x[15] )
 
     /* Operate on diagonals */
-	QUARTER( x[0], x[5], x[10], x[15] )
-	QUARTER( x[1], x[6], x[11], x[12] )
-	QUARTER( x[2], x[7], x[ 8], x[13] )
-	QUARTER( x[3], x[4], x[ 9], x[14] )
+    QUARTER( x[0], x[5], x[10], x[15] )
+    QUARTER( x[1], x[6], x[11], x[12] )
+    QUARTER( x[2], x[7], x[ 8], x[13] )
+    QUARTER( x[3], x[4], x[ 9], x[14] )
 
     B[0].x += x[0]; B[0].y += x[1]; B[0].z += x[2];  B[0].w += x[3];  B[1].x += x[4];  B[1].y += x[5];  B[1].z += x[6];  B[1].w += x[7];
     B[2].x += x[8]; B[2].y += x[9]; B[2].z += x[10]; B[2].w += x[11]; B[3].x += x[12]; B[3].y += x[13]; B[3].z += x[14]; B[3].w += x[15];
@@ -237,71 +248,71 @@ a3^=(((a30)<<18) | ((a30)>>14) );\
 
 static __device__ void xor_salsa8(uint4 *B, uint4 *C)
 {
-	uint32_t x[16];
-	x[0]=(B[0].x ^= C[0].x);
-	x[1]=(B[0].y ^= C[0].y);
-	x[2]=(B[0].z ^= C[0].z);
-	x[3]=(B[0].w ^= C[0].w);
-	x[4]=(B[1].x ^= C[1].x);
-	x[5]=(B[1].y ^= C[1].y);
-	x[6]=(B[1].z ^= C[1].z);
-	x[7]=(B[1].w ^= C[1].w);
-	x[8]=(B[2].x ^= C[2].x);
-	x[9]=(B[2].y ^= C[2].y);
-	x[10]=(B[2].z ^= C[2].z);
-	x[11]=(B[2].w ^= C[2].w);
-	x[12]=(B[3].x ^= C[3].x);
-	x[13]=(B[3].y ^= C[3].y);
-	x[14]=(B[3].z ^= C[3].z);
-	x[15]=(B[3].w ^= C[3].w);
+    uint32_t x[16];
+    x[0]=(B[0].x ^= C[0].x);
+    x[1]=(B[0].y ^= C[0].y);
+    x[2]=(B[0].z ^= C[0].z);
+    x[3]=(B[0].w ^= C[0].w);
+    x[4]=(B[1].x ^= C[1].x);
+    x[5]=(B[1].y ^= C[1].y);
+    x[6]=(B[1].z ^= C[1].z);
+    x[7]=(B[1].w ^= C[1].w);
+    x[8]=(B[2].x ^= C[2].x);
+    x[9]=(B[2].y ^= C[2].y);
+    x[10]=(B[2].z ^= C[2].z);
+    x[11]=(B[2].w ^= C[2].w);
+    x[12]=(B[3].x ^= C[3].x);
+    x[13]=(B[3].y ^= C[3].y);
+    x[14]=(B[3].z ^= C[3].z);
+    x[15]=(B[3].w ^= C[3].w);
 
     /* Operate on columns. */
-	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
-	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
-	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
-	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+    ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+    ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+    ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+    ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
 
     /* Operate on rows. */
-	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
-	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
-	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
-	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+    ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+    ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+    ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+    ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
 
     /* Operate on columns. */
-	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
-	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
-	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
-	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+    ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+    ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+    ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+    ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
 
     /* Operate on rows. */
-	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
-	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
-	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
-	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+    ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+    ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+    ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+    ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
 
     /* Operate on columns. */
-	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
-	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
-	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
-	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+    ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+    ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+    ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+    ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
 
     /* Operate on rows. */
-	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
-	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
-	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
-	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+    ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+    ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+    ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+    ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
 
     /* Operate on columns. */
-	ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
-	ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
-	ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
-	ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
+    ROTL7(x[4],x[9],x[14],x[3],x[0]+x[12],x[1]+x[5],x[6]+x[10],x[11]+x[15]);
+    ROTL9(x[8],x[13],x[2],x[7],x[0]+x[4],x[5]+x[9],x[10]+x[14],x[3]+x[15]);
+    ROTL13(x[12],x[1],x[6],x[11],x[4]+x[8],x[9]+x[13],x[2]+x[14],x[3]+x[7]);
+    ROTL18(x[0],x[5],x[10],x[15],x[8]+x[12],x[1]+x[13],x[2]+x[6],x[7]+x[11]);
 
     /* Operate on rows. */
-	ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
-	ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
-	ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
-	ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
+    ROTL7(x[1],x[6],x[11],x[12],x[0]+x[3],x[4]+x[5],x[9]+x[10],x[14]+x[15]);
+    ROTL9(x[2],x[7],x[8],x[13],x[0]+x[1],x[5]+x[6],x[10]+x[11],x[12]+x[15]);
+    ROTL13(x[3],x[4],x[9],x[14],x[1]+x[2],x[6]+x[7],x[8]+x[11],x[12]+x[13]);
+    ROTL18(x[0],x[5],x[10],x[15],x[2]+x[3],x[4]+x[7],x[8]+x[9],x[13]+x[14]);
 
     B[0].x += x[0]; B[0].y += x[1]; B[0].z += x[2];  B[0].w += x[3];  B[1].x += x[4];  B[1].y += x[5];  B[1].z += x[6];  B[1].w += x[7];
     B[2].x += x[8]; B[2].y += x[9]; B[2].z += x[10]; B[2].w += x[11]; B[3].x += x[12]; B[3].y += x[13]; B[3].z += x[14]; B[3].w += x[15];
@@ -332,7 +343,7 @@ static __device__ void unlock(int *mutex, int i)
 //! @param g_idata  input data in global memory
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
-__global__ void
+template <int ALGO> __global__ void
 spinlock_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N)
 {
     extern __shared__ unsigned char x[];
@@ -378,7 +389,10 @@ spinlock_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N)
     for (int i = 1; i < N; i++) {
 
         if (warpThread == 0) unlock(L, warpIdx_2);
-        MIXER(B, C); MIXER(C, B);
+        switch(ALGO) {
+          case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+          case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
         if (warpThread == 0) lock(L, warpIdx_2);
 
 #pragma unroll 4
@@ -396,7 +410,7 @@ spinlock_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N)
     if (warpThread == 0) unlock(L, warpIdx_2);
 }
 
-__global__ void
+template <int ALGO> __global__ void
 spinlock_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N)
 {
     extern __shared__ unsigned char x[];
@@ -440,7 +454,10 @@ spinlock_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N)
     for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
 
     if (warpThread == 0) unlock(L, warpIdx_2);
-    MIXER(B, C); MIXER(C, B);
+    switch(ALGO) {
+        case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+        case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+    }
     if (warpThread == 0) lock(L, warpIdx_2);
 
     for (int i = 0; i < N; i++) {
@@ -460,7 +477,10 @@ spinlock_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N)
         for (int idx=0; idx < 4; idx++) C[idx] ^= *((uint4*)&XX[4*idx]);
 
         if (warpThread == 0) unlock(L, warpIdx_2);
-        MIXER(B, C); MIXER(C, B);
+        switch(ALGO) {
+            case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+            case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
         if (warpThread == 0) lock(L, warpIdx_2);
     }
 
@@ -479,7 +499,7 @@ spinlock_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N)
     if (warpThread == 0) unlock(L, warpIdx_2);
 }
 
-template <int TEX_DIM> __global__ void
+template <int ALGO, int TEX_DIM> __global__ void
 spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
 {
     extern __shared__ unsigned char x[];
@@ -526,7 +546,10 @@ spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
     for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
 
     if (warpThread == 0) unlock(L, warpIdx_2);
-    MIXER(B, C); MIXER(C, B);
+    switch(ALGO) {
+        case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+        case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+    }
     if (warpThread == 0) lock(L, warpIdx_2);
 
     for (int i = 0; i < N; i++) {
@@ -550,7 +573,10 @@ spinlock_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
         for (int idx=0; idx < 4; idx++) C[idx] ^= *((uint4*)&XX[4*idx]);
 
         if (warpThread == 0) unlock(L, warpIdx_2);
-        MIXER(B, C); MIXER(C, B);
+        switch(ALGO) {
+            case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+            case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
         if (warpThread == 0) lock(L, warpIdx_2);
     }
 

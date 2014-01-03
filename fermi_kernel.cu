@@ -35,9 +35,9 @@
 #include "fermi_kernel.h"
 
 // forward references
-__global__ void fermi_scrypt_core_kernelA(uint32_t *g_idata);
-__global__ void fermi_scrypt_core_kernelB(uint32_t *g_odata);
-template <int TEX_DIM> __global__ void fermi_scrypt_core_kernelB_tex(uint32_t *g_odata);
+__global__ void fermi_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
+__global__ void fermi_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N);
+template <int TEX_DIM> __global__ void fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N);
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[1024];
@@ -99,7 +99,7 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
 
     // First phase: Sequential writes to scratchpad.
 
-    fermi_scrypt_core_kernelA<<< grid, threads, shared, stream >>>(d_idata);
+    fermi_scrypt_core_kernelA<<< grid, threads, shared, stream >>>(d_idata, N);
 
     // Optional millisecond sleep in between kernels
 
@@ -117,12 +117,12 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     if (texture_cache)
     {
         if (texture_cache == 1)
-            fermi_scrypt_core_kernelB_tex<1><<< grid, threads, shared, stream >>>(d_odata);
+            fermi_scrypt_core_kernelB_tex<1><<< grid, threads, shared, stream >>>(d_odata, N);
         else if (texture_cache == 2)
-            fermi_scrypt_core_kernelB_tex<2><<< grid, threads, shared, stream >>>(d_odata);
+            fermi_scrypt_core_kernelB_tex<2><<< grid, threads, shared, stream >>>(d_odata, N);
         else success = false;
     }
-    else fermi_scrypt_core_kernelB<<< grid, threads, shared, stream >>>(d_odata);
+    else fermi_scrypt_core_kernelB<<< grid, threads, shared, stream >>>(d_odata, N);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
@@ -245,7 +245,7 @@ static __device__ __forceinline__ uint4& operator^=(uint4& left, const uint4& ri
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void
-fermi_scrypt_core_kernelA(uint32_t *g_idata)
+fermi_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N)
 {
     extern __shared__ unsigned char x[];
     uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
@@ -300,7 +300,7 @@ fermi_scrypt_core_kernelA(uint32_t *g_idata)
 }
 
 __global__ void
-fermi_scrypt_core_kernelB(uint32_t *g_odata)
+fermi_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N)
 {
     extern __shared__ unsigned char x[];
     uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
@@ -372,7 +372,7 @@ fermi_scrypt_core_kernelB(uint32_t *g_odata)
 }
 
 template <int TEX_DIM> __global__ void
-fermi_scrypt_core_kernelB_tex(uint32_t *g_odata)
+fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
 {
     extern __shared__ unsigned char x[];
     uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;

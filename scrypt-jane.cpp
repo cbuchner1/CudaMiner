@@ -223,97 +223,6 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 	return N;
 }
 
-#if 0
-int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
-	const uint32_t *ptarget,
-	uint32_t max_nonce, unsigned long *hashes_done)
-{
-	uint32_t data[20], hash[8]/*, target_swap[8]*/;
-	volatile unsigned char *hashc = (unsigned char *) hash;
-	volatile unsigned char *datac = (unsigned char *) data;
-	volatile unsigned char *pdatac = (unsigned char *) pdata;
-	uint32_t n = pdata[19] - 1;
-	scrypt_aligned_alloc YX, V;
-	uint8_t *X, *Y;
-	uint32_t N, chunk_bytes;
-	const uint32_t r = SCRYPT_R;
-	const uint32_t p = SCRYPT_P;
-//	int i;
-	
-#if !defined(SCRYPT_TEST)
-	static int power_on_self_test = 0;
-	if (!power_on_self_test) {
-		power_on_self_test = 1;
-		if (!scrypt_power_on_self_test())
-			scrypt_fatal_error("scrypt: power on self test failed");
-	}
-#endif
-
-	/* byte swap it */
-	for(int z=0;z<20;z++) {
-		datac[(z*4)  ] = pdatac[(z*4)+3];
-		datac[(z*4)+1] = pdatac[(z*4)+2];
-		datac[(z*4)+2] = pdatac[(z*4)+1];
-		datac[(z*4)+3] = pdatac[(z*4)  ];
-	}
-
-	int Nfactor = GetNfactor(data[17]);
-	if (Nfactor > scrypt_maxN) {
-		scrypt_fatal_error("scrypt: N out of range");
-	}
-	
-	N = (1 << (Nfactor + 1));
-	
-	chunk_bytes = SCRYPT_BLOCK_BYTES * r * 2;
-	V = scrypt_alloc((uint64_t)N * chunk_bytes);
-	YX = scrypt_alloc((p + 1) * chunk_bytes);
-	
-	Y = YX.ptr;
-	X = Y + chunk_bytes;
-
-	do {
-		data[19] = ++n;
-
-		scrypt_N_1_1((unsigned char *)data, 80, 
-                       (unsigned char *)data, 80, 
-                       N, (unsigned char *)hash, 32, X, Y, V.ptr);
-
-		if (hashc[31] == 0 && hashc[30] == 0) {
-
-#if 0
-			for(int z=7;z>=0;z--)
-				fprintf(stderr, "%08x ", hash[z]);
-			fprintf(stderr, "\n");
-
-			for(int z=7;z>=0;z--)
-				fprintf(stderr, "%08x ", ptarget[z]);
-			fprintf(stderr, "\n");
-#endif
-
-			if(fulltest(hash, ptarget)) {
-				*hashes_done = n - pdata[19] + 1;
-				pdatac[76] = datac[79];
-				pdatac[77] = datac[78];
-				pdatac[78] = datac[77];
-				pdatac[79] = datac[76];
-			
-				scrypt_free(&V);
-				scrypt_free(&YX);
-				return 1;
-			}
-		}
-	} while (n < max_nonce && !work_restart[thr_id].restart);
-	
-	scrypt_free(&V);
-	scrypt_free(&YX);
-	
-	*hashes_done = n - pdata[19] + 1;
-	pdata[19] = n;
-	return 0;
-}
-
-#else
-
 #define bswap_32x4(x) ((((x) << 24) & 0xff000000u) | (((x) << 8) & 0x00ff0000u) \
                      | (((x) >> 8) & 0x0000ff00u) | (((x) >> 24) & 0x000000ffu))
 
@@ -321,13 +230,20 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	const uint32_t *ptarget,
 	uint32_t max_nonce, unsigned long *hashes_done)
 {
+	int Nfactor = GetNfactor(bswap_32x4(pdata[17]));
+	if (Nfactor > scrypt_maxN) {
+		scrypt_fatal_error("scrypt: N out of range");
+	}
+	
+	N = (1 << (Nfactor + 1));
+
+	parallel = 0;
 	int throughput = cuda_throughput(thr_id);
 
 	uint32_t *data = new uint32_t[20*throughput];
 	uint32_t *hash = new uint32_t[8*throughput];
 
 	uint32_t n = pdata[19] - 1;
-	uint32_t N;
 //	int i;
 	
 #if !defined(SCRYPT_TEST)
@@ -343,13 +259,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	for(int z=0;z<20;z++) data[z] = bswap_32x4(pdata[z]);
 	for(int i=1;i<throughput;++i) memcpy(&data[20*i], data, 20*sizeof(uint32_t));
 
-	int Nfactor = GetNfactor(data[17]);
-	if (Nfactor > scrypt_maxN) {
-		scrypt_fatal_error("scrypt: N out of range");
-	}
-	
-	N = (1 << (Nfactor + 1));
-	
 	scrypt_aligned_alloc Vbuf = scrypt_alloc((uint64_t)N * 128);
 	scrypt_aligned_alloc Xbuf = scrypt_alloc(128 * throughput);
 	scrypt_aligned_alloc Ybuf = scrypt_alloc(128);
@@ -371,8 +280,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		for(int i=0;i<throughput;++i)
 			scrypt_pbkdf2_1((unsigned char *)&data[20*i], 80, (unsigned char *)&data[20*i], 80, Xbuf.ptr + 128 * i, 128);
 
-#define CUDA 1
-#if CUDA
 		/* 2: X = ROMix(X) in CUDA */
 		memcpy(cuda_X[cur], Xbuf.ptr, 128 * throughput);
 		cuda_scrypt_HtoD(thr_id, cuda_X[cur], cur);
@@ -409,11 +316,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		}
 #endif
 		memcpy(Xbuf.ptr, cuda_X[cur], 128 * throughput);
-#else
-		/* 2: X = ROMix(X) */
-		for(int i=0;i<throughput;++i)
-			scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
-#endif
 
 		/* 3: Out = PBKDF2(password, X) */
 		for(int i=0;i<throughput;++i)
@@ -423,23 +325,10 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 			volatile unsigned char *hashc = (unsigned char *)&hash[8*i];
 			if (hashc[31] == 0 && hashc[30] == 0) {
 
-#if 0
-				fprintf(stderr, "hash %d\n", i);
-				for(int z=7;z>=0;z--)
-					fprintf(stderr, "%08x ", hash[z]);
-				fprintf(stderr, "\n");
-
-				for(int z=7;z>=0;z--)
-					fprintf(stderr, "%08x ", ptarget[z]);
-				fprintf(stderr, "\n");
-#endif
-
 				if(fulltest(&hash[8*i], ptarget)) {
 
 					uint32_t nonce = bswap_32x4(data[20*i + 19]);
 					
-					applog(LOG_INFO, "GPU #%d: %s candidate nonce %u (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], nonce, i, cur);
-					       
 					uint32_t thash[8], tdata[20];
 					for(int z=0;z<20;z++) tdata[z] = bswap_32x4(pdata[z]);
 					tdata[19] = bswap_32x4(nonce);
@@ -477,4 +366,3 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	pdata[19] = n;
 	return 0;
 }
-#endif

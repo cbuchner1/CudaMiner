@@ -81,7 +81,8 @@ public:
 #define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
 
-#define SCRATCH (32768+64)
+// make scratchpad size dependent on N
+#define SCRATCH (N*32+64)
 
 // Not performing error checking is actually bad, but...
 #define checkCudaErrors(x) x

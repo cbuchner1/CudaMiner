@@ -166,9 +166,18 @@ struct work_restart {
 	char			padding[128 - sizeof(unsigned long)];
 };
 
+// CB
+enum sha256_algos {
+	ALGO_SCRYPT,		/* scrypt(1024,1,1) */
+	ALGO_SCRYPT_JANE,	/* CB: scrypt-jane(N,1,1) */
+	ALGO_SHA256D,		/* SHA-256d */
+};
+
 extern int num_processors; // CB
 extern bool abort_flag;    // CB
 extern int parallel;       // CB
+extern unsigned int N;     // CB
+extern enum sha256_algos opt_algo;  // CB
 extern bool opt_debug;
 extern bool opt_protocol;
 extern int opt_timeout;

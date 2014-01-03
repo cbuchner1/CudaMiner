@@ -34,9 +34,9 @@
 #endif
 
 // forward references
-template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelA(uint32_t *g_idata);
-template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelB(uint32_t *g_odata);
-template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void legacy_scrypt_core_kernelB_tex(uint32_t *g_odata);
+template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
+template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N);
+template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void legacy_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N);
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[1024];
@@ -97,15 +97,15 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     // First phase: Sequential writes to scratchpad.
 
     switch (WARPS_PER_BLOCK) {
-        case 1: legacy_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 2: legacy_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata); break;
-        case 3: legacy_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata); break;
+        case 1: legacy_scrypt_core_kernelA<1><<< grid, threads, 0, stream >>>(d_idata, N); break;
+        case 2: legacy_scrypt_core_kernelA<2><<< grid, threads, 0, stream >>>(d_idata, N); break;
+        case 3: legacy_scrypt_core_kernelA<3><<< grid, threads, 0, stream >>>(d_idata, N); break;
 #if EXTRA_WARPS
-            case 4: legacy_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 5: legacy_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 6: legacy_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 7: legacy_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata); break;
-            case 8: legacy_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata); break;
+            case 4: legacy_scrypt_core_kernelA<4><<< grid, threads, 0, stream >>>(d_idata, N); break;
+            case 5: legacy_scrypt_core_kernelA<5><<< grid, threads, 0, stream >>>(d_idata, N); break;
+            case 6: legacy_scrypt_core_kernelA<6><<< grid, threads, 0, stream >>>(d_idata, N); break;
+            case 7: legacy_scrypt_core_kernelA<7><<< grid, threads, 0, stream >>>(d_idata, N); break;
+            case 8: legacy_scrypt_core_kernelA<8><<< grid, threads, 0, stream >>>(d_idata, N); break;
 #endif
         default: success = false; break;
     }
@@ -128,15 +128,15 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
         if (texture_cache == 1)
         {
             switch (WARPS_PER_BLOCK) {
-                case 1: legacy_scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: legacy_scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: legacy_scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 1: legacy_scrypt_core_kernelB_tex<1,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 2: legacy_scrypt_core_kernelB_tex<2,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 3: legacy_scrypt_core_kernelB_tex<3,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
 #if EXTRA_WARPS
-                    case 4: legacy_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 5: legacy_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 6: legacy_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 7: legacy_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                    case 8: legacy_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata); break;
+                    case 4: legacy_scrypt_core_kernelB_tex<4,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                    case 5: legacy_scrypt_core_kernelB_tex<5,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                    case 6: legacy_scrypt_core_kernelB_tex<6,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                    case 7: legacy_scrypt_core_kernelB_tex<7,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                    case 8: legacy_scrypt_core_kernelB_tex<8,1><<< grid, threads, 0, stream >>>(d_odata, N); break;
 #endif
                 default: success = false; break;
             }
@@ -144,15 +144,15 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
         else if (texture_cache == 2)
         {
             switch (WARPS_PER_BLOCK) {
-                case 1: legacy_scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 2: legacy_scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 3: legacy_scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 1: legacy_scrypt_core_kernelB_tex<1,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 2: legacy_scrypt_core_kernelB_tex<2,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 3: legacy_scrypt_core_kernelB_tex<3,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
 #if EXTRA_WARPS
-                   case 4: legacy_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 5: legacy_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 6: legacy_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 7: legacy_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                   case 8: legacy_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata); break;
+                   case 4: legacy_scrypt_core_kernelB_tex<4,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                   case 5: legacy_scrypt_core_kernelB_tex<5,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                   case 6: legacy_scrypt_core_kernelB_tex<6,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                   case 7: legacy_scrypt_core_kernelB_tex<7,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                   case 8: legacy_scrypt_core_kernelB_tex<8,2><<< grid, threads, 0, stream >>>(d_odata, N); break;
 #endif
                 default: success = false; break;
             }
@@ -161,15 +161,15 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     else
     {
         switch (WARPS_PER_BLOCK) {
-            case 1: legacy_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 2: legacy_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata); break;
-            case 3: legacy_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata); break;
+            case 1: legacy_scrypt_core_kernelB<1><<< grid, threads, 0, stream >>>(d_odata, N); break;
+            case 2: legacy_scrypt_core_kernelB<2><<< grid, threads, 0, stream >>>(d_odata, N); break;
+            case 3: legacy_scrypt_core_kernelB<3><<< grid, threads, 0, stream >>>(d_odata, N); break;
 #if EXTRA_WARPS
-                case 4: legacy_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 5: legacy_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 6: legacy_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 7: legacy_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata); break;
-                case 8: legacy_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata); break;
+                case 4: legacy_scrypt_core_kernelB<4><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 5: legacy_scrypt_core_kernelB<5><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 6: legacy_scrypt_core_kernelB<6><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 7: legacy_scrypt_core_kernelB<7><<< grid, threads, 0, stream >>>(d_odata, N); break;
+                case 8: legacy_scrypt_core_kernelB<8><<< grid, threads, 0, stream >>>(d_odata, N); break;
 #endif
             default: success = false; break;
         }
@@ -281,7 +281,7 @@ static __host__ __device__ uint2& operator^=(uint2& left, const uint2& right)
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 template <int WARPS_PER_BLOCK> __global__ void
-legacy_scrypt_core_kernelA(uint32_t *g_idata)
+legacy_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
@@ -322,7 +322,7 @@ legacy_scrypt_core_kernelA(uint32_t *g_idata)
 }
 
 template <int WARPS_PER_BLOCK> __global__ void
-legacy_scrypt_core_kernelB(uint32_t *g_odata)
+legacy_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
@@ -366,7 +366,7 @@ legacy_scrypt_core_kernelB(uint32_t *g_odata)
 }
 
 template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void
-legacy_scrypt_core_kernelB_tex(uint32_t *g_odata)
+legacy_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
 {
     __shared__ uint32_t X[WARPS_PER_BLOCK][WU_PER_WARP][32+1+_64BIT_ALIGN]; // +1 to resolve bank conflicts
 
