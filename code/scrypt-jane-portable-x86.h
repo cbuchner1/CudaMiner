@@ -1,5 +1,5 @@
 
-typedef enum cpu_flags_x86_t cpu_flags_x86;
+typedef enum cpu_flags_x86_t { }cpu_flags_x86;
 
 typedef enum cpu_vendors_x86_t {
 	cpu_nobody,

@@ -350,8 +350,9 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	
 	N = (1 << (Nfactor + 1));
 	
-	scrypt_aligned_alloc Xbuf;
-	Xbuf = scrypt_alloc(128 * throughput);
+	scrypt_aligned_alloc Vbuf = scrypt_alloc((uint64_t)N * 128);
+	scrypt_aligned_alloc Xbuf = scrypt_alloc(128 * throughput);
+	scrypt_aligned_alloc Ybuf = scrypt_alloc(128);
 
 	uint32_t* cuda_X[2]      = { cuda_transferbuffer(thr_id,0), cuda_transferbuffer(thr_id,1) };
 
@@ -361,14 +362,17 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 
 	int cur = 0;
 	do {
-		for(int i=0;i<throughput;++i) 
-			data[20*i + 19] = ++n;
+		for(int i=0;i<throughput;++i) {
+			uint32_t nonce = ++n;
+			data[20*i + 19] = bswap_32x4(nonce);
+		}
 
 		/* 1: X = PBKDF2(password, salt) */
 		for(int i=0;i<throughput;++i)
 			scrypt_pbkdf2_1((unsigned char *)&data[20*i], 80, (unsigned char *)&data[20*i], 80, Xbuf.ptr + 128 * i, 128);
 
-#if 1
+#define CUDA 1
+#if CUDA
 		/* 2: X = ROMix(X) in CUDA */
 		memcpy(cuda_X[cur], Xbuf.ptr, 128 * throughput);
 		cuda_scrypt_HtoD(thr_id, cuda_X[cur], cur);
@@ -377,26 +381,11 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		cuda_scrypt_done(thr_id, cur);
 		cuda_scrypt_DtoH(thr_id, cuda_X[cur], cur);
 		cuda_scrypt_flush(thr_id, cur);
-		memcpy(Xbuf.ptr, cuda_X[cur], 128 * throughput);
-#else
-		scrypt_aligned_alloc Ybuf, Vbuf;
-		Vbuf = scrypt_alloc((uint64_t)N * 128);
-		Ybuf = scrypt_alloc(128);
+		cuda_scrypt_sync(thr_id, cur);
 
-		/* 2: X = ROMix(X) */
-		for(int i=0;i<throughput;++i)
-			scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
-
-		scrypt_free(&Vbuf);
-		scrypt_free(&Ybuf);
-#endif
-
-#if 1
+#define VERIFY_ALL 0
+#if VERIFY_ALL
 		{
-			scrypt_aligned_alloc Ybuf, Vbuf;
-			Vbuf = scrypt_alloc((uint64_t)N * 128);
-			Ybuf = scrypt_alloc(128);
-
 			/* 2: X = ROMix(X) */
 			for(int i=0;i<throughput;++i)
 				scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
@@ -405,13 +394,25 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 			for(int i=0;i<throughput;++i) {
 				unsigned char *ref = (Xbuf.ptr + 128 * i);
 				unsigned char *dat = (unsigned char*)(cuda_X[cur] + 32 * i);
-				if (memcmp(ref, dat, 128) != 0) err++;
+				if (memcmp(ref, dat, 128) != 0)
+				{
+				  err++;
+				  uint32_t *ref32 = (uint32_t*) ref;
+				  uint32_t *dat32 = (uint32_t*) dat;
+				  for (int j=0; j<32; ++j) {
+				    if (ref32[j] != dat32[j])
+				     fprintf(stderr, "ref32[i=%d][j=%d] = $%08x / $%08x\n", i, j, ref32[j], dat32[j]);
+				  }
+				}
 			}
-			fprintf(stderr, "%d out of %d hashes differ.\n", err, throughput);
-
-			scrypt_free(&Vbuf);
-			scrypt_free(&Ybuf);
+			if (err > 0) fprintf(stderr, "%d out of %d hashes differ.\n", err, throughput);
 		}
+#endif
+		memcpy(Xbuf.ptr, cuda_X[cur], 128 * throughput);
+#else
+		/* 2: X = ROMix(X) */
+		for(int i=0;i<throughput;++i)
+			scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
 #endif
 
 		/* 3: Out = PBKDF2(password, X) */
@@ -436,20 +437,19 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 				if(fulltest(&hash[8*i], ptarget)) {
 
 					uint32_t nonce = bswap_32x4(data[20*i + 19]);
-
+					
+					applog(LOG_INFO, "GPU #%d: %s candidate nonce %u (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], nonce, i, cur);
+					       
 					uint32_t thash[8], tdata[20];
 					for(int z=0;z<20;z++) tdata[z] = bswap_32x4(pdata[z]);
-					tdata[19] = nonce;
-					scrypt_aligned_alloc Ybuf, Vbuf;
-					Vbuf = scrypt_alloc((uint64_t)N * 128);
-					Ybuf = scrypt_alloc(128);
+					tdata[19] = bswap_32x4(nonce);
 					scrypt_pbkdf2_1((unsigned char *)tdata, 80, (unsigned char *)tdata, 80, Xbuf.ptr + 128 * i, 128);
 					scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf.ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr), (scrypt_mix_word_t *)(Vbuf.ptr), N);
 					scrypt_pbkdf2_1((unsigned char *)tdata, 80, Xbuf.ptr + 128 * i, 128, (unsigned char *)thash, 32);
 					if (memcmp(thash, &hash[8*i], 32) == 0)
 					{
 						*hashes_done = n - pdata[19] + 1;
-						pdata[19] = bswap_32x4(data[20*i + 19]);
+						pdata[19] = nonce;
 						scrypt_free(&Vbuf);
 						scrypt_free(&Ybuf);
 						scrypt_free(&Xbuf);
@@ -461,14 +461,14 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 					{
 						applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], i, cur);
 					}
-					scrypt_free(&Vbuf);
-					scrypt_free(&Ybuf);
 				}
 			}
 		}
 		cur = (cur+1)%2;
 	} while (n < max_nonce && !work_restart[thr_id].restart);
 	
+	scrypt_free(&Vbuf);
+	scrypt_free(&Ybuf);
 	scrypt_free(&Xbuf);
 	delete[] data;
 	delete[] hash;

@@ -27,8 +27,8 @@
 // make scratchpad size dependent on N
 #define SCRATCH (N*32+64)
 
-#define MIXER(a,b) xor_salsa8(a,b)
-//#define MIXER(a,b) xor_chacha8(a,b)
+//#define MIXER(a,b) xor_salsa8(a,b)
+#define MIXER(a,b) xor_chacha8(a,b)
 
 // forward references
 __global__ void spinlock_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
