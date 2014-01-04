@@ -268,8 +268,8 @@ __device__  __forceinline__ void store_key_chacha(uint32_t *B, uint32_t b[4], ui
 
 
 /*
- * salsa_xor_core does the equivalent of the xor_salsa8 loop from
- * tarsnap's implementation of scrypt. The original scrypt called:
+ * salsa_xor_core (Salsa20/8 cypher)
+ * The original scrypt called:
  * xor_salsa8(&X[0], &X[16]); <-- the "b" loop
  * xor_salsa8(&X[16], &X[0]); <-- the "bx" loop
  * This version is unrolled to handle both of these loops in a single
@@ -290,7 +290,10 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
       x[i] = b[i];
     }
 
-    // Enter in "column" mode (t0 has 0, 4, 8, 12)
+    // Enter in "primary order" (t0 has  0,  4,  8, 12)
+    //                          (t1 has  5,  9, 13,  1)
+    //                          (t2 has 10, 14,  2,  6)
+    //                          (t3 has 15,  3,  7, 11)
 
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
@@ -367,13 +370,13 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
 
 
 /*
- * chacha_xor_core 
+ * chacha_xor_core (ChaCha20/8 cypher)
  * This version is unrolled to handle both of these loops in a single
  * call to avoid unnecessary data movement.
  * 
- * TODO: make sure load_key and store_key don't use primary order
- *       when using ChaCha20/8, but rather the basic transposed order
- *       (referred to as "column mode" below)
+ * load_key and store_key must not use primary order when
+ * using ChaCha20/8, but rather the basic transposed order
+ * (referred to as "column mode" below)
  */
 
 #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { x[pt] += x[ps]; uint32_t tmp = x[rt] ^ x[pt]; x[rt] = ((tmp<<amt)|(tmp>>(32-amt))); }
