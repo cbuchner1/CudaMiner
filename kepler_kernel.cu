@@ -332,7 +332,9 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
  * This version is unrolled to handle both of these loops in a single
  * call to avoid unnecessary data movement.
  * 
- * FIXME: at the moment this implementation seems broken.
+ * TODO: make sure load_key and store_key don't use primary order
+ *       when using ChaCha20/8, but rather the basic transposed order
+ *       (referred to as "column mode" below)
  */
 
 #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { x[pt] += x[ps]; uint32_t tmp = x[rt] ^ x[pt]; x[rt] = ((tmp<<amt)|(tmp>>(32-amt))); }
@@ -349,7 +351,10 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
       x[i] = b[i];
     }
 
-    // Enter in "column" mode (t0 has 0, 4, 8, 12)
+    // Enter in "column" mode (t0 has 0, 4,  8, 12)
+    //                        (t1 has 1, 5,  9, 13)
+    //                        (t2 has 2, 6, 10, 14)
+    //                        (t3 has 3, 7, 11, 15)
 
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
@@ -360,18 +365,19 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
       CHACHA_PRIMITIVE(0 ,3, 1,  8)
       CHACHA_PRIMITIVE(2 ,1, 3,  7)
       
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      
-      CHACHA_PRIMITIVE(0 ,1, 3, 16)
-      CHACHA_PRIMITIVE(2 ,3, 1, 12)
-      CHACHA_PRIMITIVE(0 ,1, 3,  8)
-      CHACHA_PRIMITIVE(2 ,3, 1,  7)
-      
-      x[3] = __shfl((int)x[3], x3_target_lane);
       x[1] = __shfl((int)x[1], x1_target_lane);
       x[2] = __shfl((int)x[2], x2_target_lane);
+      x[3] = __shfl((int)x[3], x3_target_lane);
+      
+      // Diagonal Mixing phase of chacha
+      CHACHA_PRIMITIVE(0 ,3, 1, 16)
+      CHACHA_PRIMITIVE(2 ,1, 3, 12)
+      CHACHA_PRIMITIVE(0 ,3, 1,  8)
+      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      
+      x[1] = __shfl((int)x[1], x3_target_lane);
+      x[2] = __shfl((int)x[2], x2_target_lane);
+      x[3] = __shfl((int)x[3], x1_target_lane);
     }
 
 #pragma unroll 4
@@ -384,26 +390,28 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
 
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
+
+      // Column Mixing phase of chacha
+      CHACHA_PRIMITIVE(0 ,3, 1, 16)
+      CHACHA_PRIMITIVE(2 ,1, 3, 12)
+      CHACHA_PRIMITIVE(0 ,3, 1,  8)
+      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      
+      x[1] = __shfl((int)x[1], x1_target_lane);
+      x[2] = __shfl((int)x[2], x2_target_lane);
+      x[3] = __shfl((int)x[3], x3_target_lane);
+      
+      // Diagonal Mixing phase of chacha
       CHACHA_PRIMITIVE(0 ,3, 1, 16)
       CHACHA_PRIMITIVE(2 ,1, 3, 12)
       CHACHA_PRIMITIVE(0 ,3, 1,  8)
       CHACHA_PRIMITIVE(2 ,1, 3,  7)
       
       x[1] = __shfl((int)x[1], x3_target_lane);
+      x[2] = __shfl((int)x[2], x2_target_lane);
       x[3] = __shfl((int)x[3], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      
-      CHACHA_PRIMITIVE(0 ,1, 3, 16)
-      CHACHA_PRIMITIVE(2 ,3, 1, 12)
-      CHACHA_PRIMITIVE(0 ,1, 3,  8)
-      CHACHA_PRIMITIVE(2 ,3, 1,  7)
-      
-      x[3] = __shfl((int)x[3], x3_target_lane);
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
     }
 
-    // At the end of these iterations, the data is in primary order again.
 #undef CHACHA_PRIMITIVE
 
 #pragma unroll 4
