@@ -191,7 +191,7 @@ __device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t b
  * in internal processing order.
  */
 
-__device__  __forceinline__ void load_key(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
@@ -213,7 +213,7 @@ __device__  __forceinline__ void load_key(const uint32_t *B, uint32_t b[4], uint
  * region of B in external order.
  */
 
-__device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void store_key_salsa(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
@@ -224,6 +224,45 @@ __device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t 
   for (int i = 0; i < 4; i++) {
     B[key_offset + 4*thread_in_block + (thread_in_block+i)%4] = b[i];
     B[key_offset + 4*thread_in_block + (thread_in_block+i)%4 + 16] = bx[i];
+  }
+}
+
+
+/*
+ * load_key loads a 32*32bit key from a contiguous region of memory in B.
+ * The input keys are in external order (i.e., 0, 1, 2, 3, ...).
+ * After loading, each thread has its four b and four bx keys stored
+ * in internal processing order.
+ */
+
+__device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int key_offset = scrypt_block * 32;
+  uint32_t thread_in_block = threadIdx.x % 4;
+
+  // Read in permuted order. Key loads are not our bottleneck right now.
+#pragma unroll 4
+  for (int i = 0; i < 4; i++) {
+    b[i] = B[key_offset + 4*i + thread_in_block%4];
+    bx[i] = B[key_offset + 4*i + thread_in_block%4 + 16];
+  }
+}
+
+/*
+ * store_key performs the opposite transform as load_key, taking
+ * internally-ordered b and bx and storing them into a contiguous
+ * region of B in external order.
+ */
+
+__device__  __forceinline__ void store_key_chacha(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int key_offset = scrypt_block * 32;
+  uint32_t thread_in_block = threadIdx.x % 4;
+
+#pragma unroll 4
+  for (int i = 0; i < 4; i++) {
+    B[key_offset + 4*i + thread_in_block%4] = b[i];
+    B[key_offset + 4*i + thread_in_block%4 + 16] = bx[i];
   }
 }
 
@@ -451,7 +490,10 @@ void kepler_scrypt_core_kernelA(const uint32_t *d_idata) {
    */
   uint32_t b[4], bx[4];
 
-  load_key(d_idata, b, bx);
+  switch(ALGO) {
+    case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
+    case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
+  }
   
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -514,7 +556,11 @@ void kepler_scrypt_core_kernelB(uint32_t *d_odata) {
     }
   }
 
-  store_key(d_odata, b, bx);
+  switch(ALGO) {
+    case ALGO_SCRYPT:      store_key_salsa(d_odata, b, bx); break;
+    case ALGO_SCRYPT_JANE: store_key_chacha(d_odata, b, bx); break;
+  }
+  
 }
 
 KeplerKernel::KeplerKernel() : KernelInterface()
