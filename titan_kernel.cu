@@ -6,7 +6,6 @@
  */
 
 // TODO: support for chunked memory allocation
-//       support for 1D and 2D texture cache on Compute 3.0 devices
 //       attempt V.Volkov style ILP (factor 4)
 
 #ifdef WIN32
@@ -20,20 +19,21 @@
 
 #include <cuda.h>
 
+#include "miner.h"
 #include "titan_kernel.h"
 
-static const int THREADS_PER_SCRYPT_BLOCK = 4;
-static const int SCRYPT_SCRATCH_PER_BLOCK = (32*1024);
+#undef SCRATCH
+#define SCRATCH (c_N*32+64)
 
 #if __CUDA_ARCH__ < 350 
     // Kepler (Compute 3.0)
     #define __ldg(x) (*(x))
-    #define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); }
-#else
-    // Kepler (Compute 3.5)
-    #define ROTL(a, b) __funnelshift_l( a, a, b );
-    #define XOR_ROTATE_ADD(dst, s1, s2, amt) x[dst] ^= ROTL(x[s1]+x[s2], amt);
 #endif
+
+// iteration count
+__constant__ unsigned int c_N;
+
+static const int THREADS_PER_SCRYPT_BLOCK = 4;
 
 /* write_keys writes the 8 keys being processed by a warp to the global
  * scratchpad. To effectively use memory bandwidth, it performs the writes
@@ -84,7 +84,7 @@ void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t *scra
 __device__ __forceinline__
 void write_keys(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + (32*start) + 8*(threadIdx.x%4);
+  start = scrypt_block*SCRATCH + (32*start) + 8*(threadIdx.x%4);
   write_keys_direct(b, bx, scratch, start);
 }
 
@@ -155,7 +155,7 @@ __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx
 
 __device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + (32*start);
+  start = scrypt_block*SCRATCH + (32*start);
   read_xor_keys_direct(b, bx, scratch, start);
 }
 
@@ -184,7 +184,7 @@ __device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t b
  * in internal processing order.
  */
 
-__device__  __forceinline__ void load_key(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
@@ -206,7 +206,7 @@ __device__  __forceinline__ void load_key(const uint32_t *B, uint32_t b[4], uint
  * region of B in external order.
  */
 
-__device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void store_key_salsa(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
@@ -222,6 +222,45 @@ __device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t 
 
 
 /*
+ * load_key loads a 32*32bit key from a contiguous region of memory in B.
+ * The input keys are in external order (i.e., 0, 1, 2, 3, ...).
+ * After loading, each thread has its four b and four bx keys stored
+ * in internal processing order.
+ */
+
+__device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int key_offset = scrypt_block * 32;
+  uint32_t thread_in_block = threadIdx.x % 4;
+
+  // Read in permuted order. Key loads are not our bottleneck right now.
+#pragma unroll 4
+  for (int i = 0; i < 4; i++) {
+    b[i] = B[key_offset + 4*i + thread_in_block%4];
+    bx[i] = B[key_offset + 4*i + thread_in_block%4 + 16];
+  }
+}
+
+/*
+ * store_key performs the opposite transform as load_key, taking
+ * internally-ordered b and bx and storing them into a contiguous
+ * region of B in external order.
+ */
+
+__device__  __forceinline__ void store_key_chacha(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int key_offset = scrypt_block * 32;
+  uint32_t thread_in_block = threadIdx.x % 4;
+
+#pragma unroll 4
+  for (int i = 0; i < 4; i++) {
+    B[key_offset + 4*i + thread_in_block%4] = b[i];
+    B[key_offset + 4*i + thread_in_block%4 + 16] = bx[i];
+  }
+}
+
+
+/*
  * salsa_xor_core does the equivalent of the xor_salsa8 loop from
  * tarsnap's implementation of scrypt. The original scrypt called:
  * xor_salsa8(&X[0], &X[16]); <-- the "b" loop
@@ -229,6 +268,15 @@ __device__  __forceinline__ void store_key(uint32_t *B, uint32_t b[4], uint32_t 
  * This version is unrolled to handle both of these loops in a single
  * call to avoid unnecessary data movement.
  */
+
+#if __CUDA_ARCH__ < 350 
+    // Kepler (Compute 3.0)
+    #define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); }
+#else
+    // Kepler (Compute 3.5)
+    #define ROTL(a, b) __funnelshift_l( a, a, b );
+    #define XOR_ROTATE_ADD(dst, s1, s2, amt) x[dst] ^= ROTL(x[s1]+x[s2], amt);
+#endif
 
 __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
                                  const int x1_target_lane,
@@ -319,6 +367,107 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
 
 
 /*
+ * chacha_xor_core (ChaCha20/8 cypher)
+ * This version is unrolled to handle both of these loops in a single
+ * call to avoid unnecessary data movement.
+ * 
+ * load_key and store_key must not use primary order when
+ * using ChaCha20/8, but rather the basic transposed order
+ * (referred to as "column mode" below)
+ */
+
+#if __CUDA_ARCH__ < 350 
+    // Kepler (Compute 3.0)
+    #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { x[pt] += x[ps]; uint32_t tmp = x[rt] ^ x[pt]; x[rt] = ((tmp<<amt)|(tmp>>(32-amt))); }
+#else
+    // Kepler (Compute 3.5)
+    #define ROTL(a, b) __funnelshift_l( a, a, b );
+    #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { x[pt] += x[ps]; x[rt] = ROTL(x[rt] ^ x[pt],amt); }
+#endif
+
+__device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
+                                 const int x1_target_lane,
+                                 const int x2_target_lane,
+                                 const int x3_target_lane) {
+    uint32_t x[4];
+
+#pragma unroll 4
+    for (int i = 0; i < 4; i++) {
+      b[i] ^= bx[i];
+      x[i] = b[i];
+    }
+
+    // Enter in "column" mode (t0 has 0, 4,  8, 12)
+    //                        (t1 has 1, 5,  9, 13)
+    //                        (t2 has 2, 6, 10, 14)
+    //                        (t3 has 3, 7, 11, 15)
+
+#pragma unroll 4
+    for (int j = 0; j < 4; j++) {
+    
+      // Column Mixing phase of chacha
+      CHACHA_PRIMITIVE(0 ,3, 1, 16)
+      CHACHA_PRIMITIVE(2 ,1, 3, 12)
+      CHACHA_PRIMITIVE(0 ,3, 1,  8)
+      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      
+      x[1] = __shfl((int)x[1], x1_target_lane);
+      x[2] = __shfl((int)x[2], x2_target_lane);
+      x[3] = __shfl((int)x[3], x3_target_lane);
+      
+      // Diagonal Mixing phase of chacha
+      CHACHA_PRIMITIVE(0 ,3, 1, 16)
+      CHACHA_PRIMITIVE(2 ,1, 3, 12)
+      CHACHA_PRIMITIVE(0 ,3, 1,  8)
+      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      
+      x[1] = __shfl((int)x[1], x3_target_lane);
+      x[2] = __shfl((int)x[2], x2_target_lane);
+      x[3] = __shfl((int)x[3], x1_target_lane);
+    }
+
+#pragma unroll 4
+    for (int i = 0; i < 4; i++) {
+      b[i] += x[i];
+      // The next two lines are the beginning of the BX-centric loop iteration
+      bx[i] ^= b[i];
+      x[i] = bx[i];
+    }
+
+#pragma unroll 4
+    for (int j = 0; j < 4; j++) {
+
+      // Column Mixing phase of chacha
+      CHACHA_PRIMITIVE(0 ,3, 1, 16)
+      CHACHA_PRIMITIVE(2 ,1, 3, 12)
+      CHACHA_PRIMITIVE(0 ,3, 1,  8)
+      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      
+      x[1] = __shfl((int)x[1], x1_target_lane);
+      x[2] = __shfl((int)x[2], x2_target_lane);
+      x[3] = __shfl((int)x[3], x3_target_lane);
+      
+      // Diagonal Mixing phase of chacha
+      CHACHA_PRIMITIVE(0 ,3, 1, 16)
+      CHACHA_PRIMITIVE(2 ,1, 3, 12)
+      CHACHA_PRIMITIVE(0 ,3, 1,  8)
+      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      
+      x[1] = __shfl((int)x[1], x3_target_lane);
+      x[2] = __shfl((int)x[2], x2_target_lane);
+      x[3] = __shfl((int)x[3], x1_target_lane);
+    }
+
+#undef CHACHA_PRIMITIVE
+
+#pragma unroll 4
+    for (int i = 0; i < 4; i++) {
+      bx[i] += x[i];
+    }
+}
+
+
+/*
  * The hasher_gen_kernel operates on a group of 1024-bit input keys
  * in B, stored as:
  * B = { k1B k1Bx k2B k2Bx ... }
@@ -338,7 +487,7 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
  * and similarly for kx.
  */
 
-__global__
+template <int ALGO> __global__
 void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
 
   /* Each thread operates on four of the sixteen B and Bx variables. Thus,
@@ -348,7 +497,10 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
    */
   uint32_t b[4], bx[4];
 
-  load_key(d_idata, b, bx);
+  switch(ALGO) {
+    case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
+    case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
+  }
   
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -356,11 +508,14 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
   int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + 8*(threadIdx.x%4);
+  int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
 
   write_keys_direct(b, bx, scratch, start);
-  for (int i = 1; i < 1024; i++) {
-    salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
+  for (int i = 1; i < c_N; i++) {
+    switch(ALGO) {
+      case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+      case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+    }
     write_keys_direct(b, bx, scratch, start+32*i);
   }
 }
@@ -372,7 +527,7 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
  * the scratch buffer in pseudorandom order, mixing the key as it goes.
  */
 
-__global__
+template <int ALGO> __global__
 void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
 
   /* Each thread operates on a group of four variables that must be processed
@@ -381,28 +536,37 @@ void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
   uint32_t b[4], bx[4];
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*SCRYPT_SCRATCH_PER_BLOCK + 8*(threadIdx.x%4);
+  int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
 
-  read_keys_direct(b, bx, scratch, start+32*1023);
+  read_keys_direct(b, bx, scratch, start+32*(c_N-1));
 
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
   int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
 
-  salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
-
-  for (int i = 0; i < 1024; i++) {
-
-    // Bounce through the key space and XOR the new keys in.
-    // Critical thing: (X[16] & 1023) tells us the next slot to read.
-    // X[16] in the original is bx[0]
-    int slot = bx[0] & 1023;
-    read_xor_keys(b, bx, scratch, slot);
-    salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane);
+  switch(ALGO) {
+    case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+    case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
   }
 
-  store_key(d_odata, b, bx);
+  for (int i = 0; i < c_N; i++) {
+
+    // Bounce through the key space and XOR the new keys in.
+    // Critical thing: (X[16] & (c_N-1)) tells us the next slot to read.
+    // X[16] in the original is bx[0]
+    int slot = bx[0] & (c_N-1);
+    read_xor_keys(b, bx, scratch, slot);
+    switch(ALGO) {
+      case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+      case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+    }
+  }
+
+  switch(ALGO) {
+    case ALGO_SCRYPT:      store_key_salsa(d_odata, b, bx); break;
+    case ALGO_SCRYPT_JANE: store_key_chacha(d_odata, b, bx); break;
+  }
 }
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
@@ -419,19 +583,32 @@ void TitanKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     d_scratch = h_V[0];
 }
 
-bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache)
+bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int init_N, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 
     // clear CUDA's error variable
     cudaGetLastError();
 
-    // this kernel needs 4 threads per work unit. We scale up the grid x dimension to compensate.
-    grid.x *= 4;
+    // this kernel needs 4 threads per work unit. 
+    switch(opt_algo) {
+      case ALGO_SCRYPT: grid.x *= 4; break; // scrypt: We scale up the grid x dimension to compensate.
+      case ALGO_SCRYPT_JANE: threads.x *= 4; break; // scrypt-jane: we scale up thread block size
+    }
+
+    // make constant "N" available to kernel
+    static int prev_N = 0;
+    if (init_N != prev_N) {
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &init_N, sizeof(unsigned int), 0, cudaMemcpyHostToDevice, stream));
+        prev_N = init_N;
+    }
 
     // First phase: Sequential writes to scratchpad.
 
-    titan_scrypt_core_kernelA<<< grid, threads, 0, stream >>>(d_idata, d_scratch);
+    switch(opt_algo) {
+      case ALGO_SCRYPT: titan_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata, d_scratch); break;
+      case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, d_scratch); break;
+    }
 
     // Optional millisecond sleep in between kernels
 
@@ -446,7 +623,10 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
 
     // Second phase: Random read access from scratchpad.
 
-    titan_scrypt_core_kernelB<<< grid, threads, 0, stream >>>(d_odata, d_scratch);
+    switch(opt_algo) {
+        case ALGO_SCRYPT: titan_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch); break;
+        case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch); break;
+    }
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;

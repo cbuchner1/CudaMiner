@@ -230,6 +230,8 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	const uint32_t *ptarget,
 	uint32_t max_nonce, unsigned long *hashes_done)
 {
+	const uint32_t Htarg = ptarget[7];
+
 	int Nfactor = GetNfactor(bswap_32x4(pdata[17]));
 	if (Nfactor > scrypt_maxN) {
 		scrypt_fatal_error("scrypt: N out of range");
@@ -352,34 +354,31 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 
 		for(int i=0;i<throughput;++i) {
 			volatile unsigned char *hashc = (unsigned char *)&hash[8*i];
-			if (hashc[31] == 0 && hashc[30] == 0) {
 
-				if(fulltest(&hash[8*i], ptarget)) {
+			if (hash[8*i+7] <= Htarg && fulltest(&hash[8*i], ptarget)) {
 
-					uint32_t tmp_nonce = nonce[cur]+i;
-					applog(LOG_INFO, "GPU #%d: %s candidate nonce %u (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], tmp_nonce, i, cur);
+				uint32_t tmp_nonce = nonce[cur]+i;
 					
-					uint32_t thash[8], tdata[20];
-					for(int z=0;z<20;z++) tdata[z] = bswap_32x4(pdata[z]);
-					tdata[19] = bswap_32x4(tmp_nonce);
-					scrypt_pbkdf2_1((unsigned char *)tdata, 80, (unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128);
-					scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf[cur].ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr), (scrypt_mix_word_t *)(Vbuf.ptr), N);
-					scrypt_pbkdf2_1((unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)thash, 32);
-					if (memcmp(thash, &hash[8*i], 32) == 0)
-					{
-						*hashes_done = (n-throughput) - pdata[19] + 1;
-						pdata[19] = tmp_nonce;
-						scrypt_free(&Vbuf);
-						scrypt_free(&Ybuf);
-						scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
-						delete[] data[0]; delete[] data[1];
-						delete[] hash;
-						return 1;
-					}
-					else
-					{
-						applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], i, cur);
-					}
+				uint32_t thash[8], tdata[20];
+				for(int z=0;z<20;z++) tdata[z] = bswap_32x4(pdata[z]);
+				tdata[19] = bswap_32x4(tmp_nonce);
+				scrypt_pbkdf2_1((unsigned char *)tdata, 80, (unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128);
+				scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf[cur].ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr), (scrypt_mix_word_t *)(Vbuf.ptr), N);
+				scrypt_pbkdf2_1((unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)thash, 32);
+				if (memcmp(thash, &hash[8*i], 32) == 0)
+				{
+					*hashes_done = (n-throughput) - pdata[19] + 1;
+					pdata[19] = tmp_nonce;
+					scrypt_free(&Vbuf);
+					scrypt_free(&Ybuf);
+					scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
+					delete[] data[0]; delete[] data[1];
+					delete[] hash;
+					return 1;
+				}
+				else
+				{
+					applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], i, cur);
 				}
 			}
 		}

@@ -484,13 +484,13 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             bool r = false;
                             while (repeat < 3)  // average up to 3 measurements for better exactness
                             {
-                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, 1024, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
                                 gettimeofday(&tv_end, NULL);
                                 // bail out if 50ms taken (to speed up autotuning...)
-                                if ((1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) > 0.05) break;
+                                if (opt_algo == ALGO_SCRYPT && (1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) > 0.05) break;
                             }
                             if (cudaGetLastError() != cudaSuccess || !r) continue;
 
@@ -499,7 +499,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             if (device_interactive[thr_id] && GRID_BLOCKS > 2*props.multiProcessorCount && tdelta > 1.0/30)
                                 if (WARPS_PER_BLOCK == 1) goto skip; else goto skip2;
 
-                            khash_sec = WU_PER_LAUNCH / (tdelta * 1e3);
+                            khash_sec = (double)WU_PER_LAUNCH / (tdelta * 1e3);
                             kHash[WARPS_PER_BLOCK] = khash_sec;
                             if (khash_sec > best_khash_sec) {
                                 optimal_blocks = GRID_BLOCKS;
@@ -524,7 +524,7 @@ skip2:              ;
                         for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
                             char tmp[16];
                             if (kHash[i]>0)
-                                sprintf(tmp, "%5.1f%c", kHash[i], (i<kernel->max_warps_per_block())?'|':' ');
+                                sprintf(tmp, opt_algo == ALGO_SCRYPT_JANE ? "%5.3f%c" : "%5.1f%c", kHash[i], (i<kernel->max_warps_per_block())?'|':' ');
                             else
                                 sprintf(tmp, "     %c", (i<kernel->max_warps_per_block())?'|':' ');
                             strcat(line, tmp);
@@ -813,12 +813,12 @@ computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
     for (k = 0; k < 32; k++)
         X[k] = idata[k];
     
-    for (i = 0; i < 1024; i++) {
+    for (i = 0; i < N; i++) {
         memcpy(&V[i * 32], X, 128);
         xor_salsa8(&X[0], &X[16]);
         xor_salsa8(&X[16], &X[0]);
     }
-    for (i = 0; i < 1024; i++) {
+    for (i = 0; i < N; i++) {
         j = 32 * (X[16] & 1023);
         for (k = 0; k < 32; k++)
             X[k] ^= V[j + k];
