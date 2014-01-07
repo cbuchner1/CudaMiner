@@ -99,11 +99,7 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
 
     if (!benchmark && interactive) {
         checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-#ifdef WIN32
-        Sleep(1);
-#else
-        usleep(1000);
-#endif
+        usleep(100);
     }
 
     // Second phase: Random read access from scratchpad.

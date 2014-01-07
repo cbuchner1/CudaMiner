@@ -696,25 +696,31 @@ skip:           ;
 cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
 {
     cudaError_t result = cudaSuccess;
-    static double tsum[3][8] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-
-    double tsync = 0.0;
-    double tsleep = 0.95 * tsum[situation][thr_id];
-    if (cudaStreamQuery(stream) == cudaErrorNotReady)
+    if (situation >= 0 && situation <= 2)
     {
-#ifdef WIN32
-        Sleep((DWORD)(1000*tsleep));
-#else
-        usleep((useconds_t)(1e6*tsleep));
-#endif
-        struct timeval tv_start, tv_end;
-        gettimeofday(&tv_start, NULL);
-        checkCudaErrors(result = cudaStreamSynchronize(stream));
-        gettimeofday(&tv_end, NULL);
-        tsync = 1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec);
-    }
-    if (tsync >= 0) tsum[situation][thr_id] = 0.95 * tsum[situation][thr_id] + 0.05 * (tsleep+tsync);
+        static double tsum[3][8] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
+        double tsync = 0.0;
+        double tsleep = 0.95 * tsum[situation][thr_id];
+        if (cudaStreamQuery(stream) == cudaErrorNotReady)
+        {
+    #ifdef WIN32
+            Sleep((DWORD)(1000*tsleep));
+    #else
+            usleep((useconds_t)(1e6*tsleep));
+    #endif
+            struct timeval tv_start, tv_end;
+            gettimeofday(&tv_start, NULL);
+            checkCudaErrors(result = cudaStreamSynchronize(stream));
+            gettimeofday(&tv_end, NULL);
+            tsync = 1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec);
+        }
+        if (tsync >= 0) tsum[situation][thr_id] = 0.95 * tsum[situation][thr_id] + 0.05 * (tsleep+tsync);
+    }
+    else
+    {
+        checkCudaErrors(result = cudaStreamSynchronize(stream));
+    }
     return result;
 }
 
@@ -760,11 +766,7 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
 
     if (device_interactive[thr_id]) {
 //        checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 2, thr_id));
-#ifdef WIN32
-        Sleep(1);
-#else
-        usleep(1000);
-#endif
+        usleep(100);
     }
 
     context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, device_interactive[thr_id], false, device_texturecache[thr_id]);

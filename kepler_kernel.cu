@@ -651,7 +651,7 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
 
     // First phase: Sequential writes to scratchpad.
 
-    int batch = 8192;
+    int batch = 1024;
 
     int pos = 0;
     do 
@@ -664,12 +664,8 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
         // Optional millisecond sleep in between kernels
 
         if (!benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-    #ifdef WIN32
-            Sleep(1);
-    #else
-            usleep(1000);
-    #endif
+            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
+            usleep(100);
         }
         pos += batch;
     } while (pos < init_N);
@@ -680,12 +676,8 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     do
     {
         if (pos > 0 && !benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-    #ifdef WIN32
-            Sleep(1);
-    #else
-            usleep(1000);
-    #endif
+            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
+            usleep(100);
         }
 
         if (texture_cache)
