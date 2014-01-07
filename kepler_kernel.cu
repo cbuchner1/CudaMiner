@@ -484,7 +484,7 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
  */
 
 template <int ALGO> __global__
-void kepler_scrypt_core_kernelA(const uint32_t *d_idata) {
+void kepler_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
 
   /* Each thread operates on four of the sixteen B and Bx variables. Thus,
    * each key is processed by four threads in parallel. salsa_scrypt_core
@@ -493,11 +493,6 @@ void kepler_scrypt_core_kernelA(const uint32_t *d_idata) {
    */
   uint32_t b[4], bx[4];
 
-  switch(ALGO) {
-    case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
-    case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
-  }
-  
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
@@ -506,13 +501,29 @@ void kepler_scrypt_core_kernelA(const uint32_t *d_idata) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
 
-  write_keys_direct(b, bx, start);
-  for (int i = 1; i < c_N; i++) {
+  int i=begin;
+
+  if (i == 0)
+  {
+      switch(ALGO) {
+        case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
+        case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
+      }
+      write_keys_direct(b, bx, start);
+      ++i;
+  }
+  else
+  {
+      read_keys_direct<0>(b, bx, start+32*(i-1));
+  }
+  
+  while (i < end) {
     switch(ALGO) {
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
       case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
     }
     write_keys_direct(b, bx, start+32*i);
+    ++i;
   }
 }
 
@@ -524,7 +535,7 @@ void kepler_scrypt_core_kernelA(const uint32_t *d_idata) {
  */
 
 template <int ALGO, int TEX_DIM> __global__
-void kepler_scrypt_core_kernelB(uint32_t *d_odata) {
+void kepler_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
 
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
@@ -534,19 +545,29 @@ void kepler_scrypt_core_kernelB(uint32_t *d_odata) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
 
-  read_keys_direct<TEX_DIM>(b, bx, start+32*(c_N-1));
-
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
   int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
 
-  switch(ALGO) {
-    case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-    case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+  if (begin == 0)
+  {
+      read_keys_direct<TEX_DIM>(b, bx, start+32*(c_N-1));
+
+      switch(ALGO) {
+        case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+        case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+      }
+  }
+  else
+  {
+      switch(ALGO) {
+        case ALGO_SCRYPT:      load_key_salsa(d_odata, b, bx); break;
+        case ALGO_SCRYPT_JANE: load_key_chacha(d_odata, b, bx); break;
+      }
   }
 
-  for (int i = 0; i < c_N; i++) {
+  for (int i = begin; i < end; i++) {
 
     // Bounce through the key space and XOR the new keys in.
     // Critical thing: (X[16] & (c_N-1)) tells us the next slot to read.
@@ -630,42 +651,63 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
 
     // First phase: Sequential writes to scratchpad.
 
-    switch(opt_algo) {
-      case ALGO_SCRYPT: kepler_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata); break;
-      case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata); break;
-    }
+    int batch = 8192;
 
-    // Optional millisecond sleep in between kernels
+    int pos = 0;
+    do 
+    {
+        switch(opt_algo) {
+          case ALGO_SCRYPT: kepler_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, init_N)); break;
+          case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, init_N)); break;
+        }
 
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-#ifdef WIN32
-        Sleep(1);
-#else
-        usleep(1000);
-#endif
-    }
+        // Optional millisecond sleep in between kernels
+
+        if (!benchmark && interactive) {
+            checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
+    #ifdef WIN32
+            Sleep(1);
+    #else
+            usleep(1000);
+    #endif
+        }
+        pos += batch;
+    } while (pos < init_N);
 
     // Second phase: Random read access from scratchpad.
 
-    if (texture_cache)
+    pos = 0;
+    do
     {
-        if (texture_cache == 1)
-            switch(opt_algo) {
-                case ALGO_SCRYPT: kepler_scrypt_core_kernelB<ALGO_SCRYPT,1><<< grid, threads, 0, stream >>>(d_odata); break;
-                case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, 0, stream >>>(d_odata); break;
-            }
-        else if (texture_cache == 2)
-            switch(opt_algo) {
-                case ALGO_SCRYPT: kepler_scrypt_core_kernelB<ALGO_SCRYPT,2><<< grid, threads, 0, stream >>>(d_odata); break;
-                case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, 0, stream >>>(d_odata); break;
-            }
-    }
-    else
-        switch(opt_algo) {
-            case ALGO_SCRYPT: kepler_scrypt_core_kernelB<ALGO_SCRYPT,0><<< grid, threads, 0, stream >>>(d_odata); break;
-            case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, 0, stream >>>(d_odata); break;
+        if (pos > 0 && !benchmark && interactive) {
+            checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
+    #ifdef WIN32
+            Sleep(1);
+    #else
+            usleep(1000);
+    #endif
         }
+
+        if (texture_cache)
+        {
+            if (texture_cache == 1)
+                switch(opt_algo) {
+                    case ALGO_SCRYPT: kepler_scrypt_core_kernelB<ALGO_SCRYPT,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, init_N)); break;
+                    case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, init_N)); break;
+                }
+            else if (texture_cache == 2)
+                switch(opt_algo) {
+                    case ALGO_SCRYPT: kepler_scrypt_core_kernelB<ALGO_SCRYPT,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, init_N)); break;
+                    case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, init_N)); break;
+                }
+        }
+        else
+            switch(opt_algo) {
+                case ALGO_SCRYPT: kepler_scrypt_core_kernelB<ALGO_SCRYPT,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, init_N)); break;
+                case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, init_N)); break;
+        }
+        pos += batch;
+    } while (pos < init_N);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
