@@ -22,7 +22,7 @@
 #include "kepler_kernel.h"
 
 #undef SCRATCH
-#define SCRATCH (c_N*32+64)
+#define SCRATCH (c_N*32)
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[1024];
@@ -651,7 +651,7 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
 
     // First phase: Sequential writes to scratchpad.
 
-    int batch = 1024;
+    int batch = device_batchsize[thr_id];
 
     int pos = 0;
     do 

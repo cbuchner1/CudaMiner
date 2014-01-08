@@ -43,6 +43,7 @@ bool abort_flag = false; // CB
 bool autotune = true;
 int device_map[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 int device_interactive[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+int device_batchsize[8] = { 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024 };
 int device_texturecache[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int device_singlememory[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
@@ -214,6 +215,9 @@ Options:\n\
   -i, --interactive     comma separated list of flags (0/1) specifying\n\
                         which of the CUDA device you need to run at inter-\n\
                         active frame rates (because it drives a display).\n\
+  -b, --batchsize       comma separated list of max. scrypt iterations that\n\
+                        are run in one kernel invocation. Default is 1024.\n\
+                        Increase for better performance in scrypt-jane.\n\
   -C, --texture-cache   comma separated list of flags (0/1) specifying\n\
                         which of the CUDA devices shall use the texture\n\
                         cache for mining. Kepler devices will profit.\n\
@@ -246,7 +250,7 @@ static char const short_options[] =
 #ifdef HAVE_SYSLOG_H
 	"S"
 #endif
-	"a:c:Dhp:Px:qr:R:s:t:T:o:u:O:Vd:l:i:C:m:H:"; // CB 
+	"a:c:Dhp:Px:qr:R:s:t:T:o:u:O:Vd:l:i:b:C:m:H:"; // CB 
 
 static struct option const options[] = {
 	{ "algo", 1, NULL, 'a' },
@@ -1289,6 +1293,17 @@ static void parse_arg (int key, char *arg)
 				pch = strtok (NULL, ",");
 			}
 			while (tmp_n_threads < 8) device_interactive[tmp_n_threads++] = last;
+		}
+		break;
+	case 'b':
+		{
+			char * pch = strtok (arg,",");
+			int tmp_n_threads = 0, last = 0;
+			while (pch != NULL) {
+				device_batchsize[tmp_n_threads++] = last = atoi(pch);
+				pch = strtok (NULL, ",");
+			}
+			while (tmp_n_threads < 8) device_batchsize[tmp_n_threads++] = last;
 		}
 		break;
 	case 'C':

@@ -23,7 +23,7 @@
 #include "titan_kernel.h"
 
 #undef SCRATCH
-#define SCRATCH (c_N*32+64)
+#define SCRATCH (c_N*32)
 
 #if __CUDA_ARCH__ < 350 
     // Kepler (Compute 3.0)

@@ -239,6 +239,13 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	
 	N = (1 << (Nfactor + 1));
 
+	static int s_Nfactor = 0;
+	if (Nfactor != s_Nfactor)
+	{
+		s_Nfactor = Nfactor;
+		applog(LOG_INFO, "Current Nfactor is %d (N=%d)!", Nfactor, N);
+	}
+
 	parallel = 0;
 	int throughput = cuda_throughput(thr_id);
 

@@ -12,6 +12,7 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 // from salsa_kernel.cu
 extern int device_map[8];
 extern int device_interactive[8];
+extern int device_batchsize[8];
 extern int device_texturecache[8];
 extern int device_singlememory[8];
 extern char *device_config[8];
@@ -82,7 +83,7 @@ public:
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
 
 // make scratchpad size dependent on N
-#define SCRATCH (N*32+64)
+#define SCRATCH (N*32)
 
 // Not performing error checking is actually bad, but...
 #define checkCudaErrors(x) x
