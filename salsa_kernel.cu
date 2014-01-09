@@ -1,9 +1,8 @@
 //
 // Contains the autotuning logic and some utility functions.
-// Note that most CUDA kernels have been moved to other .cu files
-// except SHA-256, which remains here.
+// Note that all CUDA kernels have been moved to other .cu files
 //
-// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
+// NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=124
 //
 
 #ifdef WIN32
@@ -347,17 +346,13 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else {
             // compute no. of warps to allocate the largest number producing a single memory block below 4GB
-            for (int warp = 0x100000000ULL / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)); warp >= 1; --warp) {
+            for (int warp = 0x7FFFFFFF / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)); warp >= 1; --warp) {
                 cudaGetLastError(); // clear the error state
                 checkCudaErrors(cudaMalloc((void **)&d_V, SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t)));
                 if (cudaGetLastError() == cudaSuccess) {
                     checkCudaErrors(cudaFree(d_V)); d_V = NULL;
-#ifdef WIN32
-                    MAXWARPS[thr_id] = 94*warp/100; // Windows needs some breathing room to operate safely
+                    MAXWARPS[thr_id] = 90*warp/100; // Windows needs some breathing room to operate safely
                                                     // in particular when binding large 1D or 2D textures
-#else
-                    MAXWARPS[thr_id] = warp;
-#endif
                     break;
                 }
             }
@@ -374,10 +369,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             {
                 if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
                 {
-                    if ( optimal_blocks * WARPS_PER_BLOCK > MW_1D ) {
-                        applog(LOG_ERR, "GPU #%d: '%s' exceeds limits for 1D cache. Using 2D cache instead.", device_map[thr_id], device_config[thr_id]);
-                        device_texturecache[thr_id] = 2;
-                    }
+                    if ( optimal_blocks * WARPS_PER_BLOCK > MW_1D )
+                        applog(LOG_ERR, "GPU #%d: Given launch config '%s' exceeds limits for 1D cache.", device_map[thr_id], device_config[thr_id]);
                 }
                 // bind linear memory to a 1D texture reference
                 if (kernel->get_texel_width() == 2)
@@ -393,10 +386,6 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 else
                     kernel->bindtexture_2D(d_V, SCRATCH/4, WU_PER_WARP * MAXWARPS[thr_id], SCRATCH*sizeof(uint32_t));
             }
-        }
-        else
-        {
-            applog(LOG_ERR, "GPU #%d:Launch config '%s' requires too much memory!", device_map[thr_id], device_config[thr_id]);
         }
     }
     else
@@ -416,14 +405,12 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             if (cudaGetLastError() == cudaSuccess) h_V[thr_id][warp] += h_V_extra[thr_id][warp];
             else {
                 h_V_extra[thr_id][warp] = 0;
-#ifdef WIN32
                 // back off by two allocations to have some breathing room
                 for (int i=0; warp > 0 && i < 2; ++i) {
                     warp--;
                     checkCudaErrors(cudaFree(h_V[thr_id][warp]-h_V_extra[thr_id][warp]));
                     h_V[thr_id][warp] = NULL; h_V_extra[thr_id][warp] = 0;
                 }
-#endif
                 break;
             }
         }
@@ -435,9 +422,6 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     {
         if (optimal_blocks * WARPS_PER_BLOCK > MAXWARPS[thr_id])
             applog(LOG_ERR, "GPU #%d: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
-
-        if (WARPS_PER_BLOCK > kernel->max_warps_per_block())
-            applog(LOG_ERR, "GPU #%d: Given launch config '%s' exceeds warp limit for '%c' kernel.", device_map[thr_id], device_config[thr_id], kernel->get_identifier());
     }
     else
     {
@@ -473,7 +457,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
                 for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
                 {
-                    double kHash[32+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+                    double kHash[24+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
                     for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= kernel->max_warps_per_block(); ++WARPS_PER_BLOCK)
                     {
                         double khash_sec = 0;
@@ -492,24 +476,22 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             bool r = false;
                             while (repeat < 3)  // average up to 3 measurements for better exactness
                             {
-                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
                                 gettimeofday(&tv_end, NULL);
                                 // bail out if 50ms taken (to speed up autotuning...)
-                                if (opt_algo == ALGO_SCRYPT && (1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) > 0.05) break;
+                                if ((1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) > 0.05) break;
                             }
                             if (cudaGetLastError() != cudaSuccess || !r) continue;
 
                             tdelta = (1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) / repeat;
 
-                            // for scrypt: in interactive mode only find launch configs where kernel launch times are short enough
-                            // TODO: instead we could reduce the batchsize parameter to meet the launch time requirement.
-                            if (opt_algo == ALGO_SCRYPT && device_interactive[thr_id] && GRID_BLOCKS > 2*props.multiProcessorCount && tdelta > 1.0/30)
+                            if (device_interactive[thr_id] && GRID_BLOCKS > 2*props.multiProcessorCount && tdelta > 1.0/30)
                                 if (WARPS_PER_BLOCK == 1) goto skip; else goto skip2;
 
-                            khash_sec = (double)WU_PER_LAUNCH / (tdelta * 1e3);
+                            khash_sec = WU_PER_LAUNCH / (tdelta * 1e3);
                             kHash[WARPS_PER_BLOCK] = khash_sec;
                             if (khash_sec > best_khash_sec) {
                                 optimal_blocks = GRID_BLOCKS;
@@ -521,25 +503,23 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 skip2:              ;
                     if (opt_debug) {
                         if (GRID_BLOCKS == 1) {
-                            char line[512] = "    ";
+                            char line[256] = "    ";
                             for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
-                                char tmp[16]; sprintf(tmp, i < 10 ? "   x%-2d" : "  x%-2d ", i);
+                                char tmp[16]; sprintf(tmp, "   x%-2d", i);
                                 strcat(line, tmp);
-                                if (cw == 80 && (i % 8 == 0 && i != kernel->max_warps_per_block()))
-                                    strcat(line, "\n                          ");
+                                if (cw == 80 && (i == 8 || i == 16)) strcat(line, "\n                          ");
                             }
                             applog(LOG_DEBUG, line);
                         }
-                        char line[512]; sprintf(line, "%3d:", GRID_BLOCKS);
+                        char line[256]; sprintf(line, "%3d:", GRID_BLOCKS);
                         for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
                             char tmp[16];
                             if (kHash[i]>0)
-                                sprintf(tmp, opt_algo == ALGO_SCRYPT_JANE ? "%5.3f%c" : "%5.1f%c", kHash[i], (i<kernel->max_warps_per_block())?'|':' ');
+                                sprintf(tmp, "%5.1f%c", kHash[i], (i<kernel->max_warps_per_block())?'|':' ');
                             else
                                 sprintf(tmp, "     %c", (i<kernel->max_warps_per_block())?'|':' ');
                             strcat(line, tmp);
-                            if (cw == 80 && (i % 8 == 0 && i != kernel->max_warps_per_block()))
-                                strcat(line, "\n                          ");
+                            if (cw == 80 && (i == 8 || i == 16)) strcat(line, "\n                          ");
                         }
                         strcat(line, "kH/s");
                         applog(LOG_DEBUG, line);
@@ -706,31 +686,25 @@ skip:           ;
 cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
 {
     cudaError_t result = cudaSuccess;
-    if (situation >= 0 && situation <= 2)
-    {
-        static double tsum[3][8] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    static double tsum[3][8] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
-        double tsync = 0.0;
-        double tsleep = 0.95 * tsum[situation][thr_id];
-        if (cudaStreamQuery(stream) == cudaErrorNotReady)
-        {
-    #ifdef WIN32
-            Sleep((DWORD)(1000*tsleep));
-    #else
-            usleep((useconds_t)(1e6*tsleep));
-    #endif
-            struct timeval tv_start, tv_end;
-            gettimeofday(&tv_start, NULL);
-            checkCudaErrors(result = cudaStreamSynchronize(stream));
-            gettimeofday(&tv_end, NULL);
-            tsync = 1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec);
-        }
-        if (tsync >= 0) tsum[situation][thr_id] = 0.95 * tsum[situation][thr_id] + 0.05 * (tsleep+tsync);
-    }
-    else
+    double tsync = 0.0;
+    double tsleep = 0.95 * tsum[situation][thr_id];
+    if (cudaStreamQuery(stream) == cudaErrorNotReady)
     {
+#ifdef WIN32
+        Sleep((DWORD)(1000*tsleep));
+#else
+        usleep((useconds_t)(1e6*tsleep));
+#endif
+        struct timeval tv_start, tv_end;
+        gettimeofday(&tv_start, NULL);
         checkCudaErrors(result = cudaStreamSynchronize(stream));
+        gettimeofday(&tv_end, NULL);
+        tsync = 1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec);
     }
+    if (tsync >= 0) tsum[situation][thr_id] = 0.95 * tsum[situation][thr_id] + 0.05 * (tsleep+tsync);
+
     return result;
 }
 
@@ -765,7 +739,7 @@ extern "C" void cuda_scrypt_flush(int thr_id, int stream)
     checkCudaErrors(cudaStreamQuery(context_streams[stream][thr_id]));
 }
 
-extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
+extern "C" void cuda_scrypt_core(int thr_id, int stream)
 {
     int GRID_BLOCKS = context_blocks[thr_id];
     int WARPS_PER_BLOCK = context_wpb[thr_id];
@@ -776,10 +750,14 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
 
     if (device_interactive[thr_id]) {
 //        checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 2, thr_id));
-        usleep(100);
+#ifdef WIN32
+        Sleep(1);
+#else
+        usleep(1000);
+#endif
     }
 
-    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, device_interactive[thr_id], false, device_texturecache[thr_id]);
+    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], device_interactive[thr_id], false, device_texturecache[thr_id]);
 }
 
 extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
@@ -825,12 +803,12 @@ computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
     for (k = 0; k < 32; k++)
         X[k] = idata[k];
     
-    for (i = 0; i < N; i++) {
+    for (i = 0; i < 1024; i++) {
         memcpy(&V[i * 32], X, 128);
         xor_salsa8(&X[0], &X[16]);
         xor_salsa8(&X[16], &X[0]);
     }
-    for (i = 0; i < N; i++) {
+    for (i = 0; i < 1024; i++) {
         j = 32 * (X[16] & 1023);
         for (k = 0; k < 32; k++)
             X[k] ^= V[j + k];
@@ -1042,100 +1020,57 @@ __device__ void cuda_sha256_init(uint32_t *state)
  */
 __device__ void cuda_sha256_transform(uint32_t *state, const uint32_t *block)
 {
-    uint32_t W[64]; // only 4 of these are accessed during each partial Mix
+    uint32_t W[64]; // only 16 of these are accessed during each partial Mix
     uint32_t S[8];
     uint32_t t0, t1;
     int i;
 
-    /* 1. Initialize working variables. */
+    /* 1. Prepare message schedule W. */
+    mycpy64(W, block);
+
+    /* 2. Initialize working variables. */
     mycpy32(S, state);
 
-    /* 2. Prepare message schedule W and Mix. */
-    mycpy16(W, block);
+    /* 3. Mix. */
     RNDr(S, W,  0); RNDr(S, W,  1); RNDr(S, W,  2); RNDr(S, W,  3);
-
-    mycpy16(W+4, block+4);
     RNDr(S, W,  4); RNDr(S, W,  5); RNDr(S, W,  6); RNDr(S, W,  7);
-
-    mycpy16(W+8, block+8);
     RNDr(S, W,  8); RNDr(S, W,  9); RNDr(S, W, 10); RNDr(S, W, 11);
-
-    mycpy16(W+12, block+12);
     RNDr(S, W, 12); RNDr(S, W, 13); RNDr(S, W, 14); RNDr(S, W, 15);
 
-#pragma unroll 2
-    for (i = 16; i < 20; i += 2) {
+#pragma unroll 8
+    for (i = 16; i < 32; i += 2) {
         W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
+        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15];
+    }
+
     RNDr(S, W, 16); RNDr(S, W, 17); RNDr(S, W, 18); RNDr(S, W, 19);
-
-#pragma unroll 2
-    for (i = 20; i < 24; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 20); RNDr(S, W, 21); RNDr(S, W, 22); RNDr(S, W, 23);
-
-#pragma unroll 2
-    for (i = 24; i < 28; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 24); RNDr(S, W, 25); RNDr(S, W, 26); RNDr(S, W, 27);
-
-#pragma unroll 2
-    for (i = 28; i < 32; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 28); RNDr(S, W, 29); RNDr(S, W, 30); RNDr(S, W, 31);
 
-#pragma unroll 2
-    for (i = 32; i < 36; i += 2) {
+#pragma unroll 8
+    for (i = 32; i < 48; i += 2) {
         W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
+        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15];
+    }
+
     RNDr(S, W, 32); RNDr(S, W, 33); RNDr(S, W, 34); RNDr(S, W, 35);
-
-#pragma unroll 2
-    for (i = 36; i < 40; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 36); RNDr(S, W, 37); RNDr(S, W, 38); RNDr(S, W, 39);
-
-#pragma unroll 2
-    for (i = 40; i < 44; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 40); RNDr(S, W, 41); RNDr(S, W, 42); RNDr(S, W, 43);
-
-#pragma unroll 2
-    for (i = 44; i < 48; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 44); RNDr(S, W, 45); RNDr(S, W, 46); RNDr(S, W, 47);
 
-#pragma unroll 2
-    for (i = 48; i < 52; i += 2) {
+#pragma unroll 8
+    for (i = 48; i < 64; i += 2) {
         W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
+        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15];
+    }
+
     RNDr(S, W, 48); RNDr(S, W, 49); RNDr(S, W, 50); RNDr(S, W, 51);
-
-#pragma unroll 2
-    for (i = 52; i < 56; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 52); RNDr(S, W, 53); RNDr(S, W, 54); RNDr(S, W, 55);
-
-#pragma unroll 2
-    for (i = 56; i < 60; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 56); RNDr(S, W, 57); RNDr(S, W, 58); RNDr(S, W, 59);
-
-#pragma unroll 2
-    for (i = 60; i < 64; i += 2) {
-        W[i]   = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
-        W[i+1] = s1(W[i - 1]) + W[i - 6] + s0(W[i - 14]) + W[i - 15]; }
     RNDr(S, W, 60); RNDr(S, W, 61); RNDr(S, W, 62); RNDr(S, W, 63);
 
-    /* 3. Mix local working variables into global state */
+    /* 4. Mix local working variables into global state */
 #pragma unroll 8
     for (i = 0; i < 8; i++)
         state[i] += S[i];
@@ -1293,16 +1228,16 @@ extern "C" void prepare_sha256(int thr_id, uint32_t host_pdata[20], uint32_t hos
 
 extern "C" void pre_sha256(int thr_id, int stream, uint32_t nonce, int throughput)
 {
-    dim3 block(128);
-    dim3 grid((throughput+127)/128);
+    dim3 block(256);
+    dim3 grid((throughput+255)/256);
 
     cuda_pre_sha256<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_idata[stream][thr_id], context_tstate[stream][thr_id], context_ostate[stream][thr_id], nonce);
 }
 
 extern "C" void post_sha256(int thr_id, int stream, uint32_t hash[8], int throughput)
 {
-    dim3 block(128);
-    dim3 grid((throughput+127)/128);
+    dim3 block(256);
+    dim3 grid((throughput+255)/256);
 
     cuda_post_sha256<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_hash[stream][thr_id], context_tstate[stream][thr_id], context_ostate[stream][thr_id], context_odata[stream][thr_id]);
 
