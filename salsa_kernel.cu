@@ -347,13 +347,17 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else {
             // compute no. of warps to allocate the largest number producing a single memory block below 4GB
-            for (int warp = 0x7FFFFFFF / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)); warp >= 1; --warp) {
+            for (int warp = 0x100000000ULL / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)); warp >= 1; --warp) {
                 cudaGetLastError(); // clear the error state
                 checkCudaErrors(cudaMalloc((void **)&d_V, SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t)));
                 if (cudaGetLastError() == cudaSuccess) {
                     checkCudaErrors(cudaFree(d_V)); d_V = NULL;
+#ifdef WIN32
                     MAXWARPS[thr_id] = 94*warp/100; // Windows needs some breathing room to operate safely
                                                     // in particular when binding large 1D or 2D textures
+#else
+                    MAXWARPS[thr_id] = warp;
+#endif
                     break;
                 }
             }
@@ -412,12 +416,14 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             if (cudaGetLastError() == cudaSuccess) h_V[thr_id][warp] += h_V_extra[thr_id][warp];
             else {
                 h_V_extra[thr_id][warp] = 0;
+#ifdef WIN32
                 // back off by two allocations to have some breathing room
                 for (int i=0; warp > 0 && i < 2; ++i) {
                     warp--;
                     checkCudaErrors(cudaFree(h_V[thr_id][warp]-h_V_extra[thr_id][warp]));
                     h_V[thr_id][warp] = NULL; h_V_extra[thr_id][warp] = 0;
                 }
+#endif
                 break;
             }
         }
@@ -498,7 +504,9 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
                             tdelta = (1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) / repeat;
 
-                            if (device_interactive[thr_id] && GRID_BLOCKS > 2*props.multiProcessorCount && tdelta > 1.0/30)
+                            // for scrypt: in interactive mode only find launch configs where kernel launch times are short enough
+                            // TODO: instead we could reduce the batchsize parameter to meet the launch time requirement.
+                            if (opt_algo == ALGO_SCRYPT && device_interactive[thr_id] && GRID_BLOCKS > 2*props.multiProcessorCount && tdelta > 1.0/30)
                                 if (WARPS_PER_BLOCK == 1) goto skip; else goto skip2;
 
                             khash_sec = (double)WU_PER_LAUNCH / (tdelta * 1e3);

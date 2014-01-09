@@ -55,10 +55,11 @@ am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
 am_cudaminer_OBJECTS = cudaminer-cpu-miner.$(OBJEXT) \
 	cudaminer-util.$(OBJEXT) cudaminer-sha2.$(OBJEXT) \
-	cudaminer-scrypt.$(OBJEXT) salsa_kernel.$(OBJEXT) \
-	spinlock_kernel.$(OBJEXT) legacy_kernel.$(OBJEXT) \
-	fermi_kernel.$(OBJEXT) kepler_kernel.$(OBJEXT) \
-	test_kernel.$(OBJEXT) titan_kernel.$(OBJEXT)
+	cudaminer-scrypt.$(OBJEXT) cudaminer-scrypt-jane.$(OBJEXT) \
+	salsa_kernel.$(OBJEXT) spinlock_kernel.$(OBJEXT) \
+	legacy_kernel.$(OBJEXT) fermi_kernel.$(OBJEXT) \
+	kepler_kernel.$(OBJEXT) test_kernel.$(OBJEXT) \
+	titan_kernel.$(OBJEXT)
 cudaminer_OBJECTS = $(am_cudaminer_OBJECTS)
 cudaminer_DEPENDENCIES =
 cudaminer_LINK = $(CXXLD) $(AM_CXXFLAGS) $(CXXFLAGS) \
@@ -266,6 +267,7 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 			  cpu-miner.c util.c \
 			  sha2.c \
 			  scrypt.cpp \
+			  scrypt-jane.cpp scrypt-jane.h \
 			  salsa_kernel.cu salsa_kernel.h \
 			  spinlock_kernel.cu spinlock_kernel.h \
 			  legacy_kernel.cu legacy_kernel.h \
@@ -276,7 +278,7 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 
 cudaminer_LDFLAGS = $(PTHREAD_FLAGS) -L/usr/local/cuda/lib64
 cudaminer_LDADD = -L/usr/lib/x86_64-linux-gnu -lcurl -Wl,-Bsymbolic-functions -Wl,-z,relro compat/jansson/libjansson.a -lpthread  -lcudart -fopenmp 
-cudaminer_CPPFLAGS = -msse2  -fopenmp $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
+cudaminer_CPPFLAGS = -msse2  -fopenmp $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES) -DSCRYPT_KECCAK512 -DSCRYPT_CHACHA -DSCRYPT_CHOOSE_COMPILETIME
 all: cpuminer-config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
@@ -379,6 +381,7 @@ distclean-compile:
 	-rm -f *.tab.c
 
 include ./$(DEPDIR)/cudaminer-cpu-miner.Po
+include ./$(DEPDIR)/cudaminer-scrypt-jane.Po
 include ./$(DEPDIR)/cudaminer-scrypt.Po
 include ./$(DEPDIR)/cudaminer-sha2.Po
 include ./$(DEPDIR)/cudaminer-util.Po
@@ -466,6 +469,20 @@ cudaminer-scrypt.obj: scrypt.cpp
 #	source='scrypt.cpp' object='cudaminer-scrypt.obj' libtool=no \
 #	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) \
 #	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-scrypt.obj `if test -f 'scrypt.cpp'; then $(CYGPATH_W) 'scrypt.cpp'; else $(CYGPATH_W) '$(srcdir)/scrypt.cpp'; fi`
+
+cudaminer-scrypt-jane.o: scrypt-jane.cpp
+	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-scrypt-jane.o -MD -MP -MF $(DEPDIR)/cudaminer-scrypt-jane.Tpo -c -o cudaminer-scrypt-jane.o `test -f 'scrypt-jane.cpp' || echo '$(srcdir)/'`scrypt-jane.cpp
+	$(am__mv) $(DEPDIR)/cudaminer-scrypt-jane.Tpo $(DEPDIR)/cudaminer-scrypt-jane.Po
+#	source='scrypt-jane.cpp' object='cudaminer-scrypt-jane.o' libtool=no \
+#	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) \
+#	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-scrypt-jane.o `test -f 'scrypt-jane.cpp' || echo '$(srcdir)/'`scrypt-jane.cpp
+
+cudaminer-scrypt-jane.obj: scrypt-jane.cpp
+	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -MT cudaminer-scrypt-jane.obj -MD -MP -MF $(DEPDIR)/cudaminer-scrypt-jane.Tpo -c -o cudaminer-scrypt-jane.obj `if test -f 'scrypt-jane.cpp'; then $(CYGPATH_W) 'scrypt-jane.cpp'; else $(CYGPATH_W) '$(srcdir)/scrypt-jane.cpp'; fi`
+	$(am__mv) $(DEPDIR)/cudaminer-scrypt-jane.Tpo $(DEPDIR)/cudaminer-scrypt-jane.Po
+#	source='scrypt-jane.cpp' object='cudaminer-scrypt-jane.obj' libtool=no \
+#	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) \
+#	$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cudaminer_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS) -c -o cudaminer-scrypt-jane.obj `if test -f 'scrypt-jane.cpp'; then $(CYGPATH_W) 'scrypt-jane.cpp'; else $(CYGPATH_W) '$(srcdir)/scrypt-jane.cpp'; fi`
 
 # This directory's subdirectories are mostly independent; you can cd
 # into them and run `make' without going through this Makefile.
@@ -927,7 +944,7 @@ uninstall-am: uninstall-binPROGRAMS
 	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 spinlock_kernel.o: spinlock_kernel.cu
-	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=compute_12 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
 
 fermi_kernel.o: fermi_kernel.cu
 	$(NVCC) -g -O2 -Xptxas "-abi=no -v" -arch=sm_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
