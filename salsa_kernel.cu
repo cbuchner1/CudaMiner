@@ -370,8 +370,10 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             {
                 if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
                 {
-                    if ( optimal_blocks * WARPS_PER_BLOCK > MW_1D )
-                        applog(LOG_ERR, "GPU #%d: Given launch config '%s' exceeds limits for 1D cache.", device_map[thr_id], device_config[thr_id]);
+                    if ( optimal_blocks * WARPS_PER_BLOCK > MW_1D ) {
+                        applog(LOG_ERR, "GPU #%d: '%s' exceeds limits for 1D cache. Using 2D cache instead.", device_map[thr_id], device_config[thr_id]);
+                        device_texturecache[thr_id] = 2;
+                    }
                 }
                 // bind linear memory to a 1D texture reference
                 if (kernel->get_texel_width() == 2)
