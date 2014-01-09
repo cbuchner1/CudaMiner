@@ -22,16 +22,17 @@
 #include "miner.h"
 #include "titan_kernel.h"
 
-#undef SCRATCH
-#define SCRATCH (c_N*32)
-
 #if __CUDA_ARCH__ < 350 
     // Kepler (Compute 3.0)
     #define __ldg(x) (*(x))
 #endif
 
-// iteration count
-__constant__ unsigned int c_N;
+// iteration count N
+__constant__ uint32_t c_N;
+__constant__ uint32_t c_N_1;                  // N-1
+// scratch buffer size SCRATCH
+__constant__ uint32_t c_SCRATCH;
+
 
 static const int THREADS_PER_SCRYPT_BLOCK = 4;
 
@@ -84,7 +85,7 @@ void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t *scra
 __device__ __forceinline__
 void write_keys(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*SCRATCH + (32*start) + 8*(threadIdx.x%4);
+  start = scrypt_block*c_SCRATCH + (32*start) + 8*(threadIdx.x%4);
   write_keys_direct(b, bx, scratch, start);
 }
 
@@ -155,7 +156,7 @@ __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx
 
 __device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*SCRATCH + (32*start);
+  start = scrypt_block*c_SCRATCH + (32*start);
   read_xor_keys_direct(b, bx, scratch, start);
 }
 
@@ -488,7 +489,7 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
  */
 
 template <int ALGO> __global__
-void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
+void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch, int begin, int end) {
 
   /* Each thread operates on four of the sixteen B and Bx variables. Thus,
    * each key is processed by four threads in parallel. salsa_scrypt_core
@@ -497,26 +498,37 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
    */
   uint32_t b[4], bx[4];
 
-  switch(ALGO) {
-    case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
-    case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
-  }
-  
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
   int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
+  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
 
-  write_keys_direct(b, bx, scratch, start);
-  for (int i = 1; i < c_N; i++) {
+  int i=begin;
+
+  if (i == 0)
+  {
+      switch(ALGO) {
+        case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
+        case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
+      }
+      write_keys_direct(b, bx, scratch, start);
+      ++i;
+  }
+  else
+  {
+      read_keys_direct(b, bx, scratch, start+32*(i-1));
+  }
+  
+  while (i < end) {
     switch(ALGO) {
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
       case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
     }
     write_keys_direct(b, bx, scratch, start+32*i);
+    ++i;
   }
 }
 
@@ -528,7 +540,7 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch) {
  */
 
 template <int ALGO> __global__
-void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
+void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch, int begin, int end) {
 
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
@@ -536,26 +548,38 @@ void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch) {
   uint32_t b[4], bx[4];
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*SCRATCH + 8*(threadIdx.x%4);
+  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
 
-  read_keys_direct(b, bx, scratch, start+32*(c_N-1));
+  read_keys_direct(b, bx, scratch, start+32*(c_N_1));
 
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
   int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
 
-  switch(ALGO) {
-    case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-    case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+  if (begin == 0)
+  {
+      read_keys_direct(b, bx, scratch, start+32*(c_N_1));
+
+      switch(ALGO) {
+        case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+        case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
+      }
+  }
+  else
+  {
+      switch(ALGO) {
+        case ALGO_SCRYPT:      load_key_salsa(d_odata, b, bx); break;
+        case ALGO_SCRYPT_JANE: load_key_chacha(d_odata, b, bx); break;
+      }
   }
 
-  for (int i = 0; i < c_N; i++) {
+  for (int i = begin; i < end; i++) {
 
     // Bounce through the key space and XOR the new keys in.
-    // Critical thing: (X[16] & (c_N-1)) tells us the next slot to read.
+    // Critical thing: (X[16] & (c_N_1)) tells us the next slot to read.
     // X[16] in the original is bx[0]
-    int slot = bx[0] & (c_N-1);
+    int slot = bx[0] & (c_N_1);
     read_xor_keys(b, bx, scratch, slot);
     switch(ALGO) {
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
@@ -583,7 +607,7 @@ void TitanKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     d_scratch = h_V[0];
 }
 
-bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int init_N, bool interactive, bool benchmark, int texture_cache)
+bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 
@@ -598,31 +622,52 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
 
     // make constant "N" available to kernel
     static int prev_N = 0;
-    if (init_N != prev_N) {
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &init_N, sizeof(unsigned int), 0, cudaMemcpyHostToDevice, stream));
-        prev_N = init_N;
+    if (N != prev_N) {
+        uint32_t h_N = N;
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        prev_N = N;
+        uint32_t h_N_1 = N-1;
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        uint32_t h_SCRATCH = SCRATCH;
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH, &h_SCRATCH, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
     }
 
     // First phase: Sequential writes to scratchpad.
 
-    switch(opt_algo) {
-      case ALGO_SCRYPT: titan_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata, d_scratch); break;
-      case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, d_scratch); break;
-    }
+    int batch = device_batchsize[thr_id];
 
-    // Optional millisecond sleep in between kernels
+    int pos = 0;
+    do 
+    {
+        switch(opt_algo) {
+          case ALGO_SCRYPT: titan_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata, d_scratch, pos, min(pos+batch, N)); break;
+          case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, d_scratch, pos, min(pos+batch, N)); break;
+        }
+        // Optional millisecond sleep in between kernels
 
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-        usleep(100);
-    }
+        if (!benchmark && interactive) {
+            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
+            usleep(100);
+        }
+        pos += batch;
+    } while (pos < N);
 
     // Second phase: Random read access from scratchpad.
 
-    switch(opt_algo) {
-        case ALGO_SCRYPT: titan_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch); break;
-        case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch); break;
-    }
+    pos = 0;
+    do
+    {
+        if (pos > 0 && !benchmark && interactive) {
+            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
+            usleep(100);
+        }
+
+        switch(opt_algo) {
+            case ALGO_SCRYPT: titan_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch, pos, min(pos+batch, N)); break;
+        }
+        pos += batch;
+    } while (pos < N);
 
     // catch any kernel launch failures
     if (cudaPeekAtLastError() != cudaSuccess) success = false;
