@@ -178,6 +178,7 @@ extern bool abort_flag;    // CB
 extern int parallel;       // CB
 extern unsigned int N;     // CB
 extern enum sha256_algos opt_algo;  // CB
+extern bool opt_benchmark; // CB
 extern bool opt_debug;
 extern bool opt_protocol;
 extern int opt_timeout;

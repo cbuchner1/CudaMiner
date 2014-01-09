@@ -128,7 +128,7 @@ static const char *algo_names[] = {
 
 bool opt_debug = false;
 bool opt_protocol = false;
-static bool opt_benchmark = false;
+bool opt_benchmark = false;
 bool want_longpoll = true;
 bool have_longpoll = false;
 bool want_stratum = true;
