@@ -207,7 +207,7 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 		} else if (!strcmp(jane_params, "ZZC") || !strcasecmp(jane_params, "ZZCoin")) {
 			// ZcCoin:   1375817223, minN: 12, maxN: 30
 			Ntimestamp = 1375817223; minN= 12; maxN= 30;
-		} else if (!strcmp(jane_params, "FRC") || !strcasecmp(jane_params, "FreiCoin")) {
+		} else if (!strcmp(jane_params, "FEC") || !strcasecmp(jane_params, "FreeCoin")) {
 			// FreeCoin: 1375801200, minN:  6, maxN: 32
 			Ntimestamp = 1375801200; minN=  6; maxN= 32;
 		} else if (!strcmp(jane_params, "ONC") || !strcasecmp(jane_params, "OneCoin")) {
