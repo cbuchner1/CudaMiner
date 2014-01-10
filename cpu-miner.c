@@ -144,6 +144,7 @@ int opt_scantime = 5;
 static json_t *opt_config;
 static const bool opt_time = true;
 enum sha256_algos opt_algo = ALGO_SCRYPT; // CB
+char *jane_params = ""; // CB
 static int opt_n_threads;
 int num_processors; // CB
 static int num_gpus; // CB
@@ -1096,8 +1097,13 @@ static void parse_arg (int key, char *arg)
 				break;
 			}
 		}
-		if (i == ARRAY_SIZE(algo_names))
-			show_usage_and_exit(1);
+		if (i == ARRAY_SIZE(algo_names)) // CB
+			if (!strncmp(arg, algo_names[ALGO_SCRYPT_JANE], strlen(algo_names[ALGO_SCRYPT_JANE])) && arg[strlen(algo_names[ALGO_SCRYPT_JANE])] == ':')
+			{
+				jane_params = strdup(&arg[strlen(algo_names[ALGO_SCRYPT_JANE])+1]);
+				opt_algo = ALGO_SCRYPT_JANE;
+			}
+			else show_usage_and_exit(1);
 		break;
 	case 'B':
 		opt_background = true;

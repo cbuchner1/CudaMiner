@@ -189,16 +189,48 @@ scrypt_N_1_1(const uint8_t *password, size_t password_len, const uint8_t *salt, 
 
 
 // yacoin: increasing Nfactor gradually
-const unsigned char minNfactor = 4;
-const unsigned char maxNfactor = 30;
-
 unsigned char GetNfactor(unsigned int nTimestamp) {
 	int l = 0;
 
-	if (nTimestamp <= 1367991200)
-		return 4;
+	unsigned int Nfactor = 0;
 
-	unsigned long int s = nTimestamp - 1367991200;
+	// Yacoin defaults
+	unsigned int Ntimestamp = 1367991200;
+	unsigned int minN = 4;
+	unsigned int maxN = 30;
+	
+	if (strlen(jane_params) > 0) {
+		if (!strcmp(jane_params, "YAC") || !strcasecmp(jane_params, "Yacoin")) {} // No-Op
+		else if (!strcmp(jane_params, "YBC") || !strcasecmp(jane_params, "YBCoin")) {
+			// YBCoin:   1372386273, minN:  4, maxN: 30
+			Ntimestamp = 1372386273; minN=  4; maxN= 30;
+		} else if (!strcmp(jane_params, "ZZC") || !strcasecmp(jane_params, "ZZCoin")) {
+			// ZcCoin:   1375817223, minN: 12, maxN: 30
+			Ntimestamp = 1375817223; minN= 12; maxN= 30;
+		} else if (!strcmp(jane_params, "FRC") || !strcasecmp(jane_params, "FreiCoin")) {
+			// FreeCoin: 1375801200, minN:  6, maxN: 32
+			Ntimestamp = 1375801200; minN=  6; maxN= 32;
+		} else if (!strcmp(jane_params, "ONC") || !strcasecmp(jane_params, "OneCoin")) {
+			// OneCoin:  1371119462, minN:  6, maxN: 30
+			Ntimestamp = 1371119462; minN=  6; maxN= 30;
+		} else if (!strcmp(jane_params, "QQC") || !strcasecmp(jane_params, "QQCoin")) {
+			// QQCoin:   1387769316, minN:  4, maxN: 30
+			Ntimestamp = 1387769316; minN=  4; maxN= 30;
+		} else if (!strcmp(jane_params, "GPL") || !strcasecmp(jane_params, "GoldPressedLatinum")) {
+			// GoldPressedLatinum:   1377557832, minN:  4, maxN: 30
+			Ntimestamp = 1377557832; minN=  4; maxN= 30;
+		} else {
+			if (sscanf(jane_params, "%u,%u,%u", &Ntimestamp, &minN, &maxN) != 3)
+			if (sscanf(jane_params, "%u", &Nfactor) == 1) return Nfactor; // skip bounding against minN, maxN
+			else applog(LOG_INFO, "Unable to parse scrypt-jane parameters: '%s'. Defaulting to Yacoin.", jane_params);
+		}
+	}
+
+	// determination based on the constants determined above
+	if (nTimestamp <= Ntimestamp)
+		return minN;
+
+	unsigned long int s = nTimestamp - Ntimestamp;
 	while ((s >> 1) > 3) {
 		l += 1;
 		s >>= 1;
@@ -213,14 +245,10 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 	if (n > 255)
 		printf("GetNfactor(%d) - something wrong(n == %d)\n", nTimestamp, n);
 
-	unsigned char N = (unsigned char)n;
-    //printf("GetNfactor: %d -> %d %d : %d / %d\n", nTimestamp - nChainStartTime, l, s, n, min(max(N, minNfactor), maxNfactor));
-
-//    return min(max(N, minNfactor), maxNfactor);
-
-	if(N<minNfactor) return minNfactor;
-	if(N>maxNfactor) return maxNfactor;
-	return N;
+	Nfactor = n;
+	if (Nfactor<minN) return minN;
+	if (Nfactor>maxN) return maxN;
+	return Nfactor;
 }
 
 #define bswap_32x4(x) ((((x) << 24) & 0xff000000u) | (((x) << 8) & 0x00ff0000u) \
@@ -231,7 +259,11 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	uint32_t max_nonce, unsigned long *hashes_done)
 {
 	const uint32_t Htarg = ptarget[7];
+	static int s_Nfactor = 0;
 
+	if (s_Nfactor == 0 && strlen(jane_params) > 0)
+		applog(LOG_INFO, "Given scrypt-jane parameters: %s", jane_params);
+	
 	int Nfactor = GetNfactor(bswap_32x4(pdata[17]));
 	if (Nfactor > scrypt_maxN) {
 		scrypt_fatal_error("scrypt: N out of range");
@@ -239,11 +271,10 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	
 	N = (1 << (Nfactor + 1));
 
-	static int s_Nfactor = 0;
 	if (Nfactor != s_Nfactor)
 	{
 		s_Nfactor = Nfactor;
-		applog(LOG_INFO, "Current Nfactor is %d (N=%d)!", Nfactor, N);
+		applog(LOG_INFO, "Nfactor is %d (N=%d)!", Nfactor, N);
 	}
 
 	parallel = 0;
