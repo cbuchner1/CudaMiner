@@ -35,6 +35,8 @@
 #include "miner.h"
 #include "fermi_kernel.h"
 
+#define TEXWIDTH 32768
+
 // forward references
 template <int ALGO> __global__ void fermi_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
 template <int ALGO> __global__ void fermi_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N);
@@ -68,6 +70,11 @@ bool FermiKernel::bindtexture_2D(uint32_t *d_V, int width, int height, size_t pi
     texRef2D_4_V.filterMode = cudaFilterModePoint;
     texRef2D_4_V.addressMode[0] = cudaAddressModeClamp;
     texRef2D_4_V.addressMode[1] = cudaAddressModeClamp;
+    // maintain texture width of TEXWIDTH (max. limit is 65000)
+    while (width > TEXWIDTH) { width /= 2; height *= 2; pitch /= 2; }
+    while (width < TEXWIDTH) { width *= 2; height = (height+1)/2; pitch *= 2; }
+//    fprintf(stderr, "total size: %u, %u bytes\n", pitch * height, width * sizeof(uint32_t) * 4 * height);
+//    fprintf(stderr, "binding width width=%d, height=%d, pitch=%d\n", width, height,pitch);
     checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_4_V, d_V, &channelDesc4, width, height, pitch));
     return true;
 }
@@ -594,18 +601,18 @@ fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
     uint32_t *XX = X[warpIdx][warpThread];
 
 #pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
+    for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + (N-1)*32 + Z)/4;
         *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
-                    tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + (N-1)*32 + Z)/4) :
-                    tex2D(texRef2D_4_V, 0.5f + (32*(N-1) + Z)/4, 0.5f + (offset+wu+Y)));
+                    tex1Dfetch(texRef1D_4_V, loc) :
+                    tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
 #pragma unroll 4
     for (int idx=0; idx < 4; idx++) B[idx] = *((uint4*)&XX[4*idx]);
 
 #pragma unroll 4
-    for (int wu=0; wu < 32; wu+=8)
+    for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + (N-1)*32 + 16+Z)/4;
         *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
-                    tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + (N-1)*32 + 16+Z)/4) :
-                    tex2D(texRef2D_4_V, 0.5f + (32*(N-1) + 16+Z)/4, 0.5f + (offset+wu+Y)));
+                    tex1Dfetch(texRef1D_4_V, loc) :
+                    tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
 #pragma unroll 4
     for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
 
@@ -619,18 +626,18 @@ fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
         XX[16] = 32 * (C[0].x & (N-1));
 
 #pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
+        for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + Z)/4;
             *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + Z)/4) :
-                        tex2D(texRef2D_4_V, 0.5f + (XB[wu][16-Z] + Z)/4, 0.5f + (offset+wu+Y)));
+                        tex1Dfetch(texRef1D_4_V, loc) :
+                        tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
 #pragma unroll 4
         for (int idx=0; idx < 4; idx++) B[idx] ^= *((uint4*)&XX[4*idx]);
 
 #pragma unroll 4
-        for (int wu=0; wu < 32; wu+=8)
+        for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + 16+Z)/4;
             *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
-                        tex1Dfetch(texRef1D_4_V, (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + 16+Z)/4) :
-                        tex2D(texRef2D_4_V, 0.5f + (XB[wu][16-Z] + 16+Z)/4, 0.5f + (offset+wu+Y)));
+                        tex1Dfetch(texRef1D_4_V, loc) :
+                        tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
 #pragma unroll 4
         for (int idx=0; idx < 4; idx++) C[idx] ^= *((uint4*)&XX[4*idx]);
 
