@@ -9,7 +9,6 @@
  * Also this kernel is going to be a testbed for adaptation to Fermi devices.
  */
 
-// TODO: port this to Fermi
 // TODO: experiment with different memory access patterns in write/read_keys_direct functions
 // TODO: attempt V.Volkov style ILP (factor 4)
 
@@ -94,13 +93,17 @@ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
   uint4 t, t2;
   t = b;
 
-  int target_thread = (threadIdx.x + 4)%32;
-  t2.x = __shfl((int)bx.x, target_thread);
-  t2.y = __shfl((int)bx.y, target_thread);
-  t2.z = __shfl((int)bx.z, target_thread);
-  t2.w = __shfl((int)bx.w, target_thread);
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
+  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 4)%32];
+  
+  *s = bx.x; t2.x = *st;
+  *s = bx.y; t2.y = *st;
+  *s = bx.z; t2.z = *st;
+  *s = bx.w; t2.w = *st;
 
-  int t2_start = __shfl((int)start, target_thread) + 4;
+  *s = start; int t2_start = *st + 4;
 
   bool c = (threadIdx.x & 0x4);
 
@@ -116,13 +119,15 @@ template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &
 
   uint4 t, t2;
 
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
+  
   // Tricky bit: We do the work on behalf of thread+4, but then when
   // we steal, we have to steal from (thread+28)%32 to get the right
   // stuff back.
-  start = __shfl((int)start, (threadIdx.x & 0x7c)) + 8*(threadIdx.x%4);
-
-  int target_thread = (threadIdx.x + 4)%32;
-  int t2_start = __shfl((int)start, target_thread) + 4;
+  *s = start; start = tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] + 8*(threadIdx.x%4);
+  *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
 
   bool c = (threadIdx.x & 0x4);
 
@@ -138,16 +143,15 @@ template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &
   else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
   else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 
-  uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
+  uint4 temp = t; t = (c ? t2 : t); t2 = (c ? temp : t2);
   
   b = t;
 
-  int steal_target = (threadIdx.x + 28)%32;
-
-  bx.x = __shfl((int)t2.x, steal_target);
-  bx.y = __shfl((int)t2.y, steal_target);
-  bx.z = __shfl((int)t2.z, steal_target);
-  bx.w = __shfl((int)t2.w, steal_target);
+  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 28)%32];
+  *s = t2.x; bx.x = *st;
+  *s = t2.y; bx.y = *st;
+  *s = t2.z; bx.z = *st;
+  *s = t2.w; bx.w = *st;
 }
 
 
@@ -155,13 +159,15 @@ template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uin
 
   uint4 t, t2;
 
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
+
   // Tricky bit: We do the work on behalf of thread+4, but then when
   // we steal, we have to steal from (thread+28)%32 to get the right
   // stuff back.
-  start = __shfl((int)start, (threadIdx.x & 0x7c)) + 8*(threadIdx.x%4);
-
-  int target_thread = (threadIdx.x + 4)%32;
-  int t2_start = __shfl((int)start, target_thread) + 4;
+  *s = start; start = tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] + 8*(threadIdx.x%4);
+  *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
 
   bool c = (threadIdx.x & 0x4);
 
@@ -177,16 +183,15 @@ template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uin
   else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
   else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 
-  uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
+  uint4 temp = t; t = (c ? t2 : t); t2 = (c ? temp : t2);
   
   b ^= t;
 
-  int steal_target = (threadIdx.x + 28)%32;
-
-  bx.x ^= __shfl((int)t2.x, steal_target);
-  bx.y ^= __shfl((int)t2.y, steal_target);
-  bx.z ^= __shfl((int)t2.z, steal_target);
-  bx.w ^= __shfl((int)t2.w, steal_target);
+  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 28)%32];
+  *s = t2.x; bx.x ^= *st;
+  *s = t2.y; bx.y ^= *st;
+  *s = t2.z; bx.z ^= *st;
+  *s = t2.w; bx.w ^= *st;
 }
 
 
@@ -199,19 +204,27 @@ template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys(uint4 &b, 
 
 __device__  __forceinline__ void primary_order_shuffle(uint4 &b, uint4 &bx) {
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
   
-  b.w = __shfl((int)b.w, x1_target_lane);
-  b.z = __shfl((int)b.z, x2_target_lane);
-  b.y = __shfl((int)b.y, x3_target_lane);
-  uint32_t tmp = b.y; b.y = b.w; b.w = tmp;
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+  unsigned int wrp  = threadIdx.x/32, lane = threadIdx.x%32;
+  uint32_t *s = &tmp[wrp][lane];
+  uint32_t *s1 = &tmp[wrp][x1_target_lane];
+  uint32_t *s2 = &tmp[wrp][x2_target_lane];
+  uint32_t *s3 = &tmp[wrp][x3_target_lane];
+
+  *s = b.w; b.w = *s1;
+  *s = b.z; b.z = *s2;
+  *s = b.y; b.y = *s3;
+  uint32_t temp = b.y; b.y = b.w; b.w = temp;
   
-  bx.w = __shfl((int)bx.w, x1_target_lane);
-  bx.z = __shfl((int)bx.z, x2_target_lane);
-  bx.y = __shfl((int)bx.y, x3_target_lane);
-  tmp = bx.y; bx.y = bx.w; bx.w = tmp;
+  *s = bx.w; bx.w = *s1;
+  *s = bx.z; bx.z = *s2;
+  *s = bx.y; bx.y = *s3;
+  temp = bx.y; bx.y = bx.w; bx.w = temp;
 }
 
 /*
@@ -324,6 +337,15 @@ __device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
+  
+    extern __shared__ unsigned char shared[];
+    uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+    unsigned int wrp  = threadIdx.x/32, lane = threadIdx.x%32;
+    uint32_t *s = &tmp[wrp][lane];
+    uint32_t *s1 = &tmp[wrp][x1_target_lane];
+    uint32_t *s2 = &tmp[wrp][x2_target_lane];
+    uint32_t *s3 = &tmp[wrp][x3_target_lane];
+
     uint4 x;
 
     b ^= bx;
@@ -347,9 +369,9 @@ __device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
       /* Unclear if this optimization is needed: These are ordered based
        * upon the dependencies needed in the later xors. Compiler should be
        * able to figure this out, but might as well give it a hand. */
-      x.y = __shfl((int)x.y, x3_target_lane);
-      x.w = __shfl((int)x.w, x1_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
+      *s = x.y; x.y = *s3;
+      *s = x.w; x.w = *s1;
+      *s = x.z; x.z = *s2;
       
       /* The next XOR_ROTATE_ADDS could be written to be a copy-paste of the first,
        * but the register targets are rewritten here to swap x[1] and x[3] so that
@@ -361,10 +383,10 @@ __device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
       XOR_ROTATE_ADD(x.z, x.w, x.x, 9);
       XOR_ROTATE_ADD(x.y, x.z, x.w, 13);
       XOR_ROTATE_ADD(x.x, x.y, x.z, 18);
-      
-      x.w = __shfl((int)x.w, x3_target_lane);
-      x.y = __shfl((int)x.y, x1_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
+
+      *s = x.w; x.w = *s3;
+      *s = x.y; x.y = *s1;
+      *s = x.z; x.z = *s2;
     }
 
     b += x;
@@ -381,18 +403,18 @@ __device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
       XOR_ROTATE_ADD(x.w, x.z, x.y, 13);
       XOR_ROTATE_ADD(x.x, x.w, x.z, 18);
       
-      x.y = __shfl((int)x.y, x3_target_lane);
-      x.w = __shfl((int)x.w, x1_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
+      *s = x.y; x.y = *s3;
+      *s = x.w; x.w = *s1;
+      *s = x.z; x.z = *s2;
       
       XOR_ROTATE_ADD(x.w, x.x, x.y, 7);
       XOR_ROTATE_ADD(x.z, x.w, x.x, 9);
       XOR_ROTATE_ADD(x.y, x.z, x.w, 13);
       XOR_ROTATE_ADD(x.x, x.y, x.z, 18);
       
-      x.w = __shfl((int)x.w, x3_target_lane);
-      x.y = __shfl((int)x.y, x1_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
+      *s = x.w; x.w = *s3;
+      *s = x.y; x.y = *s1;
+      *s = x.z; x.z = *s2;
     }
 
     // At the end of these iterations, the data is in primary order again.
@@ -418,6 +440,15 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
+  
+    extern __shared__ unsigned char shared[];
+    uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+    unsigned int wrp  = threadIdx.x/32, lane = threadIdx.x%32;
+    uint32_t *s = &tmp[wrp][lane];
+    uint32_t *s1 = &tmp[wrp][x1_target_lane];
+    uint32_t *s2 = &tmp[wrp][x2_target_lane];
+    uint32_t *s3 = &tmp[wrp][x3_target_lane];
+
     uint4 x;
 
     b ^= bx;
@@ -436,10 +467,10 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
       CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
       CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
       CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
-      
-      x.y = __shfl((int)x.y, x1_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
-      x.w = __shfl((int)x.w, x3_target_lane);
+
+      *s = x.y; x.y = *s1;
+      *s = x.z; x.z = *s2;
+      *s = x.w; x.w = *s3;
       
       // Diagonal Mixing phase of chacha
       CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
@@ -447,9 +478,9 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
       CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
       CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x.y = __shfl((int)x.y, x3_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
-      x.w = __shfl((int)x.w, x1_target_lane);
+      *s = x.y; x.y = *s3;
+      *s = x.z; x.z = *s2;
+      *s = x.w; x.w = *s1;
     }
 
     b += x;
@@ -466,9 +497,9 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
       CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
       CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x.y = __shfl((int)x.y, x1_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
-      x.w = __shfl((int)x.w, x3_target_lane);
+      *s = x.y; x.y = *s1;
+      *s = x.z; x.z = *s2;
+      *s = x.w; x.w = *s3;
       
       // Diagonal Mixing phase of chacha
       CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
@@ -476,9 +507,9 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
       CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
       CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x.y = __shfl((int)x.y, x3_target_lane);
-      x.z = __shfl((int)x.z, x2_target_lane);
-      x.w = __shfl((int)x.w, x1_target_lane);
+      *s = x.y; x.y = *s3;
+      *s = x.z; x.z = *s2;
+      *s = x.w; x.w = *s1;
     }
 
 #undef CHACHA_PRIMITIVE
@@ -518,9 +549,9 @@ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
   uint4 b, bx;
 
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
@@ -570,9 +601,9 @@ void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
   int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
 
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   if (begin == 0)
   {
@@ -671,6 +702,9 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
       case ALGO_SCRYPT_JANE: threads.x *= 4; break; // scrypt-jane: we scale up thread block size
     }
     
+    // compute required shared memory per block for __shfl() emulation
+    size_t shared = ((threads.x + 31) / 32) * (32+1) * sizeof(uint32_t);
+    
     // make some constants available to kernel, update only initially and when changing
     static int prev_N = 0;
     if (N != prev_N) {
@@ -693,8 +727,8 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     do 
     {
         switch(opt_algo) {
-          case ALGO_SCRYPT: test_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
-          case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+          case ALGO_SCRYPT: test_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+          case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
         }
 
         // Optional millisecond sleep in between kernels
@@ -720,19 +754,19 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
         {
             if (texture_cache == 1)
                 switch(opt_algo) {
-                    case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
                 }
             else if (texture_cache == 2)
                 switch(opt_algo) {
-                    case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
                 }
         }
         else
             switch(opt_algo) {
-                case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
         }
         pos += batch;
     } while (pos < N);
