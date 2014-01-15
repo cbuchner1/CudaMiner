@@ -719,12 +719,13 @@ skip:           ;
     return optimal_blocks;
 }
 
+typedef struct { double value[8]; } tsumarray;
+	
 cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
 {
     cudaError_t result = cudaSuccess;
     if (situation >= 0)
     {   
-        typedef struct { double value[8]; } tsumarray;
         static std::map<int, tsumarray> tsum;
 
         float a = 0.95, b = 0.05;
