@@ -110,7 +110,7 @@ template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint32_
   else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
   loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
        if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 
   uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
@@ -149,7 +149,7 @@ template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uin
   else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
   loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
        if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 
   uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
