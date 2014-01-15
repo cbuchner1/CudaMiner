@@ -94,6 +94,15 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     // clear CUDA's error variable
     cudaGetLastError();
 
+    int sleeptime = 100;
+    int situation = 0;
+
+    // Optional sleep in between kernels
+    if (!benchmark && interactive) {
+        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+        usleep(sleeptime);
+    }
+
     // First phase: Sequential writes to scratchpad.
 
     switch (WARPS_PER_BLOCK) {
@@ -113,8 +122,8 @@ bool LegacyKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     // Optional millisecond sleep in between kernels
 
     if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-        usleep(100);
+        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+        usleep(sleeptime);
     }
 
     // Second phase: Random read access from scratchpad.

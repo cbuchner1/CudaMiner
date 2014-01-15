@@ -669,6 +669,15 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     // First phase: Sequential writes to scratchpad.
 
     int batch = device_batchsize[thr_id];
+    int num_sleeps = 2* ((N + (batch-1)) / batch);
+    int sleeptime = 100;
+    int situation = 0;
+
+    // Optional sleep in between kernels
+    if (!benchmark && interactive) {
+        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+        usleep(sleeptime);
+    }
 
     int pos = 0;
     do 
@@ -678,11 +687,10 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
           case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
         }
 
-        // Optional millisecond sleep in between kernels
-
+        // Optional sleep in between kernels
         if (!benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, 2, thr_id));
-            usleep(100);
+            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+            usleep(sleeptime);
         }
         pos += batch;
     } while (pos < N);
@@ -692,9 +700,10 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     pos = 0;
     do
     {
+        // Optional sleep in between kernels
         if (pos > 0 && !benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, 3, thr_id));
-            usleep(100);
+            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+            usleep(sleeptime);
         }
 
         if (texture_cache)

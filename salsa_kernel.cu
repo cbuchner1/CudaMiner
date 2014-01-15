@@ -363,7 +363,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else {
             // compute no. of warps to allocate the largest number producing a single memory block
-            for (int warp = min(1024ULL, MAXMEM / (SCRATCH * WU_PER_WARP * sizeof(uint32_t))); warp >= 1; --warp) {
+            for (int warp = (int)min(1024ULL, MAXMEM / (SCRATCH * WU_PER_WARP * sizeof(uint32_t))); warp >= 1; --warp) {
                 cudaGetLastError(); // clear the error state
                 checkCudaErrors(cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t)));
                 if (cudaGetLastError() == cudaSuccess) {
@@ -722,12 +722,16 @@ skip:           ;
 cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
 {
     cudaError_t result = cudaSuccess;
-    if (situation >= 0 && situation <= 2)
-    {
-        static double tsum[3][8] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    if (situation >= 0)
+    {   
+        typedef struct { double value[8]; } tsumarray;
+        static std::map<int, tsumarray> tsum;
+
+        float a = 0.95, b = 0.05;
+        if (tsum.find(situation) == tsum.end()) { a = 0.5; b = 0.5; } // faster initial convergence
 
         double tsync = 0.0;
-        double tsleep = 0.95 * tsum[situation][thr_id];
+        double tsleep = 0.95 * tsum[situation].value[thr_id];
         if (cudaStreamQuery(stream) == cudaErrorNotReady)
         {
             usleep((useconds_t)(1e6*tsleep));
@@ -737,7 +741,21 @@ cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
             gettimeofday(&tv_end, NULL);
             tsync = 1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec);
         }
-        if (tsync >= 0) tsum[situation][thr_id] = 0.95 * tsum[situation][thr_id] + 0.05 * (tsleep+tsync);
+        if (tsync >= 0) tsum[situation].value[thr_id] = a * tsum[situation].value[thr_id] + b * (tsleep+tsync);
+
+#if 0
+        static int calls = 0;
+        if (++calls == 50) {
+            static std::map<int, tsumarray>::iterator it;
+            for (it = tsum.begin(); it != tsum.end() ; ++it)
+            {
+                const int &sit = (*it).first;
+                const tsumarray &ts = (*it).second;
+                fprintf(stderr, "%d: %f\n", sit, ts.value[thr_id]);
+            }
+            calls = 0;
+        }
+#endif
     }
     else
     {
@@ -786,10 +804,6 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(WU_PER_BLOCK, 1, 1);
 
-    if (device_interactive[thr_id]) {
-        usleep(100);
-    }
-
     context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, device_interactive[thr_id], opt_benchmark, device_texturecache[thr_id]);
 }
 
@@ -831,7 +845,7 @@ extern "C" void
 computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
 {
     uint32_t X[32];
-    int i,j,k;
+    unsigned int i; int j,k;
 
     for (k = 0; k < 32; k++)
         X[k] = idata[k];

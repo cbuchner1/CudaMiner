@@ -87,6 +87,15 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
 
     int shared = (WARPS_PER_BLOCK+1)/2 * WU_PER_WARP * (16+4) * sizeof(uint32_t);
 
+    int sleeptime = 100;
+    int situation = 0;
+
+    // Optional sleep in between kernels
+    if (!benchmark && interactive) {
+        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+        usleep(sleeptime);
+    }
+
     // First phase: Sequential writes to scratchpad.
 
     switch(opt_algo)
@@ -95,11 +104,10 @@ bool SpinlockKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, in
       case ALGO_SCRYPT_JANE: spinlock_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, N); break;
     }
 
-    // Optional millisecond sleep in between kernels
-
+    // Optional sleep in between kernels
     if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, 1, thr_id));
-        usleep(100);
+        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+        usleep(sleeptime);
     }
 
     // Second phase: Random read access from scratchpad.
