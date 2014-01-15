@@ -734,7 +734,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
         // Optional millisecond sleep in between kernels
 
         if (!benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
+            checkCudaErrors(MyStreamSynchronize(stream, 2, thr_id));
             usleep(100);
         }
         pos += batch;
@@ -746,7 +746,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     do
     {
         if (pos > 0 && !benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
+            checkCudaErrors(MyStreamSynchronize(stream, 3, thr_id));
             usleep(100);
         }
 

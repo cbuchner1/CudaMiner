@@ -730,11 +730,7 @@ cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
         double tsleep = 0.95 * tsum[situation][thr_id];
         if (cudaStreamQuery(stream) == cudaErrorNotReady)
         {
-    #ifdef WIN32
-            Sleep((DWORD)(1000*tsleep));
-    #else
             usleep((useconds_t)(1e6*tsleep));
-    #endif
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
             checkCudaErrors(result = cudaStreamSynchronize(stream));
@@ -791,7 +787,6 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
     dim3  threads(WU_PER_BLOCK, 1, 1);
 
     if (device_interactive[thr_id]) {
-//        checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 2, thr_id));
         usleep(100);
     }
 
