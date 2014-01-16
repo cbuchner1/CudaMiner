@@ -5,7 +5,6 @@
  * can be found in the file "LICENSE"
  */
 
-// TODO: support for chunked memory allocation
 //       attempt V.Volkov style ILP (factor 4)
 
 #ifdef WIN32
@@ -27,14 +26,35 @@
     #define __ldg(x) (*(x))
 #endif
 
+// scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
+__constant__ uint32_t* c_V[1024];
+
 // iteration count N
 __constant__ uint32_t c_N;
 __constant__ uint32_t c_N_1;                  // N-1
 // scratch buffer size SCRATCH
 __constant__ uint32_t c_SCRATCH;
-
+__constant__ uint32_t c_SCRATCH_WU_PER_WARP;  // SCRATCH * WU_PER_WARP
 
 static const int THREADS_PER_SCRYPT_BLOCK = 4;
+
+static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
+{
+    left.x ^= right.x;
+    left.y ^= right.y;
+    left.z ^= right.z;
+    left.w ^= right.w;
+    return left;
+}
+
+static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
+{
+    left.x += right.x;
+    left.y += right.y;
+    left.z += right.z;
+    left.w += right.w;
+    return left;
+}
 
 /* write_keys writes the 8 keys being processed by a warp to the global
  * scratchpad. To effectively use memory bandwidth, it performs the writes
@@ -61,103 +81,34 @@ static const int THREADS_PER_SCRYPT_BLOCK = 4;
  */
 
 __device__ __forceinline__
-void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
+void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
-  uint4 t, t2;
-  t.x = b[0]; t.y = b[1]; t.z = b[2]; t.w = b[3];
+  start += 4*(threadIdx.x%4);
 
-  int target_thread = (threadIdx.x + 4)%32;
-  t2.x = __shfl((int)bx[0], target_thread);
-  t2.y = __shfl((int)bx[1], target_thread);
-  t2.z = __shfl((int)bx[2], target_thread);
-  t2.w = __shfl((int)bx[3], target_thread);
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  int t2_start = __shfl((int)start, target_thread) + 4;
-
-  bool c = (threadIdx.x & 0x4);
-
-  int loc = c ? t2_start : start;
-  *((uint4 *)(&scratch[loc])) = (c ? t2 : t);
-  loc = c ? start : t2_start;
-  *((uint4 *)(&scratch[loc])) = (c ? t : t2);
+  *((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)])) = b;
+  *((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)])) = bx;
 }
 
-__device__ __forceinline__
-void write_keys(const uint32_t b[4], const uint32_t bx[4], uint32_t *scratch, uint32_t start) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*c_SCRATCH + (32*start) + 8*(threadIdx.x%4);
-  write_keys_direct(b, bx, scratch, start);
+__device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
+
+  start += 4*(threadIdx.x%4);
+
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+
+  b  = __ldg((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)]));
+  bx = __ldg((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)]));
 }
 
+__device__  __forceinline__ void read_xor_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
-__device__  __forceinline__ void read_keys_direct(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
+  start += 4*(threadIdx.x%4);
 
-  uint4 t, t2;
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  // Tricky bit: We do the work on behalf of thread+4, but then when
-  // we steal, we have to steal from (thread+28)%32 to get the right
-  // stuff back.
-  start = __shfl((int)start, (threadIdx.x & 0x7c)) + 8*(threadIdx.x%4);
-
-  int target_thread = (threadIdx.x + 4)%32;
-  int t2_start = __shfl((int)start, target_thread) + 4;
-
-  bool c = (threadIdx.x & 0x4);
-
-  int loc = c ? t2_start : start;
-  t = __ldg((uint4 *)(&scratch[loc]));
-  loc = c ? start : t2_start;
-  t2 = __ldg((uint4 *)(&scratch[loc]));
-
-  uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
-  
-  b[0] = t.x; b[1] = t.y; b[2] = t.z; b[3] = t.w;
-
-  int steal_target = (threadIdx.x + 28)%32;
-
-  bx[0] = __shfl((int)t2.x, steal_target);
-  bx[1] = __shfl((int)t2.y, steal_target);
-  bx[2] = __shfl((int)t2.z, steal_target);
-  bx[3] = __shfl((int)t2.w, steal_target);
-}
-
-
-__device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
-
-  uint4 t, t2;
-
-  // Tricky bit: We do the work on behalf of thread+4, but then when
-  // we steal, we have to steal from (thread+28)%32 to get the right
-  // stuff back.
-  start = __shfl((int)start, (threadIdx.x & 0x7c)) + 8*(threadIdx.x%4);
-
-  int target_thread = (threadIdx.x + 4)%32;
-  int t2_start = __shfl((int)start, target_thread) + 4;
-
-  bool c = (threadIdx.x & 0x4);
-
-  int loc = c ? t2_start : start;
-  t = __ldg((uint4 *)(&scratch[loc]));
-  loc = c ? start : t2_start;
-  t2 = __ldg((uint4 *)(&scratch[loc]));
-
-  uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
-  
-  b[0] ^= t.x; b[1] ^= t.y; b[2] ^= t.z; b[3] ^= t.w;
-
-  int steal_target = (threadIdx.x + 28)%32;
-
-  bx[0] ^= __shfl((int)t2.x, steal_target);
-  bx[1] ^= __shfl((int)t2.y, steal_target);
-  bx[2] ^= __shfl((int)t2.z, steal_target);
-  bx[3] ^= __shfl((int)t2.w, steal_target);
-}
-
-
-__device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], const uint32_t *scratch, uint32_t start) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*c_SCRATCH + (32*start);
-  read_xor_keys_direct(b, bx, scratch, start);
+  b  ^= __ldg((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)]));
+  bx ^= __ldg((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)]));
 }
 
 
@@ -178,27 +129,46 @@ __device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t b
   tmp = bx[1]; bx[1] = bx[3]; bx[3] = tmp;
 }
 
-/*
- * load_key loads a 32*32bit key from a contiguous region of memory in B.
- * The input keys are in external order (i.e., 0, 1, 2, 3, ...).
- * After loading, each thread has its four b and four bx keys stored
- * in internal processing order.
- */
-
-__device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int key_offset = scrypt_block * 32;
-  uint32_t thread_in_block = threadIdx.x % 4;
-
-  // Read in permuted order. Key loads are not our bottleneck right now.
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    b[i] = B[key_offset + 4*thread_in_block + (thread_in_block+i)%4];
-    bx[i] = B[key_offset + 4*thread_in_block + (thread_in_block+i)%4 + 16];
-  }
-
-  primary_order_shuffle(b, bx);
+__device__  __forceinline__ void primary_order_shuffle(uint4 &b, uint4 &bx) {
+  /* Inner loop shuffle targets */
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
   
+  b.w = __shfl((int)b.w, x1_target_lane);
+  b.z = __shfl((int)b.z, x2_target_lane);
+  b.y = __shfl((int)b.y, x3_target_lane);
+  uint32_t tmp = b.y; b.y = b.w; b.w = tmp;
+  
+  bx.w = __shfl((int)bx.w, x1_target_lane);
+  bx.z = __shfl((int)bx.z, x2_target_lane);
+  bx.y = __shfl((int)bx.y, x3_target_lane);
+  tmp = bx.y; bx.y = bx.w; bx.w = tmp;
+}
+
+/*
+ * load_key loads a 32*32bit key from a contiguous region of memory in B.
+ * The input keys are in external order (i.e., 0, 1, 2, 3, ...).
+ * After loading, each thread has its four b and four bx keys stored
+ * in internal processing order.
+ */
+
+__device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint4 &b, uint4 &bx) {
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int key_offset = scrypt_block * 32;
+  uint32_t thread_in_block = threadIdx.x % 4;
+
+  // Read in permuted order. Key loads are not our bottleneck right now.
+  b.x = B[key_offset + 4*thread_in_block + (thread_in_block+0)%4];
+  b.y = B[key_offset + 4*thread_in_block + (thread_in_block+1)%4];
+  b.z = B[key_offset + 4*thread_in_block + (thread_in_block+2)%4];
+  b.w = B[key_offset + 4*thread_in_block + (thread_in_block+3)%4];
+  bx.x = B[key_offset + 4*thread_in_block + (thread_in_block+0)%4 + 16];
+  bx.y = B[key_offset + 4*thread_in_block + (thread_in_block+1)%4 + 16];
+  bx.z = B[key_offset + 4*thread_in_block + (thread_in_block+2)%4 + 16];
+  bx.w = B[key_offset + 4*thread_in_block + (thread_in_block+3)%4 + 16];
+
+  primary_order_shuffle(b, bx);
 }
 
 /*
@@ -207,18 +177,21 @@ __device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint32_t b[4]
  * region of B in external order.
  */
 
-__device__  __forceinline__ void store_key_salsa(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void store_key_salsa(uint32_t *B, uint4 &b, uint4 &bx) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
   primary_order_shuffle(b, bx);
 
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    B[key_offset + 4*thread_in_block + (thread_in_block+i)%4] = b[i];
-    B[key_offset + 4*thread_in_block + (thread_in_block+i)%4 + 16] = bx[i];
-  }
+  B[key_offset + 4*thread_in_block + (thread_in_block+0)%4] = b.x;
+  B[key_offset + 4*thread_in_block + (thread_in_block+1)%4] = b.y;
+  B[key_offset + 4*thread_in_block + (thread_in_block+2)%4] = b.z;
+  B[key_offset + 4*thread_in_block + (thread_in_block+3)%4] = b.w;
+  B[key_offset + 4*thread_in_block + (thread_in_block+0)%4 + 16] = bx.x;
+  B[key_offset + 4*thread_in_block + (thread_in_block+1)%4 + 16] = bx.y;
+  B[key_offset + 4*thread_in_block + (thread_in_block+2)%4 + 16] = bx.z;
+  B[key_offset + 4*thread_in_block + (thread_in_block+3)%4 + 16] = bx.w;
 }
 
 
@@ -229,17 +202,20 @@ __device__  __forceinline__ void store_key_salsa(uint32_t *B, uint32_t b[4], uin
  * in internal processing order.
  */
 
-__device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint4 &b, uint4 &bx) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
   // Read in permuted order. Key loads are not our bottleneck right now.
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    b[i] = B[key_offset + 4*i + thread_in_block%4];
-    bx[i] = B[key_offset + 4*i + thread_in_block%4 + 16];
-  }
+  b.x = B[key_offset + 4*0 + thread_in_block%4];
+  b.y = B[key_offset + 4*1 + thread_in_block%4];
+  b.z = B[key_offset + 4*2 + thread_in_block%4];
+  b.w = B[key_offset + 4*3 + thread_in_block%4];
+  bx.x = B[key_offset + 4*0 + thread_in_block%4 + 16];
+  bx.y = B[key_offset + 4*1 + thread_in_block%4 + 16];
+  bx.z = B[key_offset + 4*2 + thread_in_block%4 + 16];
+  bx.w = B[key_offset + 4*3 + thread_in_block%4 + 16];
 }
 
 /*
@@ -248,22 +224,25 @@ __device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint32_t b[4
  * region of B in external order.
  */
 
-__device__  __forceinline__ void store_key_chacha(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void store_key_chacha(uint32_t *B, const uint4 &b, const uint4 &bx) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    B[key_offset + 4*i + thread_in_block%4] = b[i];
-    B[key_offset + 4*i + thread_in_block%4 + 16] = bx[i];
-  }
+  B[key_offset + 4*0 + thread_in_block%4] = b.x;
+  B[key_offset + 4*1 + thread_in_block%4] = b.y;
+  B[key_offset + 4*2 + thread_in_block%4] = b.z;
+  B[key_offset + 4*3 + thread_in_block%4] = b.w;
+  B[key_offset + 4*0 + thread_in_block%4 + 16] = bx.x;
+  B[key_offset + 4*1 + thread_in_block%4 + 16] = bx.y;
+  B[key_offset + 4*2 + thread_in_block%4 + 16] = bx.z;
+  B[key_offset + 4*3 + thread_in_block%4 + 16] = bx.w;
 }
 
 
 /*
- * salsa_xor_core does the equivalent of the xor_salsa8 loop from
- * tarsnap's implementation of scrypt. The original scrypt called:
+ * salsa_xor_core (Salsa20/8 cypher)
+ * The original scrypt called:
  * xor_salsa8(&X[0], &X[16]); <-- the "b" loop
  * xor_salsa8(&X[16], &X[0]); <-- the "bx" loop
  * This version is unrolled to handle both of these loops in a single
@@ -272,43 +251,44 @@ __device__  __forceinline__ void store_key_chacha(uint32_t *B, uint32_t b[4], ui
 
 #if __CUDA_ARCH__ < 350 
     // Kepler (Compute 3.0)
-    #define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); }
+    #define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = s1+s2; dst ^= ((tmp<<amt)|(tmp>>(32-amt))); }
 #else
     // Kepler (Compute 3.5)
     #define ROTL(a, b) __funnelshift_l( a, a, b );
-    #define XOR_ROTATE_ADD(dst, s1, s2, amt) x[dst] ^= ROTL(x[s1]+x[s2], amt);
+    #define XOR_ROTATE_ADD(dst, s1, s2, amt) dst ^= ROTL(s1+s2, amt);
 #endif
 
-__device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
+
+__device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
-    uint32_t x[4];
+    uint4 x;
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] ^= bx[i];
-      x[i] = b[i];
-    }
+    b ^= bx;
+    x = b;
 
-    // Enter in "column" mode (t0 has 0, 4, 8, 12)
+    // Enter in "primary order" (t0 has  0,  4,  8, 12)
+    //                          (t1 has  5,  9, 13,  1)
+    //                          (t2 has 10, 14,  2,  6)
+    //                          (t3 has 15,  3,  7, 11)
 
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
     
       // Mixing phase of salsa
-      XOR_ROTATE_ADD(1, 0, 3, 7);
-      XOR_ROTATE_ADD(2, 1, 0, 9);
-      XOR_ROTATE_ADD(3, 2, 1, 13);
-      XOR_ROTATE_ADD(0, 3, 2, 18);
+      XOR_ROTATE_ADD(x.y, x.x, x.w, 7);
+      XOR_ROTATE_ADD(x.z, x.y, x.x, 9);
+      XOR_ROTATE_ADD(x.w, x.z, x.y, 13);
+      XOR_ROTATE_ADD(x.x, x.w, x.z, 18);
       
       /* Transpose rows and columns. */
       /* Unclear if this optimization is needed: These are ordered based
        * upon the dependencies needed in the later xors. Compiler should be
        * able to figure this out, but might as well give it a hand. */
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
       
       /* The next XOR_ROTATE_ADDS could be written to be a copy-paste of the first,
        * but the register targets are rewritten here to swap x[1] and x[3] so that
@@ -316,54 +296,48 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
        * reassignment. The reverse shuffle then puts them back in the right place.
        */
       
-      XOR_ROTATE_ADD(3, 0, 1, 7);
-      XOR_ROTATE_ADD(2, 3, 0, 9);
-      XOR_ROTATE_ADD(1, 2, 3, 13);
-      XOR_ROTATE_ADD(0, 1, 2, 18);
+      XOR_ROTATE_ADD(x.w, x.x, x.y, 7);
+      XOR_ROTATE_ADD(x.z, x.w, x.x, 9);
+      XOR_ROTATE_ADD(x.y, x.z, x.w, 13);
+      XOR_ROTATE_ADD(x.x, x.y, x.z, 18);
       
-      x[3] = __shfl((int)x[3], x3_target_lane);
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
     }
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] += x[i];
-      // The next two lines are the beginning of the BX-centric loop iteration
-      bx[i] ^= b[i];
-      x[i] = bx[i];
-    }
+    b += x;
+    // The next two lines are the beginning of the BX-centric loop iteration
+    bx ^= b;
+    x = bx;
 
     // This is a copy of the same loop above, identical but stripped of comments.
     // Duplicated so that we can complete a bx-based loop with fewer register moves.
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
-      XOR_ROTATE_ADD(1, 0, 3, 7);
-      XOR_ROTATE_ADD(2, 1, 0, 9);
-      XOR_ROTATE_ADD(3, 2, 1, 13);
-      XOR_ROTATE_ADD(0, 3, 2, 18);
+      XOR_ROTATE_ADD(x.y, x.x, x.w, 7);
+      XOR_ROTATE_ADD(x.z, x.y, x.x, 9);
+      XOR_ROTATE_ADD(x.w, x.z, x.y, 13);
+      XOR_ROTATE_ADD(x.x, x.w, x.z, 18);
       
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
       
-      XOR_ROTATE_ADD(3, 0, 1, 7);
-      XOR_ROTATE_ADD(2, 3, 0, 9);
-      XOR_ROTATE_ADD(1, 2, 3, 13);
-      XOR_ROTATE_ADD(0, 1, 2, 18);
+      XOR_ROTATE_ADD(x.w, x.x, x.y, 7);
+      XOR_ROTATE_ADD(x.z, x.w, x.x, 9);
+      XOR_ROTATE_ADD(x.y, x.z, x.w, 13);
+      XOR_ROTATE_ADD(x.x, x.y, x.z, 18);
       
-      x[3] = __shfl((int)x[3], x3_target_lane);
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
     }
 
     // At the end of these iterations, the data is in primary order again.
 #undef XOR_ROTATE_ADD
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      bx[i] += x[i];
-    }
+    bx += x;
 }
 
 
@@ -379,24 +353,21 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
 
 #if __CUDA_ARCH__ < 350 
     // Kepler (Compute 3.0)
-    #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { x[pt] += x[ps]; uint32_t tmp = x[rt] ^ x[pt]; x[rt] = ((tmp<<amt)|(tmp>>(32-amt))); }
+    #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { uint32_t tmp = rt ^ (pt += ps); rt = ((tmp<<amt)|(tmp>>(32-amt))); }
 #else
     // Kepler (Compute 3.5)
     #define ROTL(a, b) __funnelshift_l( a, a, b );
-    #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { x[pt] += x[ps]; x[rt] = ROTL(x[rt] ^ x[pt],amt); }
+    #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { pt += ps; rt = ROTL(rt ^ pt,amt); }
 #endif
 
-__device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
+__device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
-    uint32_t x[4];
+    uint4 x;
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] ^= bx[i];
-      x[i] = b[i];
-    }
+    b ^= bx;
+    x = b;
 
     // Enter in "column" mode (t0 has 0, 4,  8, 12)
     //                        (t1 has 1, 5,  9, 13)
@@ -407,64 +378,58 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
     for (int j = 0; j < 4; j++) {
     
       // Column Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
       
       // Diagonal Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
     }
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] += x[i];
-      // The next two lines are the beginning of the BX-centric loop iteration
-      bx[i] ^= b[i];
-      x[i] = bx[i];
-    }
+    b += x;
+    // The next two lines are the beginning of the BX-centric loop iteration
+    bx ^= b;
+    x = bx;
 
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
 
       // Column Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
       
       // Diagonal Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
     }
 
 #undef CHACHA_PRIMITIVE
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      bx[i] += x[i];
-    }
+    bx += x;
 }
 
 
@@ -489,22 +454,22 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
  */
 
 template <int ALGO> __global__
-void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch, int begin, int end) {
+void titan_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
 
   /* Each thread operates on four of the sixteen B and Bx variables. Thus,
    * each key is processed by four threads in parallel. salsa_scrypt_core
    * internally shuffles the variables between threads (and back) as
    * needed.
    */
-  uint32_t b[4], bx[4];
+  uint4 b, bx;
 
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
+  int start = scrypt_block*c_SCRATCH;
 
   int i=begin;
 
@@ -514,12 +479,12 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch, int b
         case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
         case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
       }
-      write_keys_direct(b, bx, scratch, start);
+      write_keys_direct(b, bx, start);
       ++i;
   }
   else
   {
-      read_keys_direct(b, bx, scratch, start+32*(i-1));
+      read_keys_direct(b, bx, start+32*(i-1));
   }
   
   while (i < end) {
@@ -527,7 +492,7 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch, int b
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
       case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
     }
-    write_keys_direct(b, bx, scratch, start+32*i);
+    write_keys_direct(b, bx, start+32*i);
     ++i;
   }
 }
@@ -540,26 +505,24 @@ void titan_scrypt_core_kernelA(const uint32_t *d_idata, uint32_t *scratch, int b
  */
 
 template <int ALGO> __global__
-void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch, int begin, int end) {
+void titan_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
 
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
    */
-  uint32_t b[4], bx[4];
+  uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
-
-  read_keys_direct(b, bx, scratch, start+32*(c_N_1));
+  int start = scrypt_block*c_SCRATCH;
 
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   if (begin == 0)
   {
-      read_keys_direct(b, bx, scratch, start+32*(c_N_1));
+      read_keys_direct(b, bx, start+32*(c_N_1));
 
       switch(ALGO) {
         case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
@@ -578,9 +541,8 @@ void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch, int b
 
     // Bounce through the key space and XOR the new keys in.
     // Critical thing: (X[16] & (c_N_1)) tells us the next slot to read.
-    // X[16] in the original is bx[0]
-    int slot = bx[0] & (c_N_1);
-    read_xor_keys(b, bx, scratch, slot);
+    // X[16] in the original is bx.x
+    read_xor_keys_direct(b, bx, start+32*(__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1)));
     switch(ALGO) {
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
       case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
@@ -593,18 +555,14 @@ void titan_scrypt_core_kernelB(uint32_t *d_odata, const uint32_t *scratch, int b
   }
 }
 
-// scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 
 TitanKernel::TitanKernel() : KernelInterface()
 {
 }
 
-static uint32_t *d_scratch;
-
 void TitanKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
 {
-    // this currently REQUIRES single memory allocation mode (-m 1 flag)
-    d_scratch = h_V[0];
+    checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
 bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache)
@@ -619,8 +577,8 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
       case ALGO_SCRYPT: grid.x *= 4; break; // scrypt: We scale up the grid x dimension to compensate.
       case ALGO_SCRYPT_JANE: threads.x *= 4; break; // scrypt-jane: we scale up thread block size
     }
-
-    // make constant "N" available to kernel
+    
+    // make some constants available to kernel, update only initially and when changing
     static int prev_N = 0;
     if (N != prev_N) {
         uint32_t h_N = N;
@@ -630,6 +588,8 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH = SCRATCH;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH, &h_SCRATCH, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        uint32_t h_SCRATCH_WU_PER_WARP = SCRATCH * WU_PER_WARP;
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
     }
 
     // First phase: Sequential writes to scratchpad.
@@ -645,12 +605,12 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         usleep(sleeptime);
     }
 
-    unsigned int pos = 0;
+    int pos = 0;
     do 
     {
         switch(opt_algo) {
-          case ALGO_SCRYPT: titan_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata, d_scratch, pos, min(pos+batch, N)); break;
-          case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, d_scratch, pos, min(pos+batch, N)); break;
+          case ALGO_SCRYPT: titan_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+          case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
         }
 
         // Optional sleep in between kernels
@@ -673,8 +633,8 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         }
 
         switch(opt_algo) {
-            case ALGO_SCRYPT: titan_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch, pos, min(pos+batch, N)); break;
-            case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_odata, (const uint32_t*)d_scratch, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT: titan_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT_JANE: titan_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
         }
         pos += batch;
     } while (pos < N);

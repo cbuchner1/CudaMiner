@@ -743,7 +743,7 @@ cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
     {   
         static std::map<int, tsumarray> tsum;
 
-        float a = 0.95, b = 0.05;
+        double a = 0.95, b = 0.05;
         if (tsum.find(situation) == tsum.end()) { a = 0.5; b = 0.5; } // faster initial convergence
 
         double tsync = 0.0;

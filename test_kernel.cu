@@ -90,115 +90,47 @@ static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
 __device__ __forceinline__
 void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
-  uint4 t, t2;
-  t = b;
-
-  extern __shared__ unsigned char shared[];
-  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
-  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
-  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 4)%32];
-  
-  *s = bx.x; t2.x = *st;
-  *s = bx.y; t2.y = *st;
-  *s = bx.z; t2.z = *st;
-  *s = bx.w; t2.w = *st;
-
-  *s = start; int t2_start = *st + 4;
-
-  bool c = (threadIdx.x & 0x4);
+  start += 4*(threadIdx.x%4);
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  unsigned int loc = c ? t2_start : start;
-  *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)])) = (c ? t2 : t);
-  loc = c ? start : t2_start;
-  *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)])) = (c ? t : t2);
+  *((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)])) = b;
+  *((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)])) = bx;
 }
 
 template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
-  uint4 t, t2;
-
-  extern __shared__ unsigned char shared[];
-  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
-  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
-  
-  // Tricky bit: We do the work on behalf of thread+4, but then when
-  // we steal, we have to steal from (thread+28)%32 to get the right
-  // stuff back.
-  *s = start; start = tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] + 8*(threadIdx.x%4);
-  *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
-
-  bool c = (threadIdx.x & 0x4);
+  start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
   if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  unsigned int loc = (c ? t2_start : start) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) t = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-  loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
-       if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-
-  uint4 temp = t; t = (c ? t2 : t); t2 = (c ? temp : t2);
-  
-  b = t;
-
-  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 28)%32];
-  *s = t2.x; bx.x = *st;
-  *s = t2.y; bx.y = *st;
-  *s = t2.z; bx.z = *st;
-  *s = t2.w; bx.w = *st;
+  unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) b = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) b = tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) b = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
+               loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) bx = tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) bx = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 }
 
 
 template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
-  uint4 t, t2;
-
-  extern __shared__ unsigned char shared[];
-  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
-  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
-
-  // Tricky bit: We do the work on behalf of thread+4, but then when
-  // we steal, we have to steal from (thread+28)%32 to get the right
-  // stuff back.
-  *s = start; start = tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] + 8*(threadIdx.x%4);
-  *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
-
-  bool c = (threadIdx.x & 0x4);
+  start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
   if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  int loc = (c ? t2_start : start) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) t = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-  loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
-       if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-
-  uint4 temp = t; t = (c ? t2 : t); t2 = (c ? temp : t2);
-  
-  b ^= t;
-
-  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 28)%32];
-  *s = t2.x; bx.x ^= *st;
-  *s = t2.y; bx.y ^= *st;
-  *s = t2.z; bx.z ^= *st;
-  *s = t2.w; bx.w ^= *st;
-}
-
-
-template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys(uint4 &b, uint4 &bx, uint32_t start) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*c_SCRATCH + (32*start);
-  read_xor_keys_direct<TEX_DIM>(b, bx, start);
+  unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) b ^= *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) b ^= tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) b ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
+               loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) bx ^= *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) bx ^= tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) bx ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 }
 
 
@@ -554,7 +486,7 @@ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
   int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
+  int start = scrypt_block*c_SCRATCH;
 
   int i=begin;
 
@@ -592,13 +524,16 @@ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
 template <int ALGO, int TEX_DIM> __global__
 void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
 
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
    */
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
+  int start = scrypt_block*c_SCRATCH;
 
   /* Inner loop shuffle targets */
   int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -627,8 +562,8 @@ void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
     // Bounce through the key space and XOR the new keys in.
     // Critical thing: (X[16] & (c_N_1)) tells us the next slot to read.
     // X[16] in the original is bx.x
-    int slot = bx.x & (c_N_1);
-    read_xor_keys<TEX_DIM>(b, bx, slot);
+    tmp[threadIdx.x/32][threadIdx.x%32] = bx.x;
+    read_xor_keys_direct<TEX_DIM>(b, bx, start+32*(tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1)));
     switch(ALGO) {
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
       case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;

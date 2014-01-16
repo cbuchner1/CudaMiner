@@ -39,6 +39,24 @@ texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
 static const int THREADS_PER_SCRYPT_BLOCK = 4;
 
+static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
+{
+    left.x ^= right.x;
+    left.y ^= right.y;
+    left.z ^= right.z;
+    left.w ^= right.w;
+    return left;
+}
+
+static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
+{
+    left.x += right.x;
+    left.y += right.y;
+    left.z += right.z;
+    left.w += right.w;
+    return left;
+}
+
 /* write_keys writes the 8 keys being processed by a warp to the global
  * scratchpad. To effectively use memory bandwidth, it performs the writes
  * (and reads, for read_keys) 128 bytes at a time per memory location
@@ -64,129 +82,67 @@ static const int THREADS_PER_SCRYPT_BLOCK = 4;
  */
 
 __device__ __forceinline__
-void write_keys_direct(const uint32_t b[4], const uint32_t bx[4], uint32_t start) {
+void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
-  uint4 t, t2;
-  t.x = b[0]; t.y = b[1]; t.z = b[2]; t.w = b[3];
-
-  int target_thread = (threadIdx.x + 4)%32;
-  t2.x = __shfl((int)bx[0], target_thread);
-  t2.y = __shfl((int)bx[1], target_thread);
-  t2.z = __shfl((int)bx[2], target_thread);
-  t2.w = __shfl((int)bx[3], target_thread);
-
-  int t2_start = __shfl((int)start, target_thread) + 4;
-
-  bool c = (threadIdx.x & 0x4);
+  start += 4*(threadIdx.x%4);
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  unsigned int loc = c ? t2_start : start;
-  *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)])) = (c ? t2 : t);
-  loc = c ? start : t2_start;
-  *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)])) = (c ? t : t2);
+  *((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)])) = b;
+  *((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)])) = bx;
 }
 
-template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint32_t b[4], uint32_t bx[4], uint32_t start) {
+template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
-  uint4 t, t2;
-
-  // Tricky bit: We do the work on behalf of thread+4, but then when
-  // we steal, we have to steal from (thread+28)%32 to get the right
-  // stuff back.
-  start = __shfl((int)start, (threadIdx.x & 0x7c)) + 8*(threadIdx.x%4);
-
-  int target_thread = (threadIdx.x + 4)%32;
-  int t2_start = __shfl((int)start, target_thread) + 4;
-
-  bool c = (threadIdx.x & 0x4);
+  start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
   if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  unsigned int loc = (c ? t2_start : start) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) t = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-  loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
-       if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-
-  uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
-  
-  b[0] = t.x; b[1] = t.y; b[2] = t.z; b[3] = t.w;
-
-  int steal_target = (threadIdx.x + 28)%32;
-
-  bx[0] = __shfl((int)t2.x, steal_target);
-  bx[1] = __shfl((int)t2.y, steal_target);
-  bx[2] = __shfl((int)t2.z, steal_target);
-  bx[3] = __shfl((int)t2.w, steal_target);
+  unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) b = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) b = tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) b = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
+               loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) bx = tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) bx = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 }
 
 
-template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uint32_t b[4], uint32_t bx[4], uint32_t start) {
+template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
-  uint4 t, t2;
-
-  // Tricky bit: We do the work on behalf of thread+4, but then when
-  // we steal, we have to steal from (thread+28)%32 to get the right
-  // stuff back.
-  start = __shfl((int)start, (threadIdx.x & 0x7c)) + 8*(threadIdx.x%4);
-
-  int target_thread = (threadIdx.x + 4)%32;
-  int t2_start = __shfl((int)start, target_thread) + 4;
-
-  bool c = (threadIdx.x & 0x4);
+  start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
   if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
 
-  int loc = (c ? t2_start : start) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) t = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-  loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
-       if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-
-  uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
-  
-  b[0] ^= t.x; b[1] ^= t.y; b[2] ^= t.z; b[3] ^= t.w;
-
-  int steal_target = (threadIdx.x + 28)%32;
-
-  bx[0] ^= __shfl((int)t2.x, steal_target);
-  bx[1] ^= __shfl((int)t2.y, steal_target);
-  bx[2] ^= __shfl((int)t2.z, steal_target);
-  bx[3] ^= __shfl((int)t2.w, steal_target);
+  unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) b ^= *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) b ^= tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) b ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
+               loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
+       if (TEX_DIM == 0) bx ^= *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+  else if (TEX_DIM == 1) bx ^= tex1Dfetch(texRef1D_4_V, loc);
+  else if (TEX_DIM == 2) bx ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 }
 
 
-template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys(uint32_t b[4], uint32_t bx[4], uint32_t start) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  start = scrypt_block*c_SCRATCH + (32*start);
-  read_xor_keys_direct<TEX_DIM>(b, bx, start);
-}
-
-
-__device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void primary_order_shuffle(uint4 &b, uint4 &bx) {
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
   
-  b[3] = __shfl((int)b[3], x1_target_lane);
-  b[2] = __shfl((int)b[2], x2_target_lane);
-  b[1] = __shfl((int)b[1], x3_target_lane);
-  uint32_t tmp = b[1]; b[1] = b[3]; b[3] = tmp;
+  b.w = __shfl((int)b.w, x1_target_lane);
+  b.z = __shfl((int)b.z, x2_target_lane);
+  b.y = __shfl((int)b.y, x3_target_lane);
+  uint32_t tmp = b.y; b.y = b.w; b.w = tmp;
   
-  bx[3] = __shfl((int)bx[3], x1_target_lane);
-  bx[2] = __shfl((int)bx[2], x2_target_lane);
-  bx[1] = __shfl((int)bx[1], x3_target_lane);
-  tmp = bx[1]; bx[1] = bx[3]; bx[3] = tmp;
+  bx.w = __shfl((int)bx.w, x1_target_lane);
+  bx.z = __shfl((int)bx.z, x2_target_lane);
+  bx.y = __shfl((int)bx.y, x3_target_lane);
+  tmp = bx.y; bx.y = bx.w; bx.w = tmp;
 }
 
 /*
@@ -196,20 +152,22 @@ __device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t b
  * in internal processing order.
  */
 
-__device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint4 &b, uint4 &bx) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
   // Read in permuted order. Key loads are not our bottleneck right now.
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    b[i] = B[key_offset + 4*thread_in_block + (thread_in_block+i)%4];
-    bx[i] = B[key_offset + 4*thread_in_block + (thread_in_block+i)%4 + 16];
-  }
+  b.x = B[key_offset + 4*thread_in_block + (thread_in_block+0)%4];
+  b.y = B[key_offset + 4*thread_in_block + (thread_in_block+1)%4];
+  b.z = B[key_offset + 4*thread_in_block + (thread_in_block+2)%4];
+  b.w = B[key_offset + 4*thread_in_block + (thread_in_block+3)%4];
+  bx.x = B[key_offset + 4*thread_in_block + (thread_in_block+0)%4 + 16];
+  bx.y = B[key_offset + 4*thread_in_block + (thread_in_block+1)%4 + 16];
+  bx.z = B[key_offset + 4*thread_in_block + (thread_in_block+2)%4 + 16];
+  bx.w = B[key_offset + 4*thread_in_block + (thread_in_block+3)%4 + 16];
 
   primary_order_shuffle(b, bx);
-  
 }
 
 /*
@@ -218,18 +176,21 @@ __device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint32_t b[4]
  * region of B in external order.
  */
 
-__device__  __forceinline__ void store_key_salsa(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void store_key_salsa(uint32_t *B, uint4 &b, uint4 &bx) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
   primary_order_shuffle(b, bx);
 
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    B[key_offset + 4*thread_in_block + (thread_in_block+i)%4] = b[i];
-    B[key_offset + 4*thread_in_block + (thread_in_block+i)%4 + 16] = bx[i];
-  }
+  B[key_offset + 4*thread_in_block + (thread_in_block+0)%4] = b.x;
+  B[key_offset + 4*thread_in_block + (thread_in_block+1)%4] = b.y;
+  B[key_offset + 4*thread_in_block + (thread_in_block+2)%4] = b.z;
+  B[key_offset + 4*thread_in_block + (thread_in_block+3)%4] = b.w;
+  B[key_offset + 4*thread_in_block + (thread_in_block+0)%4 + 16] = bx.x;
+  B[key_offset + 4*thread_in_block + (thread_in_block+1)%4 + 16] = bx.y;
+  B[key_offset + 4*thread_in_block + (thread_in_block+2)%4 + 16] = bx.z;
+  B[key_offset + 4*thread_in_block + (thread_in_block+3)%4 + 16] = bx.w;
 }
 
 
@@ -240,17 +201,20 @@ __device__  __forceinline__ void store_key_salsa(uint32_t *B, uint32_t b[4], uin
  * in internal processing order.
  */
 
-__device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint4 &b, uint4 &bx) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
   // Read in permuted order. Key loads are not our bottleneck right now.
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    b[i] = B[key_offset + 4*i + thread_in_block%4];
-    bx[i] = B[key_offset + 4*i + thread_in_block%4 + 16];
-  }
+  b.x = B[key_offset + 4*0 + thread_in_block%4];
+  b.y = B[key_offset + 4*1 + thread_in_block%4];
+  b.z = B[key_offset + 4*2 + thread_in_block%4];
+  b.w = B[key_offset + 4*3 + thread_in_block%4];
+  bx.x = B[key_offset + 4*0 + thread_in_block%4 + 16];
+  bx.y = B[key_offset + 4*1 + thread_in_block%4 + 16];
+  bx.z = B[key_offset + 4*2 + thread_in_block%4 + 16];
+  bx.w = B[key_offset + 4*3 + thread_in_block%4 + 16];
 }
 
 /*
@@ -259,16 +223,19 @@ __device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint32_t b[4
  * region of B in external order.
  */
 
-__device__  __forceinline__ void store_key_chacha(uint32_t *B, uint32_t b[4], uint32_t bx[4]) {
+__device__  __forceinline__ void store_key_chacha(uint32_t *B, const uint4 &b, const uint4 &bx) {
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
-#pragma unroll 4
-  for (int i = 0; i < 4; i++) {
-    B[key_offset + 4*i + thread_in_block%4] = b[i];
-    B[key_offset + 4*i + thread_in_block%4 + 16] = bx[i];
-  }
+  B[key_offset + 4*0 + thread_in_block%4] = b.x;
+  B[key_offset + 4*1 + thread_in_block%4] = b.y;
+  B[key_offset + 4*2 + thread_in_block%4] = b.z;
+  B[key_offset + 4*3 + thread_in_block%4] = b.w;
+  B[key_offset + 4*0 + thread_in_block%4 + 16] = bx.x;
+  B[key_offset + 4*1 + thread_in_block%4 + 16] = bx.y;
+  B[key_offset + 4*2 + thread_in_block%4 + 16] = bx.z;
+  B[key_offset + 4*3 + thread_in_block%4 + 16] = bx.w;
 }
 
 
@@ -281,19 +248,16 @@ __device__  __forceinline__ void store_key_chacha(uint32_t *B, uint32_t b[4], ui
  * call to avoid unnecessary data movement.
  */
 
-#define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = x[s1]+x[s2]; x[dst] ^= ((tmp<<amt)|(tmp>>(32-amt))); }
+#define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = s1+s2; dst ^= ((tmp<<amt)|(tmp>>(32-amt))); }
 
-__device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
+__device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
-    uint32_t x[4];
+    uint4 x;
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] ^= bx[i];
-      x[i] = b[i];
-    }
+    b ^= bx;
+    x = b;
 
     // Enter in "primary order" (t0 has  0,  4,  8, 12)
     //                          (t1 has  5,  9, 13,  1)
@@ -304,18 +268,18 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
     for (int j = 0; j < 4; j++) {
     
       // Mixing phase of salsa
-      XOR_ROTATE_ADD(1, 0, 3, 7);
-      XOR_ROTATE_ADD(2, 1, 0, 9);
-      XOR_ROTATE_ADD(3, 2, 1, 13);
-      XOR_ROTATE_ADD(0, 3, 2, 18);
+      XOR_ROTATE_ADD(x.y, x.x, x.w, 7);
+      XOR_ROTATE_ADD(x.z, x.y, x.x, 9);
+      XOR_ROTATE_ADD(x.w, x.z, x.y, 13);
+      XOR_ROTATE_ADD(x.x, x.w, x.z, 18);
       
       /* Transpose rows and columns. */
       /* Unclear if this optimization is needed: These are ordered based
        * upon the dependencies needed in the later xors. Compiler should be
        * able to figure this out, but might as well give it a hand. */
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
       
       /* The next XOR_ROTATE_ADDS could be written to be a copy-paste of the first,
        * but the register targets are rewritten here to swap x[1] and x[3] so that
@@ -323,54 +287,48 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
        * reassignment. The reverse shuffle then puts them back in the right place.
        */
       
-      XOR_ROTATE_ADD(3, 0, 1, 7);
-      XOR_ROTATE_ADD(2, 3, 0, 9);
-      XOR_ROTATE_ADD(1, 2, 3, 13);
-      XOR_ROTATE_ADD(0, 1, 2, 18);
+      XOR_ROTATE_ADD(x.w, x.x, x.y, 7);
+      XOR_ROTATE_ADD(x.z, x.w, x.x, 9);
+      XOR_ROTATE_ADD(x.y, x.z, x.w, 13);
+      XOR_ROTATE_ADD(x.x, x.y, x.z, 18);
       
-      x[3] = __shfl((int)x[3], x3_target_lane);
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
     }
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] += x[i];
-      // The next two lines are the beginning of the BX-centric loop iteration
-      bx[i] ^= b[i];
-      x[i] = bx[i];
-    }
+    b += x;
+    // The next two lines are the beginning of the BX-centric loop iteration
+    bx ^= b;
+    x = bx;
 
     // This is a copy of the same loop above, identical but stripped of comments.
     // Duplicated so that we can complete a bx-based loop with fewer register moves.
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
-      XOR_ROTATE_ADD(1, 0, 3, 7);
-      XOR_ROTATE_ADD(2, 1, 0, 9);
-      XOR_ROTATE_ADD(3, 2, 1, 13);
-      XOR_ROTATE_ADD(0, 3, 2, 18);
+      XOR_ROTATE_ADD(x.y, x.x, x.w, 7);
+      XOR_ROTATE_ADD(x.z, x.y, x.x, 9);
+      XOR_ROTATE_ADD(x.w, x.z, x.y, 13);
+      XOR_ROTATE_ADD(x.x, x.w, x.z, 18);
       
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
       
-      XOR_ROTATE_ADD(3, 0, 1, 7);
-      XOR_ROTATE_ADD(2, 3, 0, 9);
-      XOR_ROTATE_ADD(1, 2, 3, 13);
-      XOR_ROTATE_ADD(0, 1, 2, 18);
+      XOR_ROTATE_ADD(x.w, x.x, x.y, 7);
+      XOR_ROTATE_ADD(x.z, x.w, x.x, 9);
+      XOR_ROTATE_ADD(x.y, x.z, x.w, 13);
+      XOR_ROTATE_ADD(x.x, x.y, x.z, 18);
       
-      x[3] = __shfl((int)x[3], x3_target_lane);
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
     }
 
     // At the end of these iterations, the data is in primary order again.
 #undef XOR_ROTATE_ADD
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      bx[i] += x[i];
-    }
+    bx += x;
 }
 
 
@@ -384,19 +342,16 @@ __device__  __forceinline__ void salsa_xor_core(uint32_t b[4], uint32_t bx[4],
  * (referred to as "column mode" below)
  */
 
-#define CHACHA_PRIMITIVE(pt, rt, ps, amt) { uint32_t tmp = x[rt] ^ (x[pt] += x[ps]); x[rt] = ((tmp<<amt)|(tmp>>(32-amt))); }
+#define CHACHA_PRIMITIVE(pt, rt, ps, amt) { uint32_t tmp = rt ^ (pt += ps); rt = ((tmp<<amt)|(tmp>>(32-amt))); }
 
-__device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
+__device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
                                  const int x1_target_lane,
                                  const int x2_target_lane,
                                  const int x3_target_lane) {
-    uint32_t x[4];
+    uint4 x;
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] ^= bx[i];
-      x[i] = b[i];
-    }
+    b ^= bx;
+    x = b;
 
     // Enter in "column" mode (t0 has 0, 4,  8, 12)
     //                        (t1 has 1, 5,  9, 13)
@@ -407,64 +362,58 @@ __device__  __forceinline__ void chacha_xor_core(uint32_t b[4], uint32_t bx[4],
     for (int j = 0; j < 4; j++) {
     
       // Column Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
       
       // Diagonal Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
     }
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      b[i] += x[i];
-      // The next two lines are the beginning of the BX-centric loop iteration
-      bx[i] ^= b[i];
-      x[i] = bx[i];
-    }
+    b += x;
+    // The next two lines are the beginning of the BX-centric loop iteration
+    bx ^= b;
+    x = bx;
 
 #pragma unroll 4
     for (int j = 0; j < 4; j++) {
 
       // Column Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x1_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x3_target_lane);
+      x.y = __shfl((int)x.y, x1_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x3_target_lane);
       
       // Diagonal Mixing phase of chacha
-      CHACHA_PRIMITIVE(0 ,3, 1, 16)
-      CHACHA_PRIMITIVE(2 ,1, 3, 12)
-      CHACHA_PRIMITIVE(0 ,3, 1,  8)
-      CHACHA_PRIMITIVE(2 ,1, 3,  7)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y, 16)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w, 12)
+      CHACHA_PRIMITIVE(x.x ,x.w, x.y,  8)
+      CHACHA_PRIMITIVE(x.z ,x.y, x.w,  7)
       
-      x[1] = __shfl((int)x[1], x3_target_lane);
-      x[2] = __shfl((int)x[2], x2_target_lane);
-      x[3] = __shfl((int)x[3], x1_target_lane);
+      x.y = __shfl((int)x.y, x3_target_lane);
+      x.z = __shfl((int)x.z, x2_target_lane);
+      x.w = __shfl((int)x.w, x1_target_lane);
     }
 
 #undef CHACHA_PRIMITIVE
 
-#pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-      bx[i] += x[i];
-    }
+    bx += x;
 }
 
 
@@ -496,15 +445,15 @@ void kepler_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
    * internally shuffles the variables between threads (and back) as
    * needed.
    */
-  uint32_t b[4], bx[4];
+  uint4 b, bx;
 
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
+  int start = scrypt_block*c_SCRATCH;
 
   int i=begin;
 
@@ -545,15 +494,15 @@ void kepler_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
   /* Each thread operates on a group of four variables that must be processed
    * together. Shuffle between threaads in a warp between iterations.
    */
-  uint32_t b[4], bx[4];
+  uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
-  int start = scrypt_block*c_SCRATCH + 8*(threadIdx.x%4);
+  int start = scrypt_block*c_SCRATCH;
 
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0xfc) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   if (begin == 0)
   {
@@ -576,9 +525,8 @@ void kepler_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
 
     // Bounce through the key space and XOR the new keys in.
     // Critical thing: (X[16] & (c_N_1)) tells us the next slot to read.
-    // X[16] in the original is bx[0]
-    int slot = bx[0] & (c_N_1);
-    read_xor_keys<TEX_DIM>(b, bx, slot);
+    // X[16] in the original is bx.x
+    read_xor_keys_direct<TEX_DIM>(b, bx, start+32*(__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1)));
     switch(ALGO) {
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
       case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
@@ -589,7 +537,6 @@ void kepler_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
     case ALGO_SCRYPT:      store_key_salsa(d_odata, b, bx); break;
     case ALGO_SCRYPT_JANE: store_key_chacha(d_odata, b, bx); break;
   }
-  
 }
 
 KeplerKernel::KeplerKernel() : KernelInterface()
