@@ -28,10 +28,10 @@ __constant__ uint32_t* c_V[1024];
 
 // iteration count N
 __constant__ uint32_t c_N;
-__constant__ uint32_t c_N_1;                  // N-1
+__constant__ uint32_t c_N_1;                   // N-1
 // scratch buffer size SCRATCH
 __constant__ uint32_t c_SCRATCH;
-__constant__ uint32_t c_SCRATCH_WU_PER_WARP;  // SCRATCH * WU_PER_WARP
+__constant__ uint32_t c_SCRATCH_WU_PER_WARP_1; // (SCRATCH * WU_PER_WARP) - 1
 
 // using texture references for the "tex" variants of the B kernels
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
@@ -86,10 +86,10 @@ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   start += 4*(threadIdx.x%4);
 
-  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
 
-  *((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)])) = b;
-  *((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)])) = bx;
+  *((uint4 *)(&scratch[ start    &(c_SCRATCH_WU_PER_WARP_1)])) = b;
+  *((uint4 *)(&scratch[(start+16)&(c_SCRATCH_WU_PER_WARP_1)])) = bx;
 }
 
 template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
@@ -97,14 +97,14 @@ template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &
   start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
-  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
 
   unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) b = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+       if (TEX_DIM == 0) b = *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
   else if (TEX_DIM == 1) b = tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) b = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
                loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+       if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
   else if (TEX_DIM == 1) bx = tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) bx = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 }
@@ -115,14 +115,14 @@ template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uin
   start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
-  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
 
   unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) b ^= *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+       if (TEX_DIM == 0) b ^= *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
   else if (TEX_DIM == 1) b ^= tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) b ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
                loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) bx ^= *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
+       if (TEX_DIM == 0) bx ^= *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
   else if (TEX_DIM == 1) bx ^= tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) bx ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 }
@@ -609,8 +609,8 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH = SCRATCH;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH, &h_SCRATCH, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
-        uint32_t h_SCRATCH_WU_PER_WARP = SCRATCH * WU_PER_WARP;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        uint32_t h_SCRATCH_WU_PER_WARP_1 = (SCRATCH * WU_PER_WARP) - 1;
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
     }
 
     // First phase: Sequential writes to scratchpad.

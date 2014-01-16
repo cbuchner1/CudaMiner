@@ -31,10 +31,10 @@ __constant__ uint32_t* c_V[1024];
 
 // iteration count N
 __constant__ uint32_t c_N;
-__constant__ uint32_t c_N_1;                  // N-1
+__constant__ uint32_t c_N_1;                   // N-1
 // scratch buffer size SCRATCH
 __constant__ uint32_t c_SCRATCH;
-__constant__ uint32_t c_SCRATCH_WU_PER_WARP;  // SCRATCH * WU_PER_WARP
+__constant__ uint32_t c_SCRATCH_WU_PER_WARP_1; // (SCRATCH * WU_PER_WARP)-1
 
 static const int THREADS_PER_SCRYPT_BLOCK = 4;
 
@@ -85,30 +85,30 @@ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   start += 4*(threadIdx.x%4);
 
-  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
 
-  *((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)])) = b;
-  *((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)])) = bx;
+  *((uint4 *)(&scratch[ start    &(c_SCRATCH_WU_PER_WARP_1)])) = b;
+  *((uint4 *)(&scratch[(start+16)&(c_SCRATCH_WU_PER_WARP_1)])) = bx;
 }
 
 __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
   start += 4*(threadIdx.x%4);
 
-  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
 
-  b  = __ldg((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)]));
-  bx = __ldg((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)]));
+  b  = __ldg((uint4 *)(&scratch[ start    &(c_SCRATCH_WU_PER_WARP_1)]));
+  bx = __ldg((uint4 *)(&scratch[(start+16)&(c_SCRATCH_WU_PER_WARP_1)]));
 }
 
 __device__  __forceinline__ void read_xor_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
   start += 4*(threadIdx.x%4);
 
-  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * warpSize)];
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
 
-  b  ^= __ldg((uint4 *)(&scratch[ start    %(c_SCRATCH_WU_PER_WARP)]));
-  bx ^= __ldg((uint4 *)(&scratch[(start+16)%(c_SCRATCH_WU_PER_WARP)]));
+  b  ^= __ldg((uint4 *)(&scratch[ start    &(c_SCRATCH_WU_PER_WARP_1)]));
+  bx ^= __ldg((uint4 *)(&scratch[(start+16)&(c_SCRATCH_WU_PER_WARP_1)]));
 }
 
 
@@ -588,8 +588,8 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH = SCRATCH;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH, &h_SCRATCH, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
-        uint32_t h_SCRATCH_WU_PER_WARP = SCRATCH * WU_PER_WARP;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        uint32_t h_SCRATCH_WU_PER_WARP_1 = (SCRATCH * WU_PER_WARP) - 1;
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
     }
 
     // First phase: Sequential writes to scratchpad.
