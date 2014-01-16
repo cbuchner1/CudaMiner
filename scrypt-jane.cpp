@@ -256,7 +256,7 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 
 int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	const uint32_t *ptarget,
-	uint32_t max_nonce, unsigned long *hashes_done)
+	uint32_t max_nonce, struct timeval *tv_start, struct timeval *tv_end, unsigned long *hashes_done)
 {
 	const uint32_t Htarg = ptarget[7];
 	static int s_Nfactor = 0;
@@ -279,6 +279,8 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 
 	parallel = 0;
 	int throughput = cuda_throughput(thr_id);
+	
+	gettimeofday(tv_start, NULL);
 
 	uint32_t *data[2] = { new uint32_t[20*throughput], new uint32_t[20*throughput] };
 	uint32_t *hash = new uint32_t[8*throughput];
@@ -412,6 +414,7 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 					scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
 					delete[] data[0]; delete[] data[1];
 					delete[] hash;
+					gettimeofday(tv_end, NULL);
 					return 1;
 				}
 				else
@@ -431,5 +434,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	
 	*hashes_done = (n-throughput) - pdata[19] + 1;
 	pdata[19] = (n-throughput);
+	gettimeofday(tv_end, NULL);
 	return 0;
 }

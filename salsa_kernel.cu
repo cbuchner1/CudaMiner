@@ -52,7 +52,6 @@
 
 // define some error checking macros
 #undef checkCudaErrors
-#undef getLastCudaError
 
 #define checkCudaErrors(x) \
 { \
@@ -64,7 +63,6 @@
         applog(LOG_ERR, "GPU #%d: cudaError %d (%s) calling '%s' (%s line %d)\n", device_map[thr_id], err, cudaGetErrorString(err), #x, __FILE__, __LINE__); \
     } \
 }
-#define getLastCudaError(x)
 
 
 // some globals containing pointers to device memory (for chunked allocation)

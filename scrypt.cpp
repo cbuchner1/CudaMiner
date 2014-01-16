@@ -691,10 +691,13 @@ static inline void PBKDF2_SHA256_128_32(uint32_t *tstate, uint32_t *ostate,
 
 int scanhash_scrypt(int thr_id, uint32_t *pdata,
 	const uint32_t *ptarget,
-	uint32_t max_nonce, unsigned long *hashes_done)
+	uint32_t max_nonce, struct timeval *tv_start, struct timeval *tv_end, unsigned long *hashes_done)
 {
 	int result = 0;
 	int throughput = cuda_throughput(thr_id);
+	
+	gettimeofday(tv_start, NULL);
+	
 	uint32_t n = pdata[19] - 1;
 	const uint32_t Htarg = ptarget[7];
 	int i;
@@ -919,5 +922,6 @@ byebye:
 	delete[] datax4[0]; delete[] datax4[1]; delete[] hashx4[0]; delete[] hashx4[1];
 	delete[] tstatex4[0]; delete[] tstatex4[1]; delete[] ostatex4[0]; delete[] ostatex4[1];
 	delete[] Xx4[0]; delete[] Xx4[1];
+	gettimeofday(tv_end, NULL);
 	return result;
 }

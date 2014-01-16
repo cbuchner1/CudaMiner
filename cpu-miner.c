@@ -812,23 +812,23 @@ static void *miner_thread(void *userdata)
 			max_nonce = (uint32_t)(work.data[19] + max64);
 		
 		hashes_done = 0;
-		gettimeofday(&tv_start, NULL);
+		// CB
 
 		/* scan nonces for a proof-of-work hash */
 		switch (opt_algo) {
 		case ALGO_SCRYPT:
 			rc = scanhash_scrypt(thr_id, work.data, work.target,  // CB
-			                     max_nonce, &hashes_done);
+			                     max_nonce, &tv_start, &tv_end, &hashes_done);
 			break;
 
 		case ALGO_SCRYPT_JANE:
 			rc = scanhash_scrypt_jane(thr_id, work.data, work.target,  // CB
-			                     max_nonce, &hashes_done);
+			                     max_nonce, &tv_start, &tv_end, &hashes_done);
 			break;
 
 		case ALGO_SHA256D:
-			rc = scanhash_sha256d(thr_id, work.data, work.target,
-			                      max_nonce, &hashes_done);
+			rc = scanhash_sha256d(thr_id, work.data, work.target, // CB
+			                      max_nonce, &tv_start, &tv_end, &hashes_done);
 			break;
 
 		default:
@@ -836,8 +836,8 @@ static void *miner_thread(void *userdata)
 			goto out;
 		}
 
+                // CB
 		/* record scanhash elapsed time */
-		gettimeofday(&tv_end, NULL);
 		timeval_subtract(&diff, &tv_end, &tv_start);
 		if (diff.tv_usec || diff.tv_sec) {
 			pthread_mutex_lock(&stats_lock);
