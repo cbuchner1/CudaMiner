@@ -107,7 +107,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;CURL_STATICLIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;CURL_STATICLIB;SCRYPT_KECCAK512;SCRYPT_CHACHA;SCRYPT_CHOOSE_COMPILETIME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>.;compat;compat\jansson;compat\getopt;..\pthreads\Pre-built.2\include;..\curl-7.29.0_x64\include;%(AdditionalIncludeDirectories);$(CudaToolkitIncludeDir)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -221,6 +221,9 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">32</MaxRegCount>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</CInterleavedPTX>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_30,sm_30</CodeGeneration>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</CInterleavedPTX>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">compute_30,sm_30</CodeGeneration>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">32</MaxRegCount>
     </CudaCompile>
     <CudaCompile Include="legacy_kernel.cu">
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
@@ -238,7 +241,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_30,sm_30</CodeGeneration>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_30,sm_30</CodeGeneration>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_12,sm_12</CodeGeneration>
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">compute_10,sm_10</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">compute_12,sm_12</CodeGeneration>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">64</MaxRegCount>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
@@ -247,13 +250,13 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">63</MaxRegCount>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</CInterleavedPTX>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
-      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</CInterleavedPTX>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</CInterleavedPTX>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</CInterleavedPTX>
     </CudaCompile>
     <CudaCompile Include="test_kernel.cu">
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_30,sm_30</CodeGeneration>
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_35,sm_35</CodeGeneration>
-      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_30,sm_30</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_20,sm_20</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">compute_20,sm_20</CodeGeneration>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_20,sm_20</CodeGeneration>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
@@ -261,6 +264,10 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CInterleavedPTX>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">32</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">32</MaxRegCount>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</CInterleavedPTX>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">compute_20,sm_20</CodeGeneration>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">32</MaxRegCount>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">32</MaxRegCount>
     </CudaCompile>
     <CudaCompile Include="titan_kernel.cu">
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>

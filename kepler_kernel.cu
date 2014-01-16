@@ -110,7 +110,7 @@ template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint32_
   else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
   loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
        if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 
   uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
@@ -149,7 +149,7 @@ template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uin
   else if (TEX_DIM == 2) t = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
   loc = (c ? start : t2_start) / ((TEX_DIM > 0) ? 4 : 1);;
        if (TEX_DIM == 0) t2 = *((uint4 *)(&scratch[loc%(c_SCRATCH_WU_PER_WARP)]));
-  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc/4);
+  else if (TEX_DIM == 1) t2 = tex1Dfetch(texRef1D_4_V, loc);
   else if (TEX_DIM == 2) t2 = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
 
   uint4 tmp = t; t = (c ? t2 : t); t2 = (c ? tmp : t2);
@@ -669,6 +669,15 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     // First phase: Sequential writes to scratchpad.
 
     int batch = device_batchsize[thr_id];
+    int num_sleeps = 2* ((N + (batch-1)) / batch);
+    int sleeptime = 100;
+    int situation = 0;
+
+    // Optional sleep in between kernels
+    if (!benchmark && interactive) {
+        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+        usleep(sleeptime);
+    }
 
     int pos = 0;
     do 
@@ -678,11 +687,10 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
           case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
         }
 
-        // Optional millisecond sleep in between kernels
-
+        // Optional sleep in between kernels
         if (!benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
-            usleep(100);
+            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+            usleep(sleeptime);
         }
         pos += batch;
     } while (pos < N);
@@ -692,9 +700,10 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     pos = 0;
     do
     {
+        // Optional sleep in between kernels
         if (pos > 0 && !benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, -1, thr_id));
-            usleep(100);
+            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
+            usleep(sleeptime);
         }
 
         if (texture_cache)
