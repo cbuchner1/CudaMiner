@@ -50,6 +50,23 @@
 #define DMAJ 5
 #define DMIN 5
 
+// define some error checking macros
+#undef checkCudaErrors
+#undef getLastCudaError
+
+#define checkCudaErrors(x) \
+{ \
+    cudaGetLastError(); \
+    x; \
+    cudaError_t err = cudaGetLastError(); \
+    if (err != cudaSuccess) \
+    { \
+        applog(LOG_ERR, "GPU #%d: cudaError %d (%s) calling '%s' (%s line %d)\n", device_map[thr_id], err, cudaGetErrorString(err), #x, __FILE__, __LINE__); \
+    } \
+}
+#define getLastCudaError(x)
+
+
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
 int       MAXWARPS[8];
@@ -59,7 +76,7 @@ uint32_t  h_V_extra[8][1024];
 extern "C" int cuda_num_devices()
 {
     int version;
-    int err = cudaDriverGetVersion(&version);
+    cudaError_t err = cudaDriverGetVersion(&version);
     if (err != cudaSuccess)
     {
         applog(LOG_ERR, "Unable to query CUDA driver version! Is an nVidia driver installed?");
@@ -147,7 +164,7 @@ extern "C" void cuda_shutdown(int thr_id)
 {
     checkCudaErrors(cudaStreamSynchronize(context_streams[0][thr_id]));
     checkCudaErrors(cudaStreamSynchronize(context_streams[1][thr_id]));
-    cudaThreadExit();
+    checkCudaErrors(cudaThreadExit());
 }
 
 extern "C" int cuda_throughput(int thr_id)
@@ -160,9 +177,9 @@ extern "C" int cuda_throughput(int thr_id)
         cuCtxCreate( &ctx, CU_CTX_SCHED_YIELD, device_map[thr_id] );
         cuCtxSetCurrent(ctx);
 #else
-        cudaSetDeviceFlags(cudaDeviceScheduleYield);
-        cudaSetDevice(device_map[thr_id]);
-        cudaFree(0);
+        checkCudaErrors(cudaSetDeviceFlags(cudaDeviceScheduleYield));
+        checkCudaErrors(cudaSetDevice(device_map[thr_id]));
+        checkCudaErrors(cudaFree(0));
 #endif
 
         KernelInterface *kernel;
@@ -207,7 +224,7 @@ extern "C" int cuda_throughput(int thr_id)
         cudaEvent_t tmp4;
         checkCudaErrors(cudaEventCreateWithFlags(&tmp4, cudaEventDisableTiming)); context_serialize[0][thr_id] = tmp4;
         checkCudaErrors(cudaEventCreateWithFlags(&tmp4, cudaEventDisableTiming)); context_serialize[1][thr_id] = tmp4;
-        cudaEventRecord(context_serialize[1][thr_id]);
+        checkCudaErrors(cudaEventRecord(context_serialize[1][thr_id]));
 
         context_kernel[thr_id] = kernel;
         context_concurrent[thr_id] = concurrent;
@@ -280,7 +297,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     int optimal_blocks = 0;
 
     cudaDeviceProp props;
-    cudaGetDeviceProperties(&props, device_map[thr_id]);
+    checkCudaErrors(cudaGetDeviceProperties(&props, device_map[thr_id]));
     concurrent = (props.concurrentKernels > 0);
 
     device_name[thr_id] = strdup(props.name);
@@ -326,8 +343,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     }
 
     // set whatever cache configuration and shared memory bank mode the kernel prefers
-    cudaDeviceSetCacheConfig(kernel->cache_config());
-    cudaDeviceSetSharedMemConfig(kernel->shared_mem_config());
+    checkCudaErrors(cudaDeviceSetCacheConfig(kernel->cache_config()));
+    checkCudaErrors(cudaDeviceSetSharedMemConfig(kernel->shared_mem_config()));
 
     // some kernels (e.g. Titan) do not support the texture cache
     if (kernel->no_textures() && device_texturecache[thr_id]) {
@@ -363,9 +380,9 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else {
             // compute no. of warps to allocate the largest number producing a single memory block
-            for (int warp = min(1024ULL, MAXMEM / (SCRATCH * WU_PER_WARP * sizeof(uint32_t))); warp >= 1; --warp) {
+            for (int warp = (int)min(1024ULL, MAXMEM / (SCRATCH * WU_PER_WARP * sizeof(uint32_t))); warp >= 1; --warp) {
                 cudaGetLastError(); // clear the error state
-                checkCudaErrors(cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t)));
+                cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t));
                 if (cudaGetLastError() == cudaSuccess) {
                     checkCudaErrors(cudaFree(d_V)); d_V = NULL;
 #ifdef WIN32
@@ -381,7 +398,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
         // now allocate a buffer for determined MAXWARPS setting
         cudaGetLastError(); // clear the error state
-        checkCudaErrors(cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
+        cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t));
         if (cudaGetLastError() == cudaSuccess) {
             for (int i=0; i < MAXWARPS[thr_id]; ++i)
                 h_V[thr_id][i] = d_V + SCRATCH * WU_PER_WARP * i;
@@ -412,7 +429,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else
         {
-            applog(LOG_ERR, "GPU #%d:Launch config '%s' requires too much memory!", device_map[thr_id], device_config[thr_id]);
+            applog(LOG_ERR, "GPU #%d: Launch config '%s' requires too much memory!", device_map[thr_id], device_config[thr_id]);
         }
     }
     else
@@ -428,18 +445,18 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             // work around partition camping problems by adding an offset
             h_V_extra[thr_id][warp] = (props.major == 1) ? (16 * (rand()%(16384/16))) : 0;
             cudaGetLastError(); // clear the error state
-            checkCudaErrors(cudaMalloc((void **) &h_V[thr_id][warp], (SCRATCH * WU_PER_WARP + h_V_extra[thr_id][warp])*sizeof(uint32_t)));
+            cudaMalloc((void **) &h_V[thr_id][warp], (SCRATCH * WU_PER_WARP + h_V_extra[thr_id][warp])*sizeof(uint32_t));
             if (cudaGetLastError() == cudaSuccess) h_V[thr_id][warp] += h_V_extra[thr_id][warp];
             else {
                 h_V_extra[thr_id][warp] = 0;
-#ifdef WIN32
+
                 // back off by two allocations to have some breathing room
                 for (int i=0; warp > 0 && i < 2; ++i) {
                     warp--;
                     checkCudaErrors(cudaFree(h_V[thr_id][warp]-h_V_extra[thr_id][warp]));
                     h_V[thr_id][warp] = NULL; h_V_extra[thr_id][warp] = 0;
                 }
-#endif
+
                 break;
             }
         }
@@ -502,7 +519,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             struct timeval tv_start, tv_end;
                             double tdelta = 0;
 
-                            cudaDeviceSynchronize();
+                            checkCudaErrors(cudaDeviceSynchronize());
                             gettimeofday(&tv_start, NULL);
                             int repeat = 0;
                             bool r = false;
@@ -675,7 +692,7 @@ skip:           ;
             checkCudaErrors(cudaFree(d_V)); d_V = NULL;
 
             cudaGetLastError(); // clear the error state
-            checkCudaErrors(cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t)));
+            cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * MAXWARPS[thr_id] * sizeof(uint32_t));
             if (cudaGetLastError() == cudaSuccess) {
                 for (int i=0; i < MAXWARPS[thr_id]; ++i)
                     h_V[thr_id][i] = d_V + SCRATCH * WU_PER_WARP * i;
@@ -719,29 +736,44 @@ skip:           ;
     return optimal_blocks;
 }
 
+typedef struct { double value[8]; } tsumarray;
+	
 cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
 {
     cudaError_t result = cudaSuccess;
-    if (situation >= 0 && situation <= 2)
-    {
-        static double tsum[3][8] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    if (situation >= 0)
+    {   
+        static std::map<int, tsumarray> tsum;
+
+        float a = 0.95, b = 0.05;
+        if (tsum.find(situation) == tsum.end()) { a = 0.5; b = 0.5; } // faster initial convergence
 
         double tsync = 0.0;
-        double tsleep = 0.95 * tsum[situation][thr_id];
+        double tsleep = 0.95 * tsum[situation].value[thr_id];
         if (cudaStreamQuery(stream) == cudaErrorNotReady)
         {
-    #ifdef WIN32
-            Sleep((DWORD)(1000*tsleep));
-    #else
             usleep((useconds_t)(1e6*tsleep));
-    #endif
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
             checkCudaErrors(result = cudaStreamSynchronize(stream));
             gettimeofday(&tv_end, NULL);
             tsync = 1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec);
         }
-        if (tsync >= 0) tsum[situation][thr_id] = 0.95 * tsum[situation][thr_id] + 0.05 * (tsleep+tsync);
+        if (tsync >= 0) tsum[situation].value[thr_id] = a * tsum[situation].value[thr_id] + b * (tsleep+tsync);
+
+#if 0
+        static int calls = 0;
+        if (++calls == 50) {
+            static std::map<int, tsumarray>::iterator it;
+            for (it = tsum.begin(); it != tsum.end() ; ++it)
+            {
+                const int &sit = (*it).first;
+                const tsumarray &ts = (*it).second;
+                fprintf(stderr, "%d: %f\n", sit, ts.value[thr_id]);
+            }
+            calls = 0;
+        }
+#endif
     }
     else
     {
@@ -758,7 +790,7 @@ extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream)
 
     // copy host memory to device
     checkCudaErrors(cudaMemcpyAsync(context_idata[stream][thr_id], X, mem_size,
-                               cudaMemcpyHostToDevice, context_streams[stream][thr_id]));
+                                    cudaMemcpyHostToDevice, context_streams[stream][thr_id]));
 }
 
 extern "C" void cuda_scrypt_serialize(int thr_id, int stream)
@@ -790,11 +822,6 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(WU_PER_BLOCK, 1, 1);
 
-    if (device_interactive[thr_id]) {
-//        checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 2, thr_id));
-        usleep(100);
-    }
-
     context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, device_interactive[thr_id], opt_benchmark, device_texturecache[thr_id]);
 }
 
@@ -806,7 +833,7 @@ extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
 
     // copy result from device to host (asynchronously)
     checkCudaErrors(cudaMemcpyAsync(X, context_odata[stream][thr_id], mem_size,
-                               cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
+                                    cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
 }
 
 extern "C" void cuda_scrypt_sync(int thr_id, int stream)
@@ -836,7 +863,7 @@ extern "C" void
 computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
 {
     uint32_t X[32];
-    int i,j,k;
+    unsigned int i; int j,k;
 
     for (k = 0; k < 32; k++)
         X[k] = idata[k];
