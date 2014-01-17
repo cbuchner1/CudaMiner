@@ -182,6 +182,7 @@ extern "C" int cuda_throughput(int thr_id)
 
         KernelInterface *kernel;
         bool concurrent; GRID_BLOCKS = find_optimal_blockcount(thr_id, kernel, concurrent, WARPS_PER_BLOCK);
+        unsigned int THREADS_PER_WU = kernel->threads_per_wu();
         unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
         unsigned int state_size = WU_PER_LAUNCH * sizeof(uint32_t) * 8;
 
@@ -232,6 +233,7 @@ extern "C" int cuda_throughput(int thr_id)
 
     GRID_BLOCKS = context_blocks[thr_id];
     WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
     return WU_PER_LAUNCH;
 }
 
@@ -362,6 +364,11 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
            (device_interactive[thr_id]  != 0) ? 1 : 0,
            (device_texturecache[thr_id] != 0) ? device_texturecache[thr_id] : 0, (device_texturecache[thr_id] != 0) ? 'D' : ' ',
            (device_singlememory[thr_id] != 0) ? 1 : 0 );
+
+    // number of threads collaborating on one work unit (hash)
+    unsigned int THREADS_PER_WU = kernel->threads_per_wu();
+
+    applog(LOG_INFO, "GPU #%d: %d hashes / %d MB per warp.", device_map[thr_id], WU_PER_WARP, (int)((size_t)SCRATCH * WU_PER_WARP * sizeof(uint32_t) / (1024 * 1024)));
 
     // compute highest MAXWARPS numbers for kernels allowing cudaBindTexture to succeed
     int MW_1D_4 = 134217728 / (SCRATCH * WU_PER_WARP / 4); // for uint4_t textures
@@ -512,7 +519,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                         {
                             // setup execution parameters
                             dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
-                            dim3  threads(WU_PER_BLOCK, 1, 1);
+                            dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
                             struct timeval tv_start, tv_end;
                             double tdelta = 0;
@@ -782,8 +789,9 @@ cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
 
 extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream)
 {
-    int GRID_BLOCKS = context_blocks[thr_id];
-    int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int GRID_BLOCKS = context_blocks[thr_id];
+    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
     unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
 
     // copy host memory to device
@@ -813,20 +821,22 @@ extern "C" void cuda_scrypt_flush(int thr_id, int stream)
 
 extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
 {
-    int GRID_BLOCKS = context_blocks[thr_id];
-    int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int GRID_BLOCKS = context_blocks[thr_id];
+    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
 
     // setup execution parameters
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
-    dim3  threads(WU_PER_BLOCK, 1, 1);
+    dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
     context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, device_interactive[thr_id], opt_benchmark, device_texturecache[thr_id]);
 }
 
 extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
 {
-    int GRID_BLOCKS = context_blocks[thr_id];
-    int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int GRID_BLOCKS = context_blocks[thr_id];
+    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
     unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
 
     // copy result from device to host (asynchronously)

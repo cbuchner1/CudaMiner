@@ -33,6 +33,8 @@
 #endif
 #endif
 
+#define THREADS_PER_WU 1
+
 // forward references
 template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
 template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N);

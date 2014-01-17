@@ -35,6 +35,8 @@
 #include "miner.h"
 #include "fermi_kernel.h"
 
+#define THREADS_PER_WU 1
+
 #define TEXWIDTH 32768
 
 // forward references

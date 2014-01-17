@@ -21,6 +21,7 @@ public:
 
     virtual int max_warps_per_block() { return 32; };
     virtual int get_texel_width() { return 4; };
+    virtual int threads_per_wu() { return 4; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferL1; }
 };
 

@@ -73,12 +73,13 @@ public:
     virtual int get_texel_width() = 0;
     virtual bool no_textures() { return false; };
     virtual bool single_memory() { return false; };
+    virtual int threads_per_wu() { return 1; }
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeDefault; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferNone; }
 };
 
 // Define work unit size
-#define WU_PER_WARP 32
+#define WU_PER_WARP (32 / THREADS_PER_WU)
 #define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
 

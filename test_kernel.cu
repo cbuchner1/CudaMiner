@@ -42,7 +42,7 @@ __constant__ uint32_t c_SCRATCH_WU_PER_WARP_1; // (SCRATCH * WU_PER_WARP) - 1
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
 texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
-static const int THREADS_PER_SCRYPT_BLOCK = 4;
+#define THREADS_PER_WU 4
 
 static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
@@ -92,7 +92,7 @@ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   start += 4*(threadIdx.x%4);
 
-  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
 
   *((uint4 *)(&scratch[ start    &(c_SCRATCH_WU_PER_WARP_1)])) = b;
   *((uint4 *)(&scratch[(start+16)&(c_SCRATCH_WU_PER_WARP_1)])) = bx;
@@ -103,7 +103,7 @@ template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &
   start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
-  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
+  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
 
   unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
        if (TEX_DIM == 0) b = *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
@@ -121,7 +121,7 @@ template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uin
   start += 4*(threadIdx.x%4);
 
   uint32_t *scratch;
-  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/(THREADS_PER_SCRYPT_BLOCK * 32)];
+  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
 
   unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
        if (TEX_DIM == 0) b ^= *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
@@ -167,7 +167,7 @@ __device__  __forceinline__ void primary_order_shuffle(uint4 &b, uint4 &bx) {
  */
 
 __device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint4 &b, uint4 &bx) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
@@ -192,7 +192,7 @@ __device__  __forceinline__ void load_key_salsa(const uint32_t *B, uint4 &b, uin
  */
 
 __device__  __forceinline__ void store_key_salsa(uint32_t *B, uint4 &b, uint4 &bx) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
@@ -217,7 +217,7 @@ __device__  __forceinline__ void store_key_salsa(uint32_t *B, uint4 &b, uint4 &b
  */
 
 __device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint4 &b, uint4 &bx) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
@@ -239,7 +239,7 @@ __device__  __forceinline__ void load_key_chacha(const uint32_t *B, uint4 &b, ui
  */
 
 __device__  __forceinline__ void store_key_chacha(uint32_t *B, const uint4 &b, const uint4 &bx) {
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
   int key_offset = scrypt_block * 32;
   uint32_t thread_in_block = threadIdx.x % 4;
 
@@ -485,7 +485,7 @@ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
   int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
   int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
   int start = scrypt_block*c_SCRATCH;
 
   int i=begin;
@@ -532,7 +532,7 @@ void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
    */
   uint4 b, bx;
 
-  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_SCRYPT_BLOCK;
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
   int start = scrypt_block*c_SCRATCH;
 
   /* Inner loop shuffle targets */
@@ -631,12 +631,6 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     // clear CUDA's error variable
     cudaGetLastError();
 
-    // this kernel needs 4 threads per work unit. 
-    switch(opt_algo) {
-      case ALGO_SCRYPT: grid.x *= 4; break; // scrypt: We scale up the grid x dimension to compensate.
-      case ALGO_SCRYPT_JANE: threads.x *= 4; break; // scrypt-jane: we scale up thread block size
-    }
-    
     // compute required shared memory per block for __shfl() emulation
     size_t shared = ((threads.x + 31) / 32) * (32+1) * sizeof(uint32_t);
     
