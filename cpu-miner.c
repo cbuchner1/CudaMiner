@@ -1097,7 +1097,7 @@ static void parse_arg (int key, char *arg)
 				break;
 			}
 		}
-		if (i == ARRAY_SIZE(algo_names)) // CB
+		if (i == ARRAY_SIZE(algo_names)) { // CB
 			if (!strncmp(arg, algo_names[ALGO_SCRYPT], strlen(algo_names[ALGO_SCRYPT])) && arg[strlen(algo_names[ALGO_SCRYPT])] == ':')
 			{
 				N = atoi(&arg[strlen(algo_names[ALGO_SCRYPT])+1]);
@@ -1109,6 +1109,7 @@ static void parse_arg (int key, char *arg)
 				opt_algo = ALGO_SCRYPT_JANE;
 			}
 			else show_usage_and_exit(1);
+		}
 		break;
 	case 'B':
 		opt_background = true;
