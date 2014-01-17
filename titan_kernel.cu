@@ -27,7 +27,7 @@
 #endif
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
-__constant__ uint32_t* c_V[1024];
+__constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
 
 // iteration count N
 __constant__ uint32_t c_N;

@@ -68,8 +68,8 @@
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
 int       MAXWARPS[8];
-uint32_t* h_V[8][1024];
-uint32_t  h_V_extra[8][1024];
+uint32_t* h_V[8][TOTAL_WARP_LIMIT];
+uint32_t  h_V_extra[8][TOTAL_WARP_LIMIT];
 
 extern "C" int cuda_num_devices()
 {
@@ -385,7 +385,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else {
             // compute no. of warps to allocate the largest number producing a single memory block
-            for (int warp = (int)min(1024ULL, MAXMEM / (SCRATCH * WU_PER_WARP * sizeof(uint32_t))); warp >= 1; --warp) {
+            for (int warp = (int)min((unsigned long long)TOTAL_WARP_LIMIT, MAXMEM / (SCRATCH * WU_PER_WARP * sizeof(uint32_t))); warp >= 1; --warp) {
                 cudaGetLastError(); // clear the error state
                 cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t));
                 if (cudaGetLastError() == cudaSuccess) {
@@ -442,7 +442,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
             MAXWARPS[thr_id] = optimal_blocks * WARPS_PER_BLOCK;
         else
-            MAXWARPS[thr_id] = 1024;
+            MAXWARPS[thr_id] = TOTAL_WARP_LIMIT;
 
         // chunked memory allocation up to device limits
         int warp;

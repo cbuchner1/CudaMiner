@@ -79,6 +79,7 @@ public:
 };
 
 // Define work unit size
+#define TOTAL_WARP_LIMIT 4096
 #define WU_PER_WARP (32 / THREADS_PER_WU)
 #define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)

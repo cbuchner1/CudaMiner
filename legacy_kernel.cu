@@ -41,7 +41,7 @@ template <int WARPS_PER_BLOCK> __global__ void legacy_scrypt_core_kernelB(uint32
 template <int WARPS_PER_BLOCK, int TEX_DIM> __global__ void legacy_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N);
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
-__constant__ uint32_t* c_V[1024];
+__constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
 
 // using texture references for the "tex" variants of the B kernels
 texture<uint2, 1, cudaReadModeElementType> texRef1D_2_V;

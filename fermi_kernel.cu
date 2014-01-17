@@ -45,7 +45,7 @@ template <int ALGO> __global__ void fermi_scrypt_core_kernelB(uint32_t *g_odata,
 template <int ALGO, int TEX_DIM> __global__ void fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N);
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
-__constant__ uint32_t* c_V[1024];
+__constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
 
 // using texture references for the "tex" variants of the B kernels
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;

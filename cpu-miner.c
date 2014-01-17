@@ -1098,6 +1098,11 @@ static void parse_arg (int key, char *arg)
 			}
 		}
 		if (i == ARRAY_SIZE(algo_names)) // CB
+			if (!strncmp(arg, algo_names[ALGO_SCRYPT], strlen(algo_names[ALGO_SCRYPT])) && arg[strlen(algo_names[ALGO_SCRYPT])] == ':')
+			{
+				N = atoi(&arg[strlen(algo_names[ALGO_SCRYPT])+1]);
+				opt_algo = ALGO_SCRYPT;
+			}
 			if (!strncmp(arg, algo_names[ALGO_SCRYPT_JANE], strlen(algo_names[ALGO_SCRYPT_JANE])) && arg[strlen(algo_names[ALGO_SCRYPT_JANE])] == ':')
 			{
 				jane_params = strdup(&arg[strlen(algo_names[ALGO_SCRYPT_JANE])+1]);
