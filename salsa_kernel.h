@@ -87,7 +87,7 @@ public:
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
 
 // make scratchpad size dependent on N and LOOKUP_GAP
-#define SCRATCH ((N+LOOKUP_GAP-1)/LOOKUP_GAP*32)
+#define SCRATCH (((N+LOOKUP_GAP-1)/LOOKUP_GAP)*32)
 
 // Not performing error checking is actually bad, but...
 #define checkCudaErrors(x) x

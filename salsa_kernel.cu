@@ -375,7 +375,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     // number of threads collaborating on one work unit (hash)
     unsigned int THREADS_PER_WU = kernel->threads_per_wu();
 	unsigned int LOOKUP_GAP = device_lookup_gap[thr_id];
-    applog(LOG_INFO, "GPU #%d: %d hashes / %d MB per warp.", device_map[thr_id], WU_PER_WARP, (int)((size_t)SCRATCH * WU_PER_WARP * sizeof(uint32_t) / (1024 * 1024)));
+    applog(LOG_INFO, "GPU #%d: %d hashes / %.1f MB per warp.", device_map[thr_id], WU_PER_WARP, ((double)SCRATCH * WU_PER_WARP * sizeof(uint32_t) / (1024 * 1024)));
 
     // compute highest MAXWARPS numbers for kernels allowing cudaBindTexture to succeed
     int MW_1D_4 = 134217728 / (SCRATCH * WU_PER_WARP / 4); // for uint4_t textures
