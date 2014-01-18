@@ -44,6 +44,7 @@ bool autotune = true;
 int device_map[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 int device_interactive[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int device_batchsize[8] = { 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024 };
+int device_lookup_gap[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
 int device_texturecache[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int device_singlememory[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
@@ -228,7 +229,11 @@ Options:\n\
   -H, --hash-parallel   1 to enable parallel SHA256 hashing on the CPU. May\n\
                         use more CPU overall, but distributes hashing load\n\
                         neatly across all CPU cores. 0 is now the default\n\
-                        which assigns one static CPU core to each GPU.\n"
+                        which assigns one static CPU core to each GPU.\n\
+  -L, --lookup-gap      Divides the per-hash memory requirement by this factor\n\
+                        by storing only every N'th value in the scratchpad.\n\
+                        Default is 1.\n"
+
 #ifdef HAVE_SYSLOG_H
 "\
   -S, --syslog          use system log for output messages\n"
@@ -251,7 +256,7 @@ static char const short_options[] =
 #ifdef HAVE_SYSLOG_H
 	"S"
 #endif
-	"a:c:Dhp:Px:qr:R:s:t:T:o:u:O:Vd:l:i:b:C:m:H:"; // CB 
+	"a:c:Dhp:Px:qr:R:s:t:T:o:u:O:Vd:l:i:b:C:m:H:L:"; // CB 
 
 static struct option const options[] = {
 	{ "algo", 1, NULL, 'a' },
@@ -288,6 +293,7 @@ static struct option const options[] = {
 	{ "texture-cache", 1, NULL, 'C' },
 	{ "single-memory", 1, NULL, 'm' },
 	{ "hash-parallel", 1, NULL, 'H' },
+	{ "lookup-gap", 1, NULL, 'L' },
 	{ 0, 0, 0, 0 }
 };
 
@@ -1103,7 +1109,7 @@ static void parse_arg (int key, char *arg)
 				N = atoi(&arg[strlen(algo_names[ALGO_SCRYPT])+1]);
 				opt_algo = ALGO_SCRYPT;
 			}
-			if (!strncmp(arg, algo_names[ALGO_SCRYPT_JANE], strlen(algo_names[ALGO_SCRYPT_JANE])) && arg[strlen(algo_names[ALGO_SCRYPT_JANE])] == ':')
+			else if (!strncmp(arg, algo_names[ALGO_SCRYPT_JANE], strlen(algo_names[ALGO_SCRYPT_JANE])) && arg[strlen(algo_names[ALGO_SCRYPT_JANE])] == ':')
 			{
 				jane_params = strdup(&arg[strlen(algo_names[ALGO_SCRYPT_JANE])+1]);
 				opt_algo = ALGO_SCRYPT_JANE;
@@ -1343,6 +1349,17 @@ static void parse_arg (int key, char *arg)
 	case 'H':
 		{
 			parallel = atoi(arg);
+		}
+		break;
+	case 'L':
+		{
+			char * pch = strtok (arg,",");
+			int tmp_n_threads = 0, last = 0;
+			while (pch != NULL) {
+				device_lookup_gap[tmp_n_threads++] = last = atoi(pch);
+				pch = strtok (NULL, ",");
+			}
+			while (tmp_n_threads < 8) device_lookup_gap[tmp_n_threads++] = last;
 		}
 		break;
 	case 'V':

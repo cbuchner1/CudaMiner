@@ -27,6 +27,8 @@
 #include "test_kernel.h"
 
 #define TEXWIDTH 32768
+#define THREADS_PER_WU 4  // four threads per hash
+#define LOOKUP_GAP 1      // no support for LOOKUP_GAP
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
@@ -42,7 +44,6 @@ __constant__ uint32_t c_SCRATCH_WU_PER_WARP_1; // (SCRATCH * WU_PER_WARP) - 1
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
 texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
-#define THREADS_PER_WU 4
 
 static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
@@ -624,7 +625,7 @@ void TestKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
-bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache)
+bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, unsigned int LUGA, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 

@@ -35,7 +35,8 @@
 #include "miner.h"
 #include "fermi_kernel.h"
 
-#define THREADS_PER_WU 1
+#define THREADS_PER_WU 1  // single thread per hash 
+#define LOOKUP_GAP 1      // no support for LOOKUP_GAP
 
 #define TEXWIDTH 32768
 
@@ -98,7 +99,7 @@ void FermiKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
-bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache)
+bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, unsigned int LUGA, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 

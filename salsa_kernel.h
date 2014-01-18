@@ -13,6 +13,7 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 extern int device_map[8];
 extern int device_interactive[8];
 extern int device_batchsize[8];
+extern int device_lookup_gap[8];
 extern int device_texturecache[8];
 extern int device_singlememory[8];
 extern char *device_config[8];
@@ -60,7 +61,7 @@ class KernelInterface
 {
 public:
     virtual void set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V) = 0;
-    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, bool interactive, bool benchmark, int texture_cache) = 0;
+    virtual bool run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, unsigned int LOOKUP_GAP, bool interactive, bool benchmark, int texture_cache) = 0;
     virtual bool bindtexture_1D(uint32_t *d_V, size_t size) { return true; }
     virtual bool bindtexture_2D(uint32_t *d_V, int width, int height, size_t pitch) { return true; }
     virtual bool unbindtexture_1D() { return true; }
@@ -74,6 +75,7 @@ public:
     virtual bool no_textures() { return false; };
     virtual bool single_memory() { return false; };
     virtual int threads_per_wu() { return 1; }
+    virtual bool support_lookup_gap() { return false; }
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeDefault; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferNone; }
 };
@@ -84,8 +86,8 @@ public:
 #define WU_PER_BLOCK (WU_PER_WARP*WARPS_PER_BLOCK)
 #define WU_PER_LAUNCH (GRID_BLOCKS*WU_PER_BLOCK)
 
-// make scratchpad size dependent on N
-#define SCRATCH (N*32)
+// make scratchpad size dependent on N and LOOKUP_GAP
+#define SCRATCH ((N+LOOKUP_GAP-1)/LOOKUP_GAP*32)
 
 // Not performing error checking is actually bad, but...
 #define checkCudaErrors(x) x

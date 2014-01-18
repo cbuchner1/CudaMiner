@@ -360,6 +360,13 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         device_singlememory[thr_id] = 1;
     }
 
+	if (device_lookup_gap[thr_id] == 0) device_lookup_gap[thr_id] = 1;
+	if (!kernel->support_lookup_gap() && device_lookup_gap[thr_id] > 1)
+	{
+        applog(LOG_WARNING, "GPU #%d: the '%c' kernel does not support a lookup gap", device_map[thr_id], kernel->get_identifier());
+        device_lookup_gap[thr_id] = 1;
+	}
+
     applog(LOG_INFO, "GPU #%d: interactive: %d, tex-cache: %d%c, single-alloc: %d", device_map[thr_id],
            (device_interactive[thr_id]  != 0) ? 1 : 0,
            (device_texturecache[thr_id] != 0) ? device_texturecache[thr_id] : 0, (device_texturecache[thr_id] != 0) ? 'D' : ' ',
@@ -367,7 +374,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     // number of threads collaborating on one work unit (hash)
     unsigned int THREADS_PER_WU = kernel->threads_per_wu();
-
+	unsigned int LOOKUP_GAP = device_lookup_gap[thr_id];
     applog(LOG_INFO, "GPU #%d: %d hashes / %d MB per warp.", device_map[thr_id], WU_PER_WARP, (int)((size_t)SCRATCH * WU_PER_WARP * sizeof(uint32_t) / (1024 * 1024)));
 
     // compute highest MAXWARPS numbers for kernels allowing cudaBindTexture to succeed
@@ -530,7 +537,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             bool r = false;
                             while (repeat < 3)  // average up to 3 measurements for better exactness
                             {
-                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, LOOKUP_GAP, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
@@ -824,12 +831,13 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
     unsigned int GRID_BLOCKS = context_blocks[thr_id];
     unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
     unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
+	unsigned int LOOKUP_GAP = device_lookup_gap[thr_id];
 
     // setup execution parameters
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
-    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, device_interactive[thr_id], opt_benchmark, device_texturecache[thr_id]);
+    context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, LOOKUP_GAP, device_interactive[thr_id], opt_benchmark, device_texturecache[thr_id]);
 }
 
 extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
