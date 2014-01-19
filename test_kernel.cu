@@ -28,7 +28,6 @@
 
 #define TEXWIDTH 32768
 #define THREADS_PER_WU 4  // four threads per hash
-#define LOOKUP_GAP 1      // no support for LOOKUP_GAP
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
@@ -38,12 +37,14 @@ __constant__ uint32_t c_N;
 __constant__ uint32_t c_N_1;                   // N-1
 // scratch buffer size SCRATCH
 __constant__ uint32_t c_SCRATCH;
+__constant__ uint32_t c_SCRATCH_WU_PER_WARP;   // (SCRATCH * WU_PER_WARP)
 __constant__ uint32_t c_SCRATCH_WU_PER_WARP_1; // (SCRATCH * WU_PER_WARP) - 1
 
 // using texture references for the "tex" variants of the B kernels
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
 texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
+template <int ALGO> __device__  __forceinline__ void block_mixer(uint4 &b, uint4 &bx, const int x1, const int x2, const int x3);
 
 static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
@@ -88,66 +89,42 @@ static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
  * the relative start location, as an attempt to reduce some recomputation.
  */
 
-__device__ __forceinline__
-void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
-
-  start += 4*(threadIdx.x%4);
+__device__ __forceinline__ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
 
-  *((uint4 *)(&scratch[ start    &(c_SCRATCH_WU_PER_WARP_1)])) = b;
-  *((uint4 *)(&scratch[(start+16)&(c_SCRATCH_WU_PER_WARP_1)])) = bx;
+  *((uint4 *)(&scratch[start   ])) = b;
+  *((uint4 *)(&scratch[start+16])) = bx;
 }
 
-template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
-
-  start += 4*(threadIdx.x%4);
+template <int ALGO, int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
   uint32_t *scratch;
   if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
 
-  unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) b = *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
-  else if (TEX_DIM == 1) b = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) b = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-               loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
-  else if (TEX_DIM == 1) bx = tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) bx = tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
+       if (TEX_DIM == 0) b = *((uint4 *)(&scratch[start]));
+  else if (TEX_DIM == 1) b = tex1Dfetch(texRef1D_4_V, start/4);
+  else if (TEX_DIM == 2) b = tex2D(texRef2D_4_V, 0.5f + ((start/4)%TEXWIDTH), 0.5f + ((start/4)/TEXWIDTH));
+       if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[start+16]));
+  else if (TEX_DIM == 1) bx = tex1Dfetch(texRef1D_4_V, (start+16)/4);
+  else if (TEX_DIM == 2) bx = tex2D(texRef2D_4_V, 0.5f + (((start+16)/4)%TEXWIDTH), 0.5f + (((start+16)/4)/TEXWIDTH));
 }
 
-
-template <int TEX_DIM> __device__  __forceinline__ void read_xor_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
-
-  start += 4*(threadIdx.x%4);
-
-  uint32_t *scratch;
-  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
-
-  unsigned int loc =  start     / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) b ^= *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
-  else if (TEX_DIM == 1) b ^= tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) b ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-               loc = (start+16) / ((TEX_DIM > 0) ? 4 : 1);
-       if (TEX_DIM == 0) bx ^= *((uint4 *)(&scratch[loc&(c_SCRATCH_WU_PER_WARP_1)]));
-  else if (TEX_DIM == 1) bx ^= tex1Dfetch(texRef1D_4_V, loc);
-  else if (TEX_DIM == 2) bx ^= tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH));
-}
 
 
 __device__  __forceinline__ void primary_order_shuffle(uint4 &b, uint4 &bx) {
   /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
   
   extern __shared__ unsigned char shared[];
   uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
   unsigned int wrp  = threadIdx.x/32, lane = threadIdx.x%32;
   uint32_t *s = &tmp[wrp][lane];
-  uint32_t *s1 = &tmp[wrp][x1_target_lane];
-  uint32_t *s2 = &tmp[wrp][x2_target_lane];
-  uint32_t *s3 = &tmp[wrp][x3_target_lane];
+  uint32_t *s1 = &tmp[wrp][x1];
+  uint32_t *s2 = &tmp[wrp][x2];
+  uint32_t *s3 = &tmp[wrp][x3];
 
   *s = b.w; b.w = *s1;
   *s = b.z; b.z = *s2;
@@ -255,6 +232,23 @@ __device__  __forceinline__ void store_key_chacha(uint32_t *B, const uint4 &b, c
 }
 
 
+template <int ALGO> __device__  __forceinline__ void load_key(const uint32_t *B, uint4 &b, uint4 &bx)
+{
+    switch(ALGO) {
+      case ALGO_SCRYPT:      load_key_salsa(B, b, bx); break;
+      case ALGO_SCRYPT_JANE: load_key_chacha(B, b, bx); break;
+    }
+}
+
+template <int ALGO> __device__  __forceinline__ void store_key(uint32_t *B, uint4 &b, uint4 &bx)
+{
+    switch(ALGO) {
+      case ALGO_SCRYPT:      store_key_salsa(B, b, bx); break;
+      case ALGO_SCRYPT_JANE: store_key_chacha(B, b, bx); break;
+    }
+}
+
+
 /*
  * salsa_xor_core (Salsa20/8 cypher)
  * The original scrypt called:
@@ -267,17 +261,17 @@ __device__  __forceinline__ void store_key_chacha(uint32_t *B, const uint4 &b, c
 #define XOR_ROTATE_ADD(dst, s1, s2, amt) { uint32_t tmp = s1+s2; dst ^= ((tmp<<amt)|(tmp>>(32-amt))); }
 
 __device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
-                                 const int x1_target_lane,
-                                 const int x2_target_lane,
-                                 const int x3_target_lane) {
+                                 const int x1,
+                                 const int x2,
+                                 const int x3) {
   
     extern __shared__ unsigned char shared[];
     uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
     unsigned int wrp  = threadIdx.x/32, lane = threadIdx.x%32;
     uint32_t *s = &tmp[wrp][lane];
-    uint32_t *s1 = &tmp[wrp][x1_target_lane];
-    uint32_t *s2 = &tmp[wrp][x2_target_lane];
-    uint32_t *s3 = &tmp[wrp][x3_target_lane];
+    uint32_t *s1 = &tmp[wrp][x1];
+    uint32_t *s2 = &tmp[wrp][x2];
+    uint32_t *s3 = &tmp[wrp][x3];
 
     uint4 x;
 
@@ -370,17 +364,17 @@ __device__  __forceinline__ void salsa_xor_core(uint4 &b, uint4 &bx,
 #define CHACHA_PRIMITIVE(pt, rt, ps, amt) { uint32_t tmp = rt ^ (pt += ps); rt = ((tmp<<amt)|(tmp>>(32-amt))); }
 
 __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
-                                 const int x1_target_lane,
-                                 const int x2_target_lane,
-                                 const int x3_target_lane) {
+                                 const int x1,
+                                 const int x2,
+                                 const int x3) {
   
     extern __shared__ unsigned char shared[];
     uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
     unsigned int wrp  = threadIdx.x/32, lane = threadIdx.x%32;
     uint32_t *s = &tmp[wrp][lane];
-    uint32_t *s1 = &tmp[wrp][x1_target_lane];
-    uint32_t *s2 = &tmp[wrp][x2_target_lane];
-    uint32_t *s3 = &tmp[wrp][x3_target_lane];
+    uint32_t *s1 = &tmp[wrp][x1];
+    uint32_t *s2 = &tmp[wrp][x2];
+    uint32_t *s3 = &tmp[wrp][x3];
 
     uint4 x;
 
@@ -451,6 +445,15 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
 }
 
 
+template <int ALGO> __device__  __forceinline__ void block_mixer(uint4 &b, uint4 &bx, const int x1, const int x2, const int x3)
+{
+    switch(ALGO) {
+      case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1, x2, x3); break;
+      case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1, x2, x3); break;
+    }
+}
+
+
 /*
  * The hasher_gen_kernel operates on a group of 1024-bit input keys
  * in B, stored as:
@@ -471,46 +474,59 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
  * and similarly for kx.
  */
 
-template <int ALGO> __global__
-void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
+template <int ALGO> __global__ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
 
-  /* Each thread operates on four of the sixteen B and Bx variables. Thus,
-   * each key is processed by four threads in parallel. salsa_scrypt_core
-   * internally shuffles the variables between threads (and back) as
-   * needed.
-   */
   uint4 b, bx;
 
-  /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = scrypt_block*c_SCRATCH;
+  int start = (scrypt_block*c_SCRATCH + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int i=begin;
 
-  if (i == 0)
-  {
-      switch(ALGO) {
-        case ALGO_SCRYPT:      load_key_salsa(d_idata, b, bx); break;
-        case ALGO_SCRYPT_JANE: load_key_chacha(d_idata, b, bx); break;
-      }
-      write_keys_direct(b, bx, start);
-      ++i;
+  if (i == 0) {
+    load_key<ALGO>(d_idata, b, bx);
+    write_keys_direct(b, bx, start);
+    ++i;
+  } else read_keys_direct<ALGO,0>(b, bx, start+32*(i-1));
+  
+  while (i < end) {
+    block_mixer<ALGO>(b, bx, x1, x2, x3);
+    write_keys_direct(b, bx, start+32*i);
+    ++i;
   }
-  else
-  {
-      read_keys_direct<0>(b, bx, start+32*(i-1));
+}
+
+template <int ALGO> __global__ void test_scrypt_core_kernelA_LG(const uint32_t *d_idata, int begin, int end, unsigned int LOOKUP_GAP) {
+
+  uint4 b, bx;
+
+  int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
+
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
+  int start = (scrypt_block*c_SCRATCH + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+
+  int i=begin;
+
+  if (i == 0) {
+    load_key<ALGO>(d_idata, b, bx);
+    write_keys_direct(b, bx, start);
+    ++i;
+  } else {
+    int pos = (i-1)/LOOKUP_GAP, loop = (i-1)-pos*LOOKUP_GAP;
+    read_keys_direct<ALGO,0>(b, bx, start+32*pos);
+    while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
   
   while (i < end) {
-    switch(ALGO) {
-      case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-      case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-    }
-    write_keys_direct(b, bx, start+32*i);
+    block_mixer<ALGO>(b, bx, x1, x2, x3);
+    if (i % LOOKUP_GAP == 0)
+      write_keys_direct(b, bx, start+32*(i/LOOKUP_GAP));
     ++i;
   }
 }
@@ -522,61 +538,71 @@ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
  * the scratch buffer in pseudorandom order, mixing the key as it goes.
  */
 
-template <int ALGO, int TEX_DIM> __global__
-void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
+template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
 
   extern __shared__ unsigned char shared[];
   uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
 
-  /* Each thread operates on a group of four variables that must be processed
-   * together. Shuffle between threaads in a warp between iterations.
-   */
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = scrypt_block*c_SCRATCH;
+  int start = (scrypt_block*c_SCRATCH) + 4*(threadIdx.x%4);
+  if (TEX_DIM == 0) start %= c_SCRATCH_WU_PER_WARP;
 
-  /* Inner loop shuffle targets */
-  int x1_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
-  int x2_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
-  int x3_target_lane = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
+  int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
-  if (begin == 0)
-  {
-      read_keys_direct<TEX_DIM>(b, bx, start+32*(c_N_1));
-
-      switch(ALGO) {
-        case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-        case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-      }
-  }
-  else
-  {
-      switch(ALGO) {
-        case ALGO_SCRYPT:      load_key_salsa(d_odata, b, bx); break;
-        case ALGO_SCRYPT_JANE: load_key_chacha(d_odata, b, bx); break;
-      }
-  }
+  if (begin == 0) {
+    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*c_N_1);
+    block_mixer<ALGO>(b, bx, x1, x2, x3);
+  } else load_key<ALGO>(d_odata, b, bx);
 
   for (int i = begin; i < end; i++) {
-
-    // Bounce through the key space and XOR the new keys in.
-    // Critical thing: (X[16] & (c_N_1)) tells us the next slot to read.
-    // X[16] in the original is bx.x
     tmp[threadIdx.x/32][threadIdx.x%32] = bx.x;
-    read_xor_keys_direct<TEX_DIM>(b, bx, start+32*(tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1)));
-    switch(ALGO) {
-      case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-      case ALGO_SCRYPT_JANE: chacha_xor_core(b, bx, x1_target_lane, x2_target_lane, x3_target_lane); break;
-    }
+    int j = (tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1));
+    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*j);
+    b ^= t; bx ^= tx;
+    block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
 
-  switch(ALGO) {
-    case ALGO_SCRYPT:      store_key_salsa(d_odata, b, bx); break;
-    case ALGO_SCRYPT_JANE: store_key_chacha(d_odata, b, bx); break;
-  }
-  
+  store_key<ALGO>(d_odata, b, bx);
 }
+
+template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uint32_t *d_odata, int begin, int end, unsigned int LOOKUP_GAP) {
+
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+
+  uint4 b, bx;
+
+  int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
+  int start = (scrypt_block*c_SCRATCH) + 4*(threadIdx.x%4);
+  if (TEX_DIM == 0) start %= c_SCRATCH_WU_PER_WARP;
+
+  int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
+  int x2 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
+  int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
+
+  if (begin == 0) {
+    int pos = c_N_1/LOOKUP_GAP, loop = 1 + (c_N_1-pos*LOOKUP_GAP);
+    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*pos);
+    while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
+  } else load_key<ALGO>(d_odata, b, bx);
+
+  for (int i = begin; i < end; i++) {
+    tmp[threadIdx.x/32][threadIdx.x%32] = bx.x;
+    int j = (tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1));
+    int pos = j/LOOKUP_GAP, loop = j-pos*LOOKUP_GAP;
+    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*pos);
+    while(loop--) block_mixer<ALGO>(t, tx, x1, x2, x3);
+    b ^= t; bx ^= tx;
+    block_mixer<ALGO>(b, bx, x1, x2, x3);
+  }
+
+  store_key<ALGO>(d_odata, b, bx);
+}
+
 
 TestKernel::TestKernel() : KernelInterface()
 {
@@ -602,8 +628,6 @@ bool TestKernel::bindtexture_2D(uint32_t *d_V, int width, int height, size_t pit
     // maintain texture width of TEXWIDTH (max. limit is 65000)
     while (width > TEXWIDTH) { width /= 2; height *= 2; pitch /= 2; }
     while (width < TEXWIDTH) { width *= 2; height = (height+1)/2; pitch *= 2; }
-//    fprintf(stderr, "total size: %u, %u bytes\n", pitch * height, width * sizeof(uint32_t) * 4 * height);
-//    fprintf(stderr, "binding width width=%d, height=%d, pitch=%d\n", width, height,pitch);
     checkCudaErrors(cudaBindTexture2D(NULL, &texRef2D_4_V, d_V, &channelDesc4, width, height, pitch));
     return true;
 }
@@ -625,16 +649,13 @@ void TestKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
-bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, unsigned int LUGA, bool interactive, bool benchmark, int texture_cache)
+bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, unsigned int LOOKUP_GAP, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 
     // clear CUDA's error variable
     cudaGetLastError();
 
-    // compute required shared memory per block for __shfl() emulation
-    size_t shared = ((threads.x + 31) / 32) * (32+1) * sizeof(uint32_t);
-    
     // make some constants available to kernel, update only initially and when changing
     static int prev_N = 0;
     if (N != prev_N) {
@@ -645,6 +666,8 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH = SCRATCH;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH, &h_SCRATCH, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        uint32_t h_SCRATCH_WU_PER_WARP = (SCRATCH * WU_PER_WARP);
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH_WU_PER_WARP_1 = (SCRATCH * WU_PER_WARP) - 1;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
     }
@@ -662,19 +685,23 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
         usleep(sleeptime);
     }
 
-    int pos = 0;
+    unsigned int pos = 0;
     do 
     {
-        switch(opt_algo) {
-          case ALGO_SCRYPT: test_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
-          case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
-        }
+        if (LOOKUP_GAP == 1) switch(opt_algo) {
+            case ALGO_SCRYPT:      test_scrypt_core_kernelA<ALGO_SCRYPT     ><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+        } else switch(opt_algo) {
+            case ALGO_SCRYPT:      test_scrypt_core_kernelA_LG<ALGO_SCRYPT     ><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+        } 
 
         // Optional sleep in between kernels
         if (!benchmark && interactive) {
             checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
             usleep(sleeptime);
         }
+
         pos += batch;
     } while (pos < N);
 
@@ -689,24 +716,28 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
             usleep(sleeptime);
         }
 
-        if (texture_cache)
-        {
-            if (texture_cache == 1)
-                switch(opt_algo) {
-                    case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                }
-            else if (texture_cache == 2)
-                switch(opt_algo) {
-                    case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                }
+        if (LOOKUP_GAP == 1) {
+            if (texture_cache == 0) switch(opt_algo) {
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+            else if (texture_cache == 1) switch(opt_algo) {
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+            else if (texture_cache == 2) switch(opt_algo) {
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+        } else {
+            if (texture_cache == 0) switch(opt_algo) {
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+            else if (texture_cache == 1) switch(opt_algo) {
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+            else if (texture_cache == 2) switch(opt_algo) {
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
         }
-        else
-            switch(opt_algo) {
-                case ALGO_SCRYPT: test_scrypt_core_kernelB<ALGO_SCRYPT,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-        }
+
         pos += batch;
     } while (pos < N);
 
