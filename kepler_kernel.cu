@@ -40,10 +40,7 @@ __constant__ uint32_t c_SCRATCH_WU_PER_WARP_1; // (SCRATCH * WU_PER_WARP) - 1
 texture<uint4, 1, cudaReadModeElementType> texRef1D_4_V;
 texture<uint4, 2, cudaReadModeElementType> texRef2D_4_V;
 
-template <int ALGO> __device__  __forceinline__ void block_mixer(uint4 &b, uint4 &bx,
-                                 const int x1,
-                                 const int x2,
-                                 const int x3);
+template <int ALGO> __device__  __forceinline__ void block_mixer(uint4 &b, uint4 &bx, const int x1, const int x2, const int x3);
 
 static __host__ __device__ uint4& operator^=(uint4& left, const uint4& right)
 {
@@ -87,8 +84,7 @@ static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
  * the relative start location, as an attempt to reduce some recomputation.
  */
 
-__device__ __forceinline__
-void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
+__device__ __forceinline__ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
 
@@ -96,10 +92,7 @@ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
   *((uint4 *)(&scratch[start+16])) = bx;
 }
 
-template <int ALGO, int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start,
-                                 const int x1,
-                                 const int x2,
-                                 const int x3) {
+template <int ALGO, int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
   uint32_t *scratch;
   if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
@@ -419,10 +412,7 @@ __device__  __forceinline__ void chacha_xor_core(uint4 &b, uint4 &bx,
 }
 
 
-template <int ALGO> __device__  __forceinline__ void block_mixer(uint4 &b, uint4 &bx,
-                                 const int x1,
-                                 const int x2,
-                                 const int x3)
+template <int ALGO> __device__  __forceinline__ void block_mixer(uint4 &b, uint4 &bx, const int x1, const int x2, const int x3)
 {
     switch(ALGO) {
       case ALGO_SCRYPT:      salsa_xor_core(b, bx, x1, x2, x3); break;
@@ -468,7 +458,7 @@ template <int ALGO> __global__ void kepler_scrypt_core_kernelA(const uint32_t *d
     load_key<ALGO>(d_idata, b, bx);
     write_keys_direct(b, bx, start);
     ++i;
-  } else read_keys_direct<ALGO,0>(b, bx, start+32*(i-1), x1, x2, x3);
+  } else read_keys_direct<ALGO,0>(b, bx, start+32*(i-1));
   
   while (i < end) {
     block_mixer<ALGO>(b, bx, x1, x2, x3);
@@ -496,7 +486,7 @@ template <int ALGO> __global__ void kepler_scrypt_core_kernelA_LG(const uint32_t
     ++i;
   } else {
     int pos = (i-1)/LOOKUP_GAP, loop = (i-1)-pos*LOOKUP_GAP;
-    read_keys_direct<ALGO,0>(b, bx, start+32*pos, x1, x2, x3);
+    read_keys_direct<ALGO,0>(b, bx, start+32*pos);
     while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
   
@@ -528,13 +518,13 @@ template <int ALGO, int TEX_DIM> __global__ void kepler_scrypt_core_kernelB(uint
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   if (begin == 0) {
-    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*c_N_1, x1, x2, x3);
+    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*c_N_1);
     block_mixer<ALGO>(b, bx, x1, x2, x3);
   } else load_key<ALGO>(d_odata, b, bx);
 
   for (int i = begin; i < end; i++) {
     int j = (__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1));
-    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*j, x1, x2, x3);
+    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*j);
     b ^= t; bx ^= tx;
     block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
@@ -556,14 +546,14 @@ template <int ALGO, int TEX_DIM> __global__ void kepler_scrypt_core_kernelB_LG(u
 
   if (begin == 0) {
     int pos = c_N_1/LOOKUP_GAP, loop = 1 + (c_N_1-pos*LOOKUP_GAP);
-    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*pos, x1, x2, x3);
+    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*pos);
     while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   } else load_key<ALGO>(d_odata, b, bx);
 
   for (int i = begin; i < end; i++) {
     int j = (__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1));
     int pos = j/LOOKUP_GAP, loop = j-pos*LOOKUP_GAP;
-    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*pos, x1, x2, x3);
+    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*pos);
     while(loop--) block_mixer<ALGO>(t, tx, x1, x2, x3);
     b ^= t; bx ^= tx;
     block_mixer<ALGO>(b, bx, x1, x2, x3);

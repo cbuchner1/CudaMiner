@@ -19,6 +19,7 @@ public:
     virtual int get_texel_width() { return 4; }
     virtual bool no_textures() { return true; }
     virtual int threads_per_wu() { return 4; }
+    virtual bool support_lookup_gap() { return true; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferL1; }
 };
 
