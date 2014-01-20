@@ -44,6 +44,11 @@ bool autotune = true;
 int device_map[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 int device_interactive[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int device_batchsize[8] = { 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024 };
+#if WIN32
+int device_backoff[8] = { 12, 12, 12, 12, 12, 12, 12, 12 };
+#else
+int device_backoff[8] = { 2, 2, 2, 2, 2, 2, 2, 2 };
+#endif
 int device_lookup_gap[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
 int device_texturecache[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int device_singlememory[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
@@ -51,7 +56,7 @@ char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2013-12-18"
+#define PROGRAM_VERSION		"2014-01-20"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -1490,7 +1495,7 @@ int main(int argc, char *argv[])
 	printf("\t   *** CudaMiner for nVidia GPUs by Christian Buchner ***\n");
 	printf("\t             This is version "PROGRAM_VERSION" (beta)\n");
 	printf("\tbased on pooler-cpuminer 2.3.2 (c) 2010 Jeff Garzik, 2012 pooler\n");
-	printf("\t       Cuda additions Copyright 2013 Christian Buchner\n");
+	printf("\t    Cuda additions Copyright 2013,2014 Christian Buchner\n");
 	printf("\t   My donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm\n\n");
 
 	rpc_url = strdup(DEF_RPC_URL);

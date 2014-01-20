@@ -13,6 +13,7 @@ typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 extern int device_map[8];
 extern int device_interactive[8];
 extern int device_batchsize[8];
+extern int device_backoff[8];
 extern int device_lookup_gap[8];
 extern int device_texturecache[8];
 extern int device_singlememory[8];

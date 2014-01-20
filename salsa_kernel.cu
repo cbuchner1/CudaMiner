@@ -360,12 +360,12 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         device_singlememory[thr_id] = 1;
     }
 
-	if (device_lookup_gap[thr_id] == 0) device_lookup_gap[thr_id] = 1;
-	if (!kernel->support_lookup_gap() && device_lookup_gap[thr_id] > 1)
-	{
+    if (device_lookup_gap[thr_id] == 0) device_lookup_gap[thr_id] = 1;
+    if (!kernel->support_lookup_gap() && device_lookup_gap[thr_id] > 1)
+    {
         applog(LOG_WARNING, "GPU #%d: the '%c' kernel does not support a lookup gap", device_map[thr_id], kernel->get_identifier());
         device_lookup_gap[thr_id] = 1;
-	}
+    }
 
     applog(LOG_INFO, "GPU #%d: interactive: %d, tex-cache: %d%c, single-alloc: %d", device_map[thr_id],
            (device_interactive[thr_id]  != 0) ? 1 : 0,
@@ -374,7 +374,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     // number of threads collaborating on one work unit (hash)
     unsigned int THREADS_PER_WU = kernel->threads_per_wu();
-	unsigned int LOOKUP_GAP = device_lookup_gap[thr_id];
+    unsigned int LOOKUP_GAP = device_lookup_gap[thr_id];
+    unsigned int BACKOFF = device_backoff[thr_id];
     applog(LOG_INFO, "GPU #%d: %d hashes / %.1f MB per warp.", device_map[thr_id], WU_PER_WARP, ((double)SCRATCH * WU_PER_WARP * sizeof(uint32_t) / (1024 * 1024)));
 
     // compute highest MAXWARPS numbers for kernels allowing cudaBindTexture to succeed
@@ -392,20 +393,48 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else {
             // compute no. of warps to allocate the largest number producing a single memory block
-            for (int warp = (int)min((unsigned long long)TOTAL_WARP_LIMIT, MAXMEM / (SCRATCH * WU_PER_WARP * sizeof(uint32_t))); warp >= 1; --warp) {
+            // PROBLEM: one some devices, ALL allocations will fail if the first one failed. This sucks.
+            size_t MEM_LIMIT = min((size_t)MAXMEM, props.totalGlobalMem);
+            int warpmax = (int)min((size_t)TOTAL_WARP_LIMIT, MEM_LIMIT / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)));
+#if 0
+            warpmax = ((100-BACKOFF)*warpmax+50)/100;
+            for (int warp = warpmax; warp >= 1; --warp) {
                 cudaGetLastError(); // clear the error state
                 cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t));
                 if (cudaGetLastError() == cudaSuccess) {
                     checkCudaErrors(cudaFree(d_V)); d_V = NULL;
-#ifdef WIN32
-                    MAXWARPS[thr_id] = 94*warp/100; // Windows needs some breathing room to operate safely
-                                                    // in particular when binding large 1D or 2D textures
-#else
-                    MAXWARPS[thr_id] = warp;
-#endif
+                    // Windows WDDM driver model needs some breathing room to operate safely
+                    // in particular when binding large 1D or 2D textures
+                    if (warp < warpmax)
+                        MAXWARPS[thr_id] = ((100-BACKOFF)*warp+50)/100;
                     break;
                 }
             }
+#else
+            // run a bisection algorithm for memory allocation
+            int best = 0;
+            int warp = (warpmax+1)/2;
+            int interval = (warpmax+1)/2;
+            while (interval > 0)
+            {
+                cudaGetLastError(); // clear the error state
+                cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t));
+                if (cudaGetLastError() == cudaSuccess) {
+                    checkCudaErrors(cudaFree(d_V)); d_V = NULL;
+                    if (warp > best) best = warp;
+                    interval = (interval+1)/2;
+                    warp += interval;
+                    if (warp > warpmax) warp = warpmax;
+                }
+                else
+                {
+                    interval = interval/2;
+                    warp -= interval;
+                    if (warp < 1) warp = 1;
+                }
+            }
+            MAXWARPS[thr_id] = ((100-BACKOFF)*best+50)/100;;
+#endif
         }
 
         // now allocate a buffer for determined MAXWARPS setting
@@ -454,7 +483,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         // chunked memory allocation up to device limits
         int warp;
         for (warp = 0; warp < MAXWARPS[thr_id]; ++warp) {
-            // work around partition camping problems by adding an offset
+            // work around partition camping problems by adding a random start address offset to each allocation
             h_V_extra[thr_id][warp] = (props.major == 1) ? (16 * (rand()%(16384/16))) : 0;
             cudaGetLastError(); // clear the error state
             cudaMalloc((void **) &h_V[thr_id][warp], (SCRATCH * WU_PER_WARP + h_V_extra[thr_id][warp])*sizeof(uint32_t));
@@ -462,8 +491,9 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             else {
                 h_V_extra[thr_id][warp] = 0;
 
-                // back off by two allocations to have some breathing room
-                for (int i=0; warp > 0 && i < 2; ++i) {
+                // back off by several warp allocations to have some breathing room
+                int remove = (BACKOFF*warp+50)/100;
+                for (int i=0; warp > 0 && i < remove; ++i) {
                     warp--;
                     checkCudaErrors(cudaFree(h_V[thr_id][warp]-h_V_extra[thr_id][warp]));
                     h_V[thr_id][warp] = NULL; h_V_extra[thr_id][warp] = 0;
@@ -511,18 +541,25 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
             // auto-tuning loop
             {
+                // we want to have enough total warps for half the multiprocessors at least
                 // compute highest MAXWARPS number that we can support based on texture cache mode
-                int MW = (device_texturecache[thr_id] == 1) ? std::min(MAXWARPS[thr_id],MW_1D) : MAXWARPS[thr_id];
+                int MINTW = props.multiProcessorCount / 2;
+                int MAXTW = (device_texturecache[thr_id] == 1) ? std::min(MAXWARPS[thr_id],MW_1D) : MAXWARPS[thr_id];
 
-                applog(LOG_INFO, "GPU #%d: maximum warps: %d", device_map[thr_id], MW);
+                // we want to have blocks for half the multiprocessors at least
+                int MINB = props.multiProcessorCount / 2;
+                int MAXB = MAXTW;
 
-                for (int GRID_BLOCKS = 1; !abort_flag && GRID_BLOCKS <= MW; ++GRID_BLOCKS)
+                applog(LOG_INFO, "GPU #%d: maximum total warps (BxW): %d", device_map[thr_id], MAXTW);
+
+                for (int GRID_BLOCKS = MINB; !abort_flag && GRID_BLOCKS <= MAXB; ++GRID_BLOCKS)
                 {
                     double kHash[32+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
                     for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= kernel->max_warps_per_block(); ++WARPS_PER_BLOCK)
                     {
                         double khash_sec = 0;
-                        if (GRID_BLOCKS * WARPS_PER_BLOCK <= MW)
+                        if (GRID_BLOCKS * WARPS_PER_BLOCK >= MINTW &&
+                            GRID_BLOCKS * WARPS_PER_BLOCK <= MAXTW)
                         {
                             // setup execution parameters
                             dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
@@ -543,7 +580,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                                 ++repeat;
                                 gettimeofday(&tv_end, NULL);
                                 // bail out if 50ms taken (to speed up autotuning...)
-                                if (opt_algo == ALGO_SCRYPT && (1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) > 0.05) break;
+                                if ((1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) > 0.05) break;
                             }
                             if (cudaGetLastError() != cudaSuccess || !r) continue;
 
@@ -565,7 +602,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                     }
 skip2:              ;
                     if (opt_debug) {
-                        if (GRID_BLOCKS == 1) {
+                        if (GRID_BLOCKS == MINB) {
                             char line[512] = "    ";
                             for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
                                 char tmp[16]; sprintf(tmp, i < 10 ? "   x%-2d" : "  x%-2d ", i);
@@ -749,7 +786,7 @@ skip:           ;
 }
 
 typedef struct { double value[8]; } tsumarray;
-	
+    
 cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
 {
     cudaError_t result = cudaSuccess;
@@ -831,7 +868,7 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
     unsigned int GRID_BLOCKS = context_blocks[thr_id];
     unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
     unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
-	unsigned int LOOKUP_GAP = device_lookup_gap[thr_id];
+    unsigned int LOOKUP_GAP = device_lookup_gap[thr_id];
 
     // setup execution parameters
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
