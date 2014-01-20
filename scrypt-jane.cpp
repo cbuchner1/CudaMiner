@@ -222,13 +222,15 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 		} else if (!strcmp(jane_params, "MRC") || !strcasecmp(jane_params, "MicroCoin")) {
 			// MicroCoin:1389028879, minN:  4, maxN: 30
 			Ntimestamp = 1389028879; minN=  4; maxN= 30;
+		} else if (!strcmp(jane_params, "APC") || !strcasecmp(jane_params, "AppleCoin")) {
+			// AppleCoin:1384720832, minN:  4, maxN: 30
+			Ntimestamp = 1384720832; minN=  4; maxN= 30;
 		} else {
 			if (sscanf(jane_params, "%u,%u,%u", &Ntimestamp, &minN, &maxN) != 3)
 			if (sscanf(jane_params, "%u", &Nfactor) == 1) return Nfactor; // skip bounding against minN, maxN
 			else applog(LOG_INFO, "Unable to parse scrypt-jane parameters: '%s'. Defaulting to Yacoin.", jane_params);
 		}
 	}
-
 	// determination based on the constants determined above
 	if (nTimestamp <= Ntimestamp)
 		return minN;
