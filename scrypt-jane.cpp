@@ -219,6 +219,9 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 		} else if (!strcmp(jane_params, "GPL") || !strcasecmp(jane_params, "GoldPressedLatinum")) {
 			// GoldPressedLatinum:   1377557832, minN:  4, maxN: 30
 			Ntimestamp = 1377557832; minN=  4; maxN= 30;
+		} else if (!strcmp(jane_params, "MRC") || !strcasecmp(jane_params, "MicroCoin")) {
+			// MicroCoin:1389028879, minN:  4, maxN: 30
+			Ntimestamp = 1389028879; minN=  4; maxN= 30;
 		} else {
 			if (sscanf(jane_params, "%u,%u,%u", &Ntimestamp, &minN, &maxN) != 3)
 			if (sscanf(jane_params, "%u", &Nfactor) == 1) return Nfactor; // skip bounding against minN, maxN
