@@ -701,6 +701,7 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 	uint32_t n = pdata[19] - 1;
 	const uint32_t Htarg = ptarget[7];
 	int i;
+	uint32_t *scratch = new uint32_t[N*32]; // scratchbuffer for CPU based validation
 
 	uint32_t nonce[2];
 	uint32_t* hash[2]   = { cuda_hashbuffer(thr_id,0), cuda_hashbuffer(thr_id,1) };
@@ -888,13 +889,12 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 			if (hash[cur][i * 8 + 7] <= Htarg && fulltest(hash[cur] + i * 8, ptarget)) {
 
 				// CPU based validation to rule out GPU errors (scalar CPU code)
-				uint32_t ldata[20], tstate[8], ostate[8], inp[32], ref[32], scratch[32768], refhash[8];
+				uint32_t ldata[20], tstate[8], ostate[8], inp[32], ref[32], refhash[8];
 				memcpy(ldata, pdata, 80); ldata[19] = nonce[cur]+i;
 				memcpy(tstate, midstate, 32);
 				HMAC_SHA256_80_init(ldata, tstate, ostate);
 				PBKDF2_SHA256_80_128(tstate, ostate, ldata, inp);
 				computeGold(inp, ref, scratch);
-
 				bool good = true;
 				if (parallel < 2) {
 					if (memcmp(&X[cur][i * 32], ref, 32*sizeof(uint32_t)) != 0) good = false;
@@ -922,6 +922,7 @@ byebye:
 	delete[] datax4[0]; delete[] datax4[1]; delete[] hashx4[0]; delete[] hashx4[1];
 	delete[] tstatex4[0]; delete[] tstatex4[1]; delete[] ostatex4[0]; delete[] ostatex4[1];
 	delete[] Xx4[0]; delete[] Xx4[1];
+	delete [] scratch;
 	gettimeofday(tv_end, NULL);
 	return result;
 }
