@@ -656,6 +656,9 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     // clear CUDA's error variable
     cudaGetLastError();
 
+    // compute required shared memory per block for __shfl() emulation
+    size_t shared = ((threads.x + 31) / 32) * (32+1) * sizeof(uint32_t);
+    
     // make some constants available to kernel, update only initially and when changing
     static int prev_N = 0;
     if (N != prev_N) {
@@ -689,11 +692,11 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     do 
     {
         if (LOOKUP_GAP == 1) switch(opt_algo) {
-            case ALGO_SCRYPT:      test_scrypt_core_kernelA<ALGO_SCRYPT     ><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
-            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT:      test_scrypt_core_kernelA<ALGO_SCRYPT     ><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
         } else switch(opt_algo) {
-            case ALGO_SCRYPT:      test_scrypt_core_kernelA_LG<ALGO_SCRYPT     ><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+            case ALGO_SCRYPT:      test_scrypt_core_kernelA_LG<ALGO_SCRYPT     ><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
         } 
 
         // Optional sleep in between kernels
@@ -718,24 +721,24 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
         if (LOOKUP_GAP == 1) {
             if (texture_cache == 0) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
             else if (texture_cache == 1) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
             else if (texture_cache == 2) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
         } else {
             if (texture_cache == 0) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
             else if (texture_cache == 1) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,1><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
             else if (texture_cache == 2) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,2><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
         }
 
         pos += batch;
