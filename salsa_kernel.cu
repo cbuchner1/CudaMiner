@@ -928,7 +928,7 @@ computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V)
         xor_salsa8(&X[16], &X[0]);
     }
     for (i = 0; i < N; i++) {
-        j = 32 * (X[16] & 1023);
+        j = 32 * (X[16] % N);
         for (k = 0; k < 32; k++)
             X[k] ^= V[j + k];
         xor_salsa8(&X[0], &X[16]);
