@@ -1,3 +1,4 @@
+
 //
 // Contains the autotuning logic and some utility functions.
 // Note that most CUDA kernels have been moved to other .cu files
@@ -394,8 +395,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         else {
             // compute no. of warps to allocate the largest number producing a single memory block
             // PROBLEM: one some devices, ALL allocations will fail if the first one failed. This sucks.
-            size_t MEM_LIMIT = min((size_t)MAXMEM, props.totalGlobalMem);
-            int warpmax = (int)min((size_t)TOTAL_WARP_LIMIT, MEM_LIMIT / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)));
+            size_t MEM_LIMIT = (unsigned long long)min((unsigned long long)MAXMEM, (unsigned long long)props.totalGlobalMem);
+            int warpmax = (int)min((unsigned long long)TOTAL_WARP_LIMIT, (unsigned long long)MEM_LIMIT / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)));
 #if 0
             warpmax = ((100-BACKOFF)*warpmax+50)/100;
             for (int warp = warpmax; warp >= 1; --warp) {
