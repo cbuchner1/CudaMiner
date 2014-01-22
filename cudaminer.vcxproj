@@ -231,6 +231,26 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">64</MaxRegCount>
     </CudaCompile>
+    <CudaCompile Include="nv_kernel.cu">
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</CInterleavedPTX>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_30,sm_30</CodeGeneration>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">63</MaxRegCount>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_30,sm_30</CodeGeneration>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">63</MaxRegCount>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
+    </CudaCompile>
+    <CudaCompile Include="nv_kernel2.cu">
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">compute_35,sm_35</CodeGeneration>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">80</MaxRegCount>
+      <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</CInterleavedPTX>
+      <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_35,sm_35</CodeGeneration>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">80</MaxRegCount>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
+    </CudaCompile>
     <CudaCompile Include="salsa_kernel.cu">
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">64</MaxRegCount>
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
@@ -349,6 +369,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="kepler_kernel.h" />
     <ClInclude Include="legacy_kernel.h" />
     <ClInclude Include="miner.h" />
+    <ClInclude Include="nv_kernel.h" />
+    <ClInclude Include="nv_kernel2.h" />
     <ClInclude Include="salsa_kernel.h" />
     <ClInclude Include="scrypt-jane.h" />
     <ClInclude Include="spinlock_kernel.h" />
