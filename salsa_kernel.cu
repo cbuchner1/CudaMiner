@@ -27,6 +27,8 @@
 #include "fermi_kernel.h"
 #include "legacy_kernel.h"
 #include "test_kernel.h"
+#include "nv_kernel.h"
+#include "nv_kernel2.h"
 #include "kepler_kernel.h"
 
 #include "miner.h"
@@ -125,6 +127,8 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
                 case 'F': *kernel = new FermiKernel(); break;
                 case 'L': *kernel = new LegacyKernel(); break;
                 case 'X': *kernel = new TestKernel(); break;
+                case 'Y': *kernel = new NVKernel(); break;
+                case 'Z': *kernel = new NV2Kernel(); break;
                 case ' ': // choose based on device architecture
                      if (props->major == 3 && props->minor == 5)
                     *kernel = new TitanKernel();
@@ -336,6 +340,10 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             kernel = new LegacyKernel();
         else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'X'))
             kernel = new TestKernel();
+        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'Y'))
+            kernel = new NVKernel();
+        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'Z'))
+            kernel = new NV2Kernel();
     }
 
     if (kernel->get_major_version() > props.major || kernel->get_major_version() == props.major && kernel->get_minor_version() > props.minor)

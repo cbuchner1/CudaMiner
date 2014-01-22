@@ -26,6 +26,8 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  fermi_kernel.cu fermi_kernel.h \
 			  kepler_kernel.cu kepler_kernel.h \
 			  test_kernel.cu test_kernel.h \
+			  nv_kernel.cu nv_kernel.h \
+			  nv_kernel2.cu nv_kernel2.h \
 			  titan_kernel.cu titan_kernel.h
 
 cudaminer_LDFLAGS	= $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
@@ -48,4 +50,10 @@ titan_kernel.o: titan_kernel.cu
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_35 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
 
 test_kernel.o: test_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_20 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+
+nv_kernel.o: nv_kernel.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+
+nv_kernel2.o: nv_kernel2.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_35 --maxrregcount=80 $(JANSSON_INCLUDES) -o $@ -c $<
