@@ -23,6 +23,7 @@ extern bool autotune;
 
 // CUDA externals
 extern int cuda_num_devices();
+extern int cuda_finddevice(char *name);
 extern void cuda_shutdown(int thr_id);
 extern int cuda_throughput(int thr_id);
 

@@ -101,6 +101,40 @@ extern "C" int cuda_num_devices()
     return GPU_N;
 }
 
+static bool substringsearch(const char *haystack, const char *needle, int &match)
+{
+    int hlen = strlen(haystack);
+    int nlen = strlen(needle);
+    for (int i=0; i < hlen; ++i)
+    {
+        if (haystack[i] == ' ') continue;
+        int j=0, x = 0;
+        while(j < nlen)
+        {
+            if (haystack[i+x] == ' ') {++x; continue;}
+            if (needle[j] == ' ') {++j; continue;}
+            if (needle[j] == '#') return ++match == needle[j+1]-'0';
+            if (tolower(haystack[i+x]) != tolower(needle[j])) break;
+            ++j; ++x;
+        }
+        if (j == nlen) return true;
+    }
+    return false;
+}
+
+extern "C" int cuda_finddevice(char *name)
+{
+    int num = cuda_num_devices();
+    int match = 0;
+    for (int i=0; i < num; ++i)
+    {
+        cudaDeviceProp props;
+        if (cudaGetDeviceProperties(&props, i) == cudaSuccess)
+            if (substringsearch(props.name, name, match)) return i;
+    }
+    return -1;
+}
+
 bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NULL, cudaDeviceProp *props = NULL)
 {
     bool success = false;
