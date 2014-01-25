@@ -245,6 +245,9 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 		} else if (!strcmp(jane_params, "ITC") || !strcasecmp(jane_params, "InternetCoin")) {
 			// InternetCoin:1388385602, minN: 4, maxN: 30
 			Ntimestamp = 1388385602; minN= 4; maxN= 30;
+		} else if (!strcmp(jane_params, "RAD") || !strcasecmp(jane_params, "RadioactiveCoin")) {
+			// InternetCoin:1389196388, minN: 4, maxN: 30
+			Ntimestamp = 1389196388; minN= 4; maxN= 30;
 		} else {
 			if (sscanf(jane_params, "%u,%u,%u", &Ntimestamp, &minN, &maxN) != 3)
 			if (sscanf(jane_params, "%u", &Nfactor) == 1) return Nfactor; // skip bounding against minN, maxN
