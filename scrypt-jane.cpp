@@ -201,6 +201,11 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 	
 	if (strlen(jane_params) > 0) {
 		if (!strcmp(jane_params, "YAC") || !strcasecmp(jane_params, "Yacoin")) {} // No-Op
+		//
+		// NO WARRANTY FOR CORRECTNESS. Look for the int64 nChainStartTime constant
+		// in the src/main.cpp file of the official wallet clients as well as the
+		// const unsigned char minNfactor and const unsigned char maxNfactor
+		//
 		else if (!strcmp(jane_params, "YBC") || !strcasecmp(jane_params, "YBCoin")) {
 			// YBCoin:   1372386273, minN:  4, maxN: 30
 			Ntimestamp = 1372386273; minN=  4; maxN= 30;
@@ -217,7 +222,7 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 			// QQCoin:   1387769316, minN:  4, maxN: 30
 			Ntimestamp = 1387769316; minN=  4; maxN= 30;
 		} else if (!strcmp(jane_params, "GPL") || !strcasecmp(jane_params, "GoldPressedLatinum")) {
-			// GoldPressedLatinum:   1377557832, minN:  4, maxN: 30
+			// GoldPressedLatinum:1377557832, minN:  4, maxN: 30
 			Ntimestamp = 1377557832; minN=  4; maxN= 30;
 		} else if (!strcmp(jane_params, "MRC") || !strcasecmp(jane_params, "MicroCoin")) {
 			// MicroCoin:1389028879, minN:  4, maxN: 30
@@ -225,6 +230,21 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 		} else if (!strcmp(jane_params, "APC") || !strcasecmp(jane_params, "AppleCoin")) {
 			// AppleCoin:1384720832, minN:  4, maxN: 30
 			Ntimestamp = 1384720832; minN=  4; maxN= 30;
+		} else if (!strcmp(jane_params, "CPR") || !strcasecmp(jane_params, "Copperbars")) {
+			// Copperbars:1376184687, minN: 4, maxN: 30
+			Ntimestamp = 1376184687; minN= 4; maxN= 30;
+		} else if (!strcmp(jane_params, "CACH") || !strcasecmp(jane_params, "CacheCoin")) {
+			// CacheCoin:1388949883, minN: 4, maxN: 30
+			Ntimestamp = 1388949883; minN= 4; maxN= 30;
+		} else if (!strcmp(jane_params, "MRC") || !strcasecmp(jane_params, "MicroCoin")) {
+			// MicroCoin:1389028879, minN: 4, maxN: 30
+			Ntimestamp = 1389028879; minN= 4; maxN= 30;
+		} else if (!strcmp(jane_params, "VEL") || !strcasecmp(jane_params, "VelocityCoin")) {
+			// VelocityCoin:1387769316, minN: 4, maxN: 30
+			Ntimestamp = 1387769316; minN= 4; maxN= 30;
+		} else if (!strcmp(jane_params, "ITC") || !strcasecmp(jane_params, "InternetCoin")) {
+			// InternetCoin:1388385602, minN: 4, maxN: 30
+			Ntimestamp = 1388385602; minN= 4; maxN= 30;
 		} else {
 			if (sscanf(jane_params, "%u,%u,%u", &Ntimestamp, &minN, &maxN) != 3)
 			if (sscanf(jane_params, "%u", &Nfactor) == 1) return Nfactor; // skip bounding against minN, maxN
