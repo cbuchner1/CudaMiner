@@ -37,6 +37,7 @@ using namespace Concurrency;
 #include "cpuminer-config.h"
 #include "miner.h"
 #include "salsa_kernel.h"
+#include "sha256.h"
 
 #include <stdlib.h>
 #include <stdint.h>

@@ -9,7 +9,7 @@ extern "C" {
 
 typedef unsigned int uint32_t; // define this as 32 bit type derived from int
 
-// from salsa_kernel.cu
+// from cpu-miner.h
 extern int device_map[8];
 extern int device_interactive[8];
 extern int device_batchsize[8];
@@ -37,10 +37,6 @@ extern void cuda_scrypt_done(int thr_id, int stream);
 extern void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream);
 extern void cuda_scrypt_sync(int thr_id, int stream);
 extern void cuda_scrypt_flush(int thr_id, int stream);
-
-extern void prepare_sha256(int thr_id, uint32_t cpu_pdata[20], uint32_t cpu_midstate[8]);
-extern void pre_sha256(int thr_id, int stream, uint32_t nonce, int throughput);
-extern void post_sha256(int thr_id, int stream, uint32_t hash_z[8], int throughput);
 
 extern void computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V);
 

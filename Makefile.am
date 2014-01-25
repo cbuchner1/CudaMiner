@@ -21,6 +21,7 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  scrypt.cpp \
 			  scrypt-jane.cpp scrypt-jane.h \
 			  salsa_kernel.cu salsa_kernel.h \
+			  sha256.cu sha256.h \
 			  spinlock_kernel.cu spinlock_kernel.h \
 			  legacy_kernel.cu legacy_kernel.h \
 			  fermi_kernel.cu fermi_kernel.h \
@@ -35,6 +36,9 @@ cudaminer_LDADD		= @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ @CUDA_LIBS
 cudaminer_CPPFLAGS	= -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@ $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES) -DSCRYPT_KECCAK512 -DSCRYPT_CHACHA -DSCRYPT_CHOOSE_COMPILETIME
 
 .cu.o:
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+
+sha256.o: sha256.cu
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 spinlock_kernel.o: spinlock_kernel.cu
