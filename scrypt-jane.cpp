@@ -510,7 +510,9 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	cuda_scrypt_serialize(thr_id, cur);
 	cuda_scrypt_core(thr_id, cur, N);
 	cuda_scrypt_done(thr_id, cur);
-	cuda_scrypt_DtoH(thr_id, cuda_X[cur], cur);
+	if (parallel < 2) {
+		cuda_scrypt_DtoH(thr_id, cuda_X[cur], cur);
+	}
 	cuda_scrypt_flush(thr_id, cur);
 
 	do {
