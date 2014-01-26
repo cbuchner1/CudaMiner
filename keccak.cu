@@ -337,8 +337,6 @@ scrypt_pbkdf2_1(const uint8_t *password, size_t password_len, const uint8_t *sal
 
 // ---------------------------- END PBKDF2 functions ------------------------------------
 
-// 		scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, (unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128);
-
 static __device__ uint32_t cuda_swab32(uint32_t x)
 {
     return (((x << 24) & 0xff000000u) | ((x << 8) & 0x00ff0000u)

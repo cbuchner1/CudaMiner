@@ -462,7 +462,7 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	gettimeofday(tv_start, NULL);
 
 	uint32_t *data[2] = { new uint32_t[20*throughput], new uint32_t[20*throughput] };
-	uint32_t *hash = new uint32_t[8*throughput];
+	uint32_t* hash[2]   = { cuda_hashbuffer(thr_id,0), cuda_hashbuffer(thr_id,1) };
 
 	uint32_t n = pdata[19] - 1;
 //	int i;
@@ -544,8 +544,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		}
 		cuda_scrypt_flush(thr_id, nxt);
 
-		cuda_scrypt_sync(thr_id, cur);
-
 #define VERIFY_ALL 0
 #if VERIFY_ALL
 		{
@@ -573,20 +571,22 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 			if (err > 0) fprintf(stderr, "%d out of %d hashes differ.\n", err, throughput);
 		}
 #endif
-		memcpy(Xbuf[cur].ptr, cuda_X[cur], 128 * throughput);
 
 		/* 3: Out = PBKDF2(password, X) */
 		if (parallel < 2) {
+			cuda_scrypt_sync(thr_id, cur);
+			memcpy(Xbuf[cur].ptr, cuda_X[cur], 128 * throughput);
 			for(int i=0;i<throughput;++i)
-				scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)&hash[8*i], 32);
+				scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)(&hash[cur][8*i]), 32);
 		} else {
-			post_keccak512(thr_id, cur, nonce[cur], hash, throughput);
+			post_keccak512(thr_id, cur, nonce[cur], &hash[cur][0], throughput);
+			cuda_scrypt_sync(thr_id, cur);
 		}
 
 		for(int i=0;i<throughput;++i) {
-			volatile unsigned char *hashc = (unsigned char *)&hash[8*i];
+			volatile unsigned char *hashc = (unsigned char *)(&hash[cur][8*i]);
 
-			if (hash[8*i+7] <= Htarg && fulltest(&hash[8*i], ptarget)) {
+			if (hash[cur][8*i+7] <= Htarg && fulltest(&hash[cur][8*i], ptarget)) {
 
 				uint32_t tmp_nonce = nonce[cur]+i;
 					
@@ -596,7 +596,7 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 				scrypt_pbkdf2_1((unsigned char *)tdata, 80, (unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128);
 				scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf[cur].ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr), (scrypt_mix_word_t *)(Vbuf.ptr), N);
 				scrypt_pbkdf2_1((unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)thash, 32);
-				if (memcmp(thash, &hash[8*i], 32) == 0)
+				if (memcmp(thash, &hash[cur][8*i], 32) == 0)
 				{
 					*hashes_done = (n-throughput) - pdata[19] + 1;
 					pdata[19] = tmp_nonce;
@@ -604,7 +604,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 					scrypt_free(&Ybuf);
 					scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
 					delete[] data[0]; delete[] data[1];
-					delete[] hash;
 					gettimeofday(tv_end, NULL);
 					return 1;
 				}
@@ -621,7 +620,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	scrypt_free(&Ybuf);
 	scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
 	delete[] data[0]; delete[] data[1];
-	delete[] hash;
 	
 	*hashes_done = (n-throughput) - pdata[19] + 1;
 	pdata[19] = (n-throughput);
