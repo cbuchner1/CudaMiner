@@ -157,7 +157,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CInterleavedPTX>true</CInterleavedPTX>
     </CudaCompile>
     <CudaCompile>
-      <MaxRegCount>32</MaxRegCount>
+      <MaxRegCount>64</MaxRegCount>
     </CudaCompile>
     <CudaCompile>
       <PtxAsOptionV>true</PtxAsOptionV>
@@ -190,7 +190,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CInterleavedPTX>true</CInterleavedPTX>
     </CudaCompile>
     <CudaCompile>
-      <MaxRegCount>32</MaxRegCount>
+      <MaxRegCount>64</MaxRegCount>
     </CudaCompile>
     <CudaCompile>
       <PtxAsOptionV>true</PtxAsOptionV>
@@ -211,6 +211,10 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</CInterleavedPTX>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</CInterleavedPTX>
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</CInterleavedPTX>
+    </CudaCompile>
+    <CudaCompile Include="keccak.cu">
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">64</MaxRegCount>
+      <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Release|x64'">64</MaxRegCount>
     </CudaCompile>
     <CudaCompile Include="kepler_kernel.cu">
       <CInterleavedPTX Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CInterleavedPTX>
@@ -370,6 +374,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="cpuminer-config.h" />
     <ClInclude Include="elist.h" />
     <ClInclude Include="fermi_kernel.h" />
+    <ClInclude Include="keccak.h" />
     <ClInclude Include="kepler_kernel.h" />
     <ClInclude Include="legacy_kernel.h" />
     <ClInclude Include="miner.h" />

@@ -22,6 +22,7 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  scrypt-jane.cpp scrypt-jane.h \
 			  salsa_kernel.cu salsa_kernel.h \
 			  sha256.cu sha256.h \
+			  keccak.cu keccak.h \
 			  spinlock_kernel.cu spinlock_kernel.h \
 			  legacy_kernel.cu legacy_kernel.h \
 			  fermi_kernel.cu fermi_kernel.h \
@@ -39,6 +40,9 @@ cudaminer_CPPFLAGS	= -msse2 @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@ $(PTHREAD_FLAGS) 
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 sha256.o: sha256.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+
+keccak.o: keccak.cu
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
 spinlock_kernel.o: spinlock_kernel.cu
