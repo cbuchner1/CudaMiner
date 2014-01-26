@@ -13,6 +13,7 @@
 #include "scrypt-jane.h"
 #include "code/scrypt-jane-portable.h"
 #include "code/scrypt-jane-romix.h"
+#include "keccak.h"
 
 
 #define scrypt_maxN 30  /* (1 << (30 + 1)) = ~2 billion */
@@ -219,10 +220,6 @@ scrypt_hmac_init(scrypt_hmac_state *st, const uint8_t *key, size_t keylen) {
 	for (i = 0; i < SCRYPT_HASH_BLOCK_SIZE; i++)
 		pad[i] ^= (0x5c ^ 0x36);
 	scrypt_hash_update(&st->outer, pad, SCRYPT_HASH_BLOCK_SIZE);
-
-#ifdef SCRYPT_PREVENT_STATE_LEAK
-	scrypt_ensure_zero(pad, sizeof(pad));
-#endif
 }
 
 static void
@@ -476,6 +473,7 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		for(int z=0;z<20;z++) data[k][z] = bswap_32x4(pdata[z]);
 		for(int i=1;i<throughput;++i) memcpy(&data[k][20*i], &data[k][0], 20*sizeof(uint32_t));
 	}
+	if (parallel == 2) prepare_keccak512(thr_id, pdata);
 
 	scrypt_aligned_alloc Xbuf[2] = { scrypt_alloc(128 * throughput), scrypt_alloc(128 * throughput) };
 	scrypt_aligned_alloc Vbuf = scrypt_alloc((uint64_t)N * 128);
