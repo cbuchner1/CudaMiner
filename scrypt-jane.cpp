@@ -457,7 +457,6 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		applog(LOG_INFO, "Nfactor is %d (N=%d)!", Nfactor, N);
 	}
 
-	parallel = 0;
 	int throughput = cuda_throughput(thr_id);
 	
 	gettimeofday(tv_start, NULL);
@@ -495,13 +494,19 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		data[cur][20*i + 19] = bswap_32x4(tmp_nonce);
 	}
 
-	/* 1: X = PBKDF2(password, salt) */
-	for(int i=0;i<throughput;++i)
+	if (parallel < 2) {
+		/* 1: X = PBKDF2(password, salt) */
+		for(int i=0;i<throughput;++i)
 		scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, (unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128);
+	} else {
+		pre_keccak512(thr_id, cur, nonce[cur], throughput);
+	}
 
 	/* 2: X = ROMix(X) in CUDA */
-	memcpy(cuda_X[cur], Xbuf[cur].ptr, 128 * throughput);
-	cuda_scrypt_HtoD(thr_id, cuda_X[cur], cur);
+	if (parallel < 2) {
+		memcpy(cuda_X[cur], Xbuf[cur].ptr, 128 * throughput);
+		cuda_scrypt_HtoD(thr_id, cuda_X[cur], cur);
+	}
 	cuda_scrypt_serialize(thr_id, cur);
 	cuda_scrypt_core(thr_id, cur, N);
 	cuda_scrypt_done(thr_id, cur);
@@ -516,17 +521,25 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 			data[nxt][20*i + 19] = bswap_32x4(tmp_nonce);
 		}
 
-		/* 1: X = PBKDF2(password, salt) */
-		for(int i=0;i<throughput;++i)
-			scrypt_pbkdf2_1((unsigned char *)&data[nxt][20*i], 80, (unsigned char *)&data[nxt][20*i], 80, Xbuf[nxt].ptr + 128 * i, 128);
+		if (parallel < 2) {
+			/* 1: X = PBKDF2(password, salt) */
+			for(int i=0;i<throughput;++i)
+				scrypt_pbkdf2_1((unsigned char *)&data[nxt][20*i], 80, (unsigned char *)&data[nxt][20*i], 80, Xbuf[nxt].ptr + 128 * i, 128);
+		} else {
+			pre_keccak512(thr_id, nxt, nonce[nxt], throughput);
+		}
 
 		/* 2: X = ROMix(X) in CUDA */
-		memcpy(cuda_X[nxt], Xbuf[nxt].ptr, 128 * throughput);
-		cuda_scrypt_HtoD(thr_id, cuda_X[nxt], nxt);
+		if (parallel < 2) {
+			memcpy(cuda_X[nxt], Xbuf[nxt].ptr, 128 * throughput);
+			cuda_scrypt_HtoD(thr_id, cuda_X[nxt], nxt);
+		}
 		cuda_scrypt_serialize(thr_id, nxt);
 		cuda_scrypt_core(thr_id, nxt, N);
 		cuda_scrypt_done(thr_id, nxt);
-		cuda_scrypt_DtoH(thr_id, cuda_X[nxt], nxt);
+		if (parallel < 2) {
+			cuda_scrypt_DtoH(thr_id, cuda_X[nxt], nxt);
+		}
 		cuda_scrypt_flush(thr_id, nxt);
 
 		cuda_scrypt_sync(thr_id, cur);
@@ -561,8 +574,12 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		memcpy(Xbuf[cur].ptr, cuda_X[cur], 128 * throughput);
 
 		/* 3: Out = PBKDF2(password, X) */
-		for(int i=0;i<throughput;++i)
-			scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)&hash[8*i], 32);
+		if (parallel < 2) {
+			for(int i=0;i<throughput;++i)
+				scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)&hash[8*i], 32);
+		} else {
+			post_keccak512(thr_id, cur, nonce[cur], hash, throughput);
+		}
 
 		for(int i=0;i<throughput;++i) {
 			volatile unsigned char *hashc = (unsigned char *)&hash[8*i];

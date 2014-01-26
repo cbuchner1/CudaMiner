@@ -4,13 +4,13 @@
 // NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
 //
 
-#include "sha256.h"
-
 #include <map>
 #include <cuda.h>
 
 #include "salsa_kernel.h"
 #include "miner.h"
+
+#include "sha256.h"
 
 // define some error checking macros
 #undef checkCudaErrors

@@ -4,13 +4,17 @@
 // NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
 //
 // TODO: the actual CUDA porting work is work in progress...
-//       For good performance we have to get rid of most local memory spills
 //
+//       For good performance we have to get rid of most local memory spills
+//       TODO: drop the uint8_t conversions (use uint32_t arrays or uint64_t)
+//             manually inline scrypt_pbkdf2_1 function into pre/post kernels
+//             and unroll loops. Remove unused code.
 
 #include <map>
 #include <stdint.h>
 
 #include "salsa_kernel.h"
+#include "miner.h"
 
 #include "keccak.h"
 
@@ -32,8 +36,6 @@
 extern std::map<int, uint32_t *> context_idata[2];
 extern std::map<int, uint32_t *> context_odata[2];
 extern std::map<int, cudaStream_t> context_streams[2];
-extern std::map<int, uint32_t *> context_tstate[2];
-extern std::map<int, uint32_t *> context_ostate[2];
 extern std::map<int, uint32_t *> context_hash[2];
 
 #define U8TO32_BE(p)                                            \
@@ -343,10 +345,10 @@ static __device__ uint32_t cuda_swab32(uint32_t x)
           | ((x >> 8) & 0x0000ff00u) | ((x >> 24) & 0x000000ffu));
 }
 
-__global__ void cuda_pre_keccak512(uint32_t *g_odata, uint32_t nonce)
+__global__ void cuda_pre_keccak512(uint32_t *g_idata, uint32_t nonce)
 {
     nonce        +=       (blockIdx.x * blockDim.x) + threadIdx.x; 
-    g_odata      += 32 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+    g_idata      += 32 * ((blockIdx.x * blockDim.x) + threadIdx.x);
 
     uint32_t data[20];
 
@@ -355,7 +357,24 @@ __global__ void cuda_pre_keccak512(uint32_t *g_odata, uint32_t nonce)
         data[i] = cuda_swab32(pdata[i]);
     data[19] = cuda_swab32(nonce);
 
-    scrypt_pbkdf2_1((const uint8_t*)data, 80, (const uint8_t*)data, 80, (uint8_t*)g_odata, 128);
+    scrypt_pbkdf2_1((const uint8_t*)data, 80, (const uint8_t*)data, 80, (uint8_t*)g_idata, 128);
+}
+
+
+__global__ void cuda_post_keccak512(uint32_t *g_odata, uint32_t *g_hash, uint32_t nonce)
+{
+    nonce        +=       (blockIdx.x * blockDim.x) + threadIdx.x; 
+    g_odata      += 32 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+    g_hash       +=  8 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+
+    uint32_t data[20];
+
+#pragma unroll 19
+    for (int i=0; i <19; ++i)
+        data[i] = cuda_swab32(pdata[i]);
+    data[19] = cuda_swab32(nonce);
+
+    scrypt_pbkdf2_1((const uint8_t*)data, 80, (const uint8_t*)g_odata, 128, (uint8_t*)g_hash, 32);
 }
 
 //
@@ -379,4 +398,18 @@ extern "C" void pre_keccak512(int thr_id, int stream, uint32_t nonce, int throug
     dim3 grid((throughput+127)/128);
 
     cuda_pre_keccak512<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_idata[stream][thr_id], nonce);
+}
+
+extern "C" void post_keccak512(int thr_id, int stream, uint32_t nonce, uint32_t hash[8], int throughput)
+{
+    dim3 block(128);
+    dim3 grid((throughput+127)/128);
+
+    cuda_post_keccak512<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_odata[stream][thr_id], context_hash[stream][thr_id], nonce);
+
+    unsigned int mem_size = throughput * sizeof(uint32_t) * 8;
+
+    // copy device memory to host
+    checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
+                    cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
 }

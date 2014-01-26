@@ -236,19 +236,31 @@ extern "C" int cuda_throughput(int thr_id)
         checkCudaErrors(cudaHostAlloc((void **) &tmp, state_size, cudaHostAllocDefault)); context_H[0][thr_id] = tmp;
         checkCudaErrors(cudaHostAlloc((void **) &tmp, state_size, cudaHostAllocDefault)); context_H[1][thr_id] = tmp;
 
-        if (parallel < 2)
+        if (opt_algo == ALGO_SCRYPT)
+        {
+            if (parallel < 2)
+            {
+                // allocate pinned host memory for scrypt_core input/output
+                checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[0][thr_id] = tmp;
+                checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[1][thr_id] = tmp;
+            }
+            else
+            {
+                // allocate tstate, ostate, scrypt hash device memory
+                checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_tstate[0][thr_id] = tmp;
+                checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_tstate[1][thr_id] = tmp;
+                checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_ostate[0][thr_id] = tmp;
+                checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_ostate[1][thr_id] = tmp;
+                checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[0][thr_id] = tmp;
+                checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[1][thr_id] = tmp;
+            }
+        }
+        else if (opt_algo == ALGO_SCRYPT_JANE)
         {
             // allocate pinned host memory for scrypt_core input/output
             checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[0][thr_id] = tmp;
             checkCudaErrors(cudaHostAlloc((void **) &tmp, mem_size, cudaHostAllocDefault)); context_X[1][thr_id] = tmp;
-        }
-        else
-        {
-            // allocate tstate, ostate, scrypt hash device memory
-            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_tstate[0][thr_id] = tmp;
-            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_tstate[1][thr_id] = tmp;
-            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_ostate[0][thr_id] = tmp;
-            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_ostate[1][thr_id] = tmp;
+
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[0][thr_id] = tmp;
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[1][thr_id] = tmp;
         }
