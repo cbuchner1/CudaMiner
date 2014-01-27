@@ -79,6 +79,23 @@ typedef struct keccak_hash_state_t {
     uint32_t buffer[72/4];                     // 72
 } keccak_hash_state;
 
+__device__ void statecopy0(keccak_hash_state *d, keccak_hash_state *s)
+{
+#pragma unroll 25
+    for (int i=0; i < 25; ++i)
+        d->state[i] = s->state[i];
+}
+
+__device__ void statecopy8(keccak_hash_state *d, keccak_hash_state *s)
+{
+#pragma unroll 25
+    for (int i=0; i < 25; ++i)
+        d->state[i] = s->state[i];
+#pragma unroll 2
+    for (int i=0; i < 2; ++i)
+        d->buffer[i] = s->buffer[i];
+}
+
 static const uint64_t host_keccak_round_constants[24] = {
     0x0000000000000001ull, 0x0000000000008082ull,
     0x800000000000808aull, 0x8000000080008000ull,
@@ -357,6 +374,12 @@ pbkdf2_hmac_finish60(pbkdf2_hmac_state *st, uint32_t *mac) {
     keccak_hash_finish64(&st->outer, mac);
 }
 
+__device__ void
+pbkdf2_statecopy8(pbkdf2_hmac_state *d, pbkdf2_hmac_state *s) {
+    statecopy8(&d->inner, &s->inner);
+    statecopy0(&d->outer, &s->outer);
+}
+
 // ---------------------------- END PBKDF2 functions ------------------------------------
 
 static __device__ uint32_t cuda_swab32(uint32_t x)
@@ -392,13 +415,13 @@ __global__ void cuda_pre_keccak512(uint32_t *g_idata, uint32_t nonce)
 
     /* U1 = hmac(password, salt || be(i)) */
     be = cuda_swab32(1);
-    work = hmac_pw;
+    pbkdf2_statecopy8(&work, &hmac_pw);
     pbkdf2_hmac_update4_8(&work, &be);
     pbkdf2_hmac_finish12(&work, ti);
     mycpy64(g_idata, ti);
 
     be = cuda_swab32(2);
-    work = hmac_pw;
+    pbkdf2_statecopy8(&work, &hmac_pw);
     pbkdf2_hmac_update4_8(&work, &be);
     pbkdf2_hmac_finish12(&work, ti);
     mycpy64(g_idata+16, ti);
