@@ -76,7 +76,6 @@ static __device__ void mycpy4(uint32_t *d, const uint32_t *s) {
 
 typedef struct keccak_hash_state_t {
     uint64_t state[25];                        // 25*2
-    uint32_t leftover;                         // 1
     uint32_t buffer[72/4];                     // 72
 } keccak_hash_state;
 
@@ -171,7 +170,9 @@ keccak_block(keccak_hash_state *S, const uint32_t *in) {
 
 __device__ void
 keccak_hash_init(keccak_hash_state *S) { 
-    memset(S, 0, sizeof(*S));
+#pragma unroll 25
+    for (int i=0; i<25; ++i)
+        S->state[i] = 0ULL;
 }
 
 // assuming there is no leftover data and exactly 72 bytes are incoming
@@ -182,46 +183,73 @@ keccak_hash_update72(keccak_hash_state *S, const uint32_t *in) {
 }
 
 __device__ void keccak_hash_update8(keccak_hash_state *S, const uint32_t *in) {
-    /* handle leftover data */
-    S->leftover = (uint32_t)8/4;
     mycpy8(S->buffer, in);
 }
 
 __device__ void keccak_hash_update4_8(keccak_hash_state *S, const uint32_t *in) {
-    /* handle leftover data */
-    S->leftover = (uint32_t)12/4;
     mycpy4(S->buffer+8/4, in);
 }
 
 __device__ void keccak_hash_update4_56(keccak_hash_state *S, const uint32_t *in) {
-    /* handle leftover data */
-    S->leftover = (uint32_t)60/4;
     mycpy4(S->buffer+56/4, in);
 }
 
 __device__ void keccak_hash_update56(keccak_hash_state *S, const uint32_t *in) {
-    /* handle leftover data */
-    S->leftover = (uint32_t)56/4;
     mycpy56(S->buffer, in);
 }
 
 __device__ void keccak_hash_update64(keccak_hash_state *S, const uint32_t *in) {
-    /* handle leftover data */
-    S->leftover = (uint32_t)64/4;
     mycpy64(S->buffer, in);
 }
 
 __device__ void
-keccak_hash_finish(keccak_hash_state *S, uint32_t *hash) {
-    size_t i;
-
-    S->buffer[S->leftover] = 0x01;
-    for (int i=S->leftover+1; i < 72/4; ++i) S->buffer[i] = 0;
+keccak_hash_finish8(keccak_hash_state *S, uint32_t *hash) {
+    S->buffer[8/4] = 0x01;
+#pragma unroll 15
+    for (int i=8/4+1; i < 72/4; ++i) S->buffer[i] = 0;
     S->buffer[72/4 - 1] |= 0x80000000;
     keccak_block(S, (const uint32_t*)S->buffer);
-
 #pragma unroll 8
-    for (i = 0; i < 64; i += 8) {
+    for (size_t i = 0; i < 64; i += 8) {
+        U64TO32_LE((&hash[i/4]), S->state[i / 8]);
+    }
+}
+
+__device__ void
+keccak_hash_finish12(keccak_hash_state *S, uint32_t *hash) {
+    S->buffer[12/4] = 0x01;
+#pragma unroll 14
+    for (int i=12/4+1; i < 72/4; ++i) S->buffer[i] = 0;
+    S->buffer[72/4 - 1] |= 0x80000000;
+    keccak_block(S, (const uint32_t*)S->buffer);
+#pragma unroll 8
+    for (size_t i = 0; i < 64; i += 8) {
+        U64TO32_LE((&hash[i/4]), S->state[i / 8]);
+    }
+}
+
+__device__ void
+keccak_hash_finish60(keccak_hash_state *S, uint32_t *hash) {
+    S->buffer[60/4] = 0x01;
+#pragma unroll 2
+    for (int i=60/4+1; i < 72/4; ++i) S->buffer[i] = 0;
+    S->buffer[72/4 - 1] |= 0x80000000;
+    keccak_block(S, (const uint32_t*)S->buffer);
+#pragma unroll 8
+    for (size_t i = 0; i < 64; i += 8) {
+        U64TO32_LE((&hash[i/4]), S->state[i / 8]);
+    }
+}
+
+__device__ void
+keccak_hash_finish64(keccak_hash_state *S, uint32_t *hash) {
+    S->buffer[64/4] = 0x01;
+#pragma unroll 1
+    for (int i=64/4+1; i < 72/4; ++i) S->buffer[i] = 0;
+    S->buffer[72/4 - 1] |= 0x80000000;
+    keccak_block(S, (const uint32_t*)S->buffer);
+#pragma unroll 8
+    for (size_t i = 0; i < 64; i += 8) {
         U64TO32_LE((&hash[i/4]), S->state[i / 8]);
     }
 }
@@ -238,15 +266,15 @@ typedef struct pbkdf2_hmac_state_t {
 __device__ void
 pbkdf2_hash(uint32_t *hash, const uint32_t *m) {
     keccak_hash_state st;
-    keccak_hash_init(&st); 
+    keccak_hash_init(&st);
     keccak_hash_update72(&st, m);
     keccak_hash_update8(&st, m+72/4);
-    keccak_hash_finish(&st, hash);
+    keccak_hash_finish8(&st, hash);
 }
 
 /* hmac */
 __device__ void
-pbkdf2_hmac_init(pbkdf2_hmac_state *st, const uint32_t *key) {
+pbkdf2_hmac_init80(pbkdf2_hmac_state *st, const uint32_t *key) {
     uint32_t pad[72/4];
     size_t i;
 
@@ -308,14 +336,25 @@ pbkdf2_hmac_update56(pbkdf2_hmac_state *st, const uint32_t *m) {
 }
 
 __device__ void
-pbkdf2_hmac_finish(pbkdf2_hmac_state *st, uint32_t *mac) {
+pbkdf2_hmac_finish12(pbkdf2_hmac_state *st, uint32_t *mac) {
     /* h(inner || m) */
     uint32_t innerhash[16];
-    keccak_hash_finish(&st->inner, innerhash);
+    keccak_hash_finish12(&st->inner, innerhash);
 
     /* h(outer || h(inner || m)) */
     keccak_hash_update64(&st->outer, innerhash);
-    keccak_hash_finish(&st->outer, mac);
+    keccak_hash_finish64(&st->outer, mac);
+}
+
+__device__ void
+pbkdf2_hmac_finish60(pbkdf2_hmac_state *st, uint32_t *mac) {
+    /* h(inner || m) */
+    uint32_t innerhash[16];
+    keccak_hash_finish60(&st->inner, innerhash);
+
+    /* h(outer || h(inner || m)) */
+    keccak_hash_update64(&st->outer, innerhash);
+    keccak_hash_finish64(&st->outer, mac);
 }
 
 // ---------------------------- END PBKDF2 functions ------------------------------------
@@ -345,7 +384,7 @@ __global__ void cuda_pre_keccak512(uint32_t *g_idata, uint32_t nonce)
     uint32_t be;
     
     /* hmac(password, ...) */
-    pbkdf2_hmac_init(&hmac_pw, data);
+    pbkdf2_hmac_init80(&hmac_pw, data);
 
     /* hmac(password, salt...) */
     pbkdf2_hmac_update72(&hmac_pw, data);
@@ -355,13 +394,13 @@ __global__ void cuda_pre_keccak512(uint32_t *g_idata, uint32_t nonce)
     be = cuda_swab32(1);
     work = hmac_pw;
     pbkdf2_hmac_update4_8(&work, &be);
-    pbkdf2_hmac_finish(&work, ti);
+    pbkdf2_hmac_finish12(&work, ti);
     mycpy64(g_idata, ti);
 
     be = cuda_swab32(2);
     work = hmac_pw;
     pbkdf2_hmac_update4_8(&work, &be);
-    pbkdf2_hmac_finish(&work, ti);
+    pbkdf2_hmac_finish12(&work, ti);
     mycpy64(g_idata+16, ti);
 }
 
@@ -386,7 +425,7 @@ __global__ void cuda_post_keccak512(uint32_t *g_odata, uint32_t *g_hash, uint32_
     uint32_t be;
     
     /* hmac(password, ...) */
-    pbkdf2_hmac_init(&hmac_pw, data);
+    pbkdf2_hmac_init80(&hmac_pw, data);
 
     /* hmac(password, salt...) */
     pbkdf2_hmac_update72(&hmac_pw, g_odata);
@@ -395,7 +434,7 @@ __global__ void cuda_post_keccak512(uint32_t *g_odata, uint32_t *g_hash, uint32_
     /* U1 = hmac(password, salt || be(i)) */
     be = cuda_swab32(1);
     pbkdf2_hmac_update4_56(&hmac_pw, &be);
-    pbkdf2_hmac_finish(&hmac_pw, ti);
+    pbkdf2_hmac_finish60(&hmac_pw, ti);
     mycpy32(g_hash, ti);
 }
 
