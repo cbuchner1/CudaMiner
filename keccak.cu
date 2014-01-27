@@ -6,9 +6,8 @@
 // TODO: the actual CUDA porting work is work in progress...
 //
 //       For good performance we have to get rid of most local memory spills
-//       TODO: drop the uint8_t conversions (use uint32_t arrays or uint64_t)
-//             manually inline scrypt_pbkdf2_1 function into pre/post kernels
-//             and unroll loops. Remove unused code.
+//       TODO: make sure all loops have known trip counts at compile time
+//             and are adequately unrolled.
 
 #include <map>
 #include <stdint.h>
@@ -38,50 +37,38 @@ extern std::map<int, uint32_t *> context_odata[2];
 extern std::map<int, cudaStream_t> context_streams[2];
 extern std::map<int, uint32_t *> context_hash[2];
 
-#define U32TO8_LE(p, v)                                           \
-	(p)[0] = (uint8_t)((v)      ); (p)[1] = (uint8_t)((v) >>  8); \
-	(p)[2] = (uint8_t)((v) >> 16); (p)[3] = (uint8_t)((v) >> 24);
-
-#define U64TO8_LE(p, v)                        \
-	U32TO8_LE((p),     (uint32_t)((v)      )); \
-	U32TO8_LE((p) + 4, (uint32_t)((v) >> 32));
-
 #define ROTL64(a,b) (((a) << (b)) | ((a) >> (64 - b)))
 
 // CB
-#define U32TO64_LE(p)                                                  \
-	(((uint64_t)(*p)) | (((uint64_t)(*(p + 1))) << 32))
+#define U32TO64_LE(p) \
+    (((uint64_t)(*p)) | (((uint64_t)(*(p + 1))) << 32))
+
+#define U64TO32_LE(p, v) \
+    *p = (uint32_t)((v)); *(p+1) = (uint32_t)((v) >> 32);
 
 // ---------------------------- BEGIN keccak functions ------------------------------------
 
 #define KECCAK_HASH "Keccak-512"
-#define KECCAK_HASH_DIGEST_SIZE 64
-#define KECCAK_F 1600
-#define KECCAK_C (KECCAK_HASH_DIGEST_SIZE * 8 * 2) /* 1024 */
-#define KECCAK_R (KECCAK_F - KECCAK_C) /* 576 */
-#define KECCAK_HASH_BLOCK_SIZE (KECCAK_R / 8) /* 72 */
-
-typedef uint8_t keccak_hash_digest[KECCAK_HASH_DIGEST_SIZE];
 
 typedef struct keccak_hash_state_t {
-	uint64_t state[KECCAK_F / 64];             // 25
-	uint32_t leftover;                         // 1
-	uint32_t buffer[KECCAK_HASH_BLOCK_SIZE/4]; // 72
+    uint64_t state[25];                        // 25*2
+    uint32_t leftover;                         // 1
+    uint32_t buffer[72/4];                     // 72
 } keccak_hash_state;
 
 static const uint64_t host_keccak_round_constants[24] = {
-	0x0000000000000001ull, 0x0000000000008082ull,
-	0x800000000000808aull, 0x8000000080008000ull,
-	0x000000000000808bull, 0x0000000080000001ull,
-	0x8000000080008081ull, 0x8000000000008009ull,
-	0x000000000000008aull, 0x0000000000000088ull,
-	0x0000000080008009ull, 0x000000008000000aull,
-	0x000000008000808bull, 0x800000000000008bull,
-	0x8000000000008089ull, 0x8000000000008003ull,
-	0x8000000000008002ull, 0x8000000000000080ull,
-	0x000000000000800aull, 0x800000008000000aull,
-	0x8000000080008081ull, 0x8000000000008080ull,
-	0x0000000080000001ull, 0x8000000080008008ull
+    0x0000000000000001ull, 0x0000000000008082ull,
+    0x800000000000808aull, 0x8000000080008000ull,
+    0x000000000000808bull, 0x0000000080000001ull,
+    0x8000000080008081ull, 0x8000000000008009ull,
+    0x000000000000008aull, 0x0000000000000088ull,
+    0x0000000080008009ull, 0x000000008000000aull,
+    0x000000008000808bull, 0x800000000000008bull,
+    0x8000000000008089ull, 0x8000000000008003ull,
+    0x8000000000008002ull, 0x8000000000000080ull,
+    0x000000000000800aull, 0x800000008000000aull,
+    0x8000000080008081ull, 0x8000000000008080ull,
+    0x0000000080000001ull, 0x8000000080008008ull
 };
 
 __constant__ uint64_t c_keccak_round_constants[24];
@@ -89,129 +76,130 @@ __constant__ uint32_t pdata[20];
 
 __device__ void
 keccak_block(keccak_hash_state *S, const uint32_t *in) {
-	size_t i;
-	uint64_t *s = S->state, t[5], u[5], v, w;
+    size_t i;
+    uint64_t *s = S->state, t[5], u[5], v, w;
 
-	/* absorb input */
+    /* absorb input */
 #pragma unroll 9
-	for (i = 0; i < KECCAK_HASH_BLOCK_SIZE / 8; i++, in += 2)
-		s[i] ^= U32TO64_LE(in);
-	
-	for (i = 0; i < 24; i++) {
-		/* theta: c = a[0,i] ^ a[1,i] ^ .. a[4,i] */
-		t[0] = s[0] ^ s[5] ^ s[10] ^ s[15] ^ s[20];
-		t[1] = s[1] ^ s[6] ^ s[11] ^ s[16] ^ s[21];
-		t[2] = s[2] ^ s[7] ^ s[12] ^ s[17] ^ s[22];
-		t[3] = s[3] ^ s[8] ^ s[13] ^ s[18] ^ s[23];
-		t[4] = s[4] ^ s[9] ^ s[14] ^ s[19] ^ s[24];
+    for (i = 0; i < 72 / 8; i++, in += 2)
+        s[i] ^= U32TO64_LE(in);
+    
+    for (i = 0; i < 24; i++) {
+        /* theta: c = a[0,i] ^ a[1,i] ^ .. a[4,i] */
+        t[0] = s[0] ^ s[5] ^ s[10] ^ s[15] ^ s[20];
+        t[1] = s[1] ^ s[6] ^ s[11] ^ s[16] ^ s[21];
+        t[2] = s[2] ^ s[7] ^ s[12] ^ s[17] ^ s[22];
+        t[3] = s[3] ^ s[8] ^ s[13] ^ s[18] ^ s[23];
+        t[4] = s[4] ^ s[9] ^ s[14] ^ s[19] ^ s[24];
 
-		/* theta: d[i] = c[i+4] ^ rotl(c[i+1],1) */
-		u[0] = t[4] ^ ROTL64(t[1], 1);
-		u[1] = t[0] ^ ROTL64(t[2], 1);
-		u[2] = t[1] ^ ROTL64(t[3], 1);
-		u[3] = t[2] ^ ROTL64(t[4], 1);
-		u[4] = t[3] ^ ROTL64(t[0], 1);
+        /* theta: d[i] = c[i+4] ^ rotl(c[i+1],1) */
+        u[0] = t[4] ^ ROTL64(t[1], 1);
+        u[1] = t[0] ^ ROTL64(t[2], 1);
+        u[2] = t[1] ^ ROTL64(t[3], 1);
+        u[3] = t[2] ^ ROTL64(t[4], 1);
+        u[4] = t[3] ^ ROTL64(t[0], 1);
 
-		/* theta: a[0,i], a[1,i], .. a[4,i] ^= d[i] */
-		s[0] ^= u[0]; s[5] ^= u[0]; s[10] ^= u[0]; s[15] ^= u[0]; s[20] ^= u[0];
-		s[1] ^= u[1]; s[6] ^= u[1]; s[11] ^= u[1]; s[16] ^= u[1]; s[21] ^= u[1];
-		s[2] ^= u[2]; s[7] ^= u[2]; s[12] ^= u[2]; s[17] ^= u[2]; s[22] ^= u[2];
-		s[3] ^= u[3]; s[8] ^= u[3]; s[13] ^= u[3]; s[18] ^= u[3]; s[23] ^= u[3];
-		s[4] ^= u[4]; s[9] ^= u[4]; s[14] ^= u[4]; s[19] ^= u[4]; s[24] ^= u[4];
+        /* theta: a[0,i], a[1,i], .. a[4,i] ^= d[i] */
+        s[0] ^= u[0]; s[5] ^= u[0]; s[10] ^= u[0]; s[15] ^= u[0]; s[20] ^= u[0];
+        s[1] ^= u[1]; s[6] ^= u[1]; s[11] ^= u[1]; s[16] ^= u[1]; s[21] ^= u[1];
+        s[2] ^= u[2]; s[7] ^= u[2]; s[12] ^= u[2]; s[17] ^= u[2]; s[22] ^= u[2];
+        s[3] ^= u[3]; s[8] ^= u[3]; s[13] ^= u[3]; s[18] ^= u[3]; s[23] ^= u[3];
+        s[4] ^= u[4]; s[9] ^= u[4]; s[14] ^= u[4]; s[19] ^= u[4]; s[24] ^= u[4];
 
-		/* rho pi: b[..] = rotl(a[..], ..) */
-		v = s[ 1];
-		s[ 1] = ROTL64(s[ 6], 44);
-		s[ 6] = ROTL64(s[ 9], 20);
-		s[ 9] = ROTL64(s[22], 61);
-		s[22] = ROTL64(s[14], 39);
-		s[14] = ROTL64(s[20], 18);
-		s[20] = ROTL64(s[ 2], 62);
-		s[ 2] = ROTL64(s[12], 43);
-		s[12] = ROTL64(s[13], 25);
-		s[13] = ROTL64(s[19],  8);
-		s[19] = ROTL64(s[23], 56);
-		s[23] = ROTL64(s[15], 41);
-		s[15] = ROTL64(s[ 4], 27);
-		s[ 4] = ROTL64(s[24], 14);
-		s[24] = ROTL64(s[21],  2);
-		s[21] = ROTL64(s[ 8], 55);
-		s[ 8] = ROTL64(s[16], 45);
-		s[16] = ROTL64(s[ 5], 36);
-		s[ 5] = ROTL64(s[ 3], 28);
-		s[ 3] = ROTL64(s[18], 21);
-		s[18] = ROTL64(s[17], 15);
-		s[17] = ROTL64(s[11], 10);
-		s[11] = ROTL64(s[ 7],  6);
-		s[ 7] = ROTL64(s[10],  3);
-		s[10] = ROTL64(    v,  1);
+        /* rho pi: b[..] = rotl(a[..], ..) */
+        v = s[ 1];
+        s[ 1] = ROTL64(s[ 6], 44);
+        s[ 6] = ROTL64(s[ 9], 20);
+        s[ 9] = ROTL64(s[22], 61);
+        s[22] = ROTL64(s[14], 39);
+        s[14] = ROTL64(s[20], 18);
+        s[20] = ROTL64(s[ 2], 62);
+        s[ 2] = ROTL64(s[12], 43);
+        s[12] = ROTL64(s[13], 25);
+        s[13] = ROTL64(s[19],  8);
+        s[19] = ROTL64(s[23], 56);
+        s[23] = ROTL64(s[15], 41);
+        s[15] = ROTL64(s[ 4], 27);
+        s[ 4] = ROTL64(s[24], 14);
+        s[24] = ROTL64(s[21],  2);
+        s[21] = ROTL64(s[ 8], 55);
+        s[ 8] = ROTL64(s[16], 45);
+        s[16] = ROTL64(s[ 5], 36);
+        s[ 5] = ROTL64(s[ 3], 28);
+        s[ 3] = ROTL64(s[18], 21);
+        s[18] = ROTL64(s[17], 15);
+        s[17] = ROTL64(s[11], 10);
+        s[11] = ROTL64(s[ 7],  6);
+        s[ 7] = ROTL64(s[10],  3);
+        s[10] = ROTL64(    v,  1);
 
-		/* chi: a[i,j] ^= ~b[i,j+1] & b[i,j+2] */
-		v = s[ 0]; w = s[ 1]; s[ 0] ^= (~w) & s[ 2]; s[ 1] ^= (~s[ 2]) & s[ 3]; s[ 2] ^= (~s[ 3]) & s[ 4]; s[ 3] ^= (~s[ 4]) & v; s[ 4] ^= (~v) & w;
-		v = s[ 5]; w = s[ 6]; s[ 5] ^= (~w) & s[ 7]; s[ 6] ^= (~s[ 7]) & s[ 8]; s[ 7] ^= (~s[ 8]) & s[ 9]; s[ 8] ^= (~s[ 9]) & v; s[ 9] ^= (~v) & w;
-		v = s[10]; w = s[11]; s[10] ^= (~w) & s[12]; s[11] ^= (~s[12]) & s[13]; s[12] ^= (~s[13]) & s[14]; s[13] ^= (~s[14]) & v; s[14] ^= (~v) & w;
-		v = s[15]; w = s[16]; s[15] ^= (~w) & s[17]; s[16] ^= (~s[17]) & s[18]; s[17] ^= (~s[18]) & s[19]; s[18] ^= (~s[19]) & v; s[19] ^= (~v) & w;
-		v = s[20]; w = s[21]; s[20] ^= (~w) & s[22]; s[21] ^= (~s[22]) & s[23]; s[22] ^= (~s[23]) & s[24]; s[23] ^= (~s[24]) & v; s[24] ^= (~v) & w;
+        /* chi: a[i,j] ^= ~b[i,j+1] & b[i,j+2] */
+        v = s[ 0]; w = s[ 1]; s[ 0] ^= (~w) & s[ 2]; s[ 1] ^= (~s[ 2]) & s[ 3]; s[ 2] ^= (~s[ 3]) & s[ 4]; s[ 3] ^= (~s[ 4]) & v; s[ 4] ^= (~v) & w;
+        v = s[ 5]; w = s[ 6]; s[ 5] ^= (~w) & s[ 7]; s[ 6] ^= (~s[ 7]) & s[ 8]; s[ 7] ^= (~s[ 8]) & s[ 9]; s[ 8] ^= (~s[ 9]) & v; s[ 9] ^= (~v) & w;
+        v = s[10]; w = s[11]; s[10] ^= (~w) & s[12]; s[11] ^= (~s[12]) & s[13]; s[12] ^= (~s[13]) & s[14]; s[13] ^= (~s[14]) & v; s[14] ^= (~v) & w;
+        v = s[15]; w = s[16]; s[15] ^= (~w) & s[17]; s[16] ^= (~s[17]) & s[18]; s[17] ^= (~s[18]) & s[19]; s[18] ^= (~s[19]) & v; s[19] ^= (~v) & w;
+        v = s[20]; w = s[21]; s[20] ^= (~w) & s[22]; s[21] ^= (~s[22]) & s[23]; s[22] ^= (~s[23]) & s[24]; s[23] ^= (~s[24]) & v; s[24] ^= (~v) & w;
 
-		/* iota: a[0,0] ^= round constant */
-		s[0] ^= c_keccak_round_constants[i];
-	}
+        /* iota: a[0,0] ^= round constant */
+        s[0] ^= c_keccak_round_constants[i];
+    }
 }
 
 __device__ void
-keccak_hash_init(keccak_hash_state *S) {
-	memset(S, 0, sizeof(*S));
+keccak_hash_init(keccak_hash_state *S) { 
+    memset(S, 0, sizeof(*S));
 }
 
 // assuming there is no leftover data and exactly 72 bytes are incoming
 // we can directly call into the block hashing function
 __device__ void
-keccak_hash_update72(keccak_hash_state *S, const uint8_t *in) {
-	keccak_block(S, (const uint32_t*)in);
+keccak_hash_update72(keccak_hash_state *S, const uint32_t *in) {
+    keccak_block(S, in);
 }
 
 __device__ void
-keccak_hash_update(keccak_hash_state *S, const uint8_t *in, size_t inlen) {
-	size_t want;
+keccak_hash_update(keccak_hash_state *S, const uint32_t *in, size_t inlen) {
+    size_t want;
 
-	/* handle the previous data */
-	if (S->leftover) {
-		want = (KECCAK_HASH_BLOCK_SIZE - 4*S->leftover);
-		want = (want < inlen) ? want : inlen;
-		memcpy(S->buffer + S->leftover, in, want);
-		S->leftover += (uint32_t)want/4;
-		if (4*S->leftover < KECCAK_HASH_BLOCK_SIZE)
-			return;
-		in += want;
-		inlen -= want;
-		keccak_block(S, (const uint32_t*)S->buffer);
-	}
+    /* handle the previous data */
+    if (S->leftover) {
+        want = (72 - 4*S->leftover);
+        want = (want < inlen) ? want : inlen;
+        memcpy(S->buffer + S->leftover, in, want);
+        S->leftover += (uint32_t)want/4;
+        if (4*S->leftover < 72)
+            return;
+        in += want/4;
+        inlen -= want;
+        keccak_block(S, (const uint32_t*)S->buffer);
+    }
 
-	/* handle the current data */
-	while (inlen >= KECCAK_HASH_BLOCK_SIZE) {
-		keccak_block(S, (const uint32_t*)in);
-		in += KECCAK_HASH_BLOCK_SIZE;
-		inlen -= KECCAK_HASH_BLOCK_SIZE;
-	}
+    /* handle the current data */
+    while (inlen >= 72) {
+        keccak_block(S, in);
+        in += 72/4;
+        inlen -= 72;
+    }
 
-	/* handle leftover data */
-	S->leftover = (uint32_t)inlen/4;
-	if (S->leftover)
-		memcpy(S->buffer, in, 4*S->leftover);
+    /* handle leftover data */
+    S->leftover = (uint32_t)inlen/4;
+    if (S->leftover)
+        memcpy(S->buffer, in, 4*S->leftover);
 }
 
 __device__ void
-keccak_hash_finish(keccak_hash_state *S, uint8_t *hash) {
-	size_t i;
+keccak_hash_finish(keccak_hash_state *S, uint32_t *hash) {
+    size_t i;
 
-	S->buffer[S->leftover] = 0x01;
-	for (int i=S->leftover+1; i < KECCAK_HASH_BLOCK_SIZE/4; ++i) S->buffer[i] = 0;
-	S->buffer[KECCAK_HASH_BLOCK_SIZE/4 - 1] |= 0x80000000;
-	keccak_block(S, (const uint32_t*)S->buffer);
+    S->buffer[S->leftover] = 0x01;
+    for (int i=S->leftover+1; i < 72/4; ++i) S->buffer[i] = 0;
+    S->buffer[72/4 - 1] |= 0x80000000;
+    keccak_block(S, (const uint32_t*)S->buffer);
 
-	for (i = 0; i < KECCAK_HASH_DIGEST_SIZE; i += 8) {
-		U64TO8_LE(&hash[i], S->state[i / 8]);
-	}
+#pragma unroll 8
+    for (i = 0; i < 64; i += 8) {
+        U64TO32_LE((&hash[i/4]), S->state[i / 8]);
+    }
 }
 
 // ---------------------------- END keccak functions ------------------------------------
@@ -219,67 +207,67 @@ keccak_hash_finish(keccak_hash_state *S, uint8_t *hash) {
 // ---------------------------- BEGIN PBKDF2 functions ------------------------------------
 
 typedef struct pbkdf2_hmac_state_t {
-	keccak_hash_state inner, outer;
+    keccak_hash_state inner, outer;
 } pbkdf2_hmac_state;
 
 
 __device__ void
 pbkdf2_hash(uint32_t *hash, const uint32_t *m) {
-	keccak_hash_state st;
-	keccak_hash_init(&st);
-	keccak_hash_update72(&st, (uint8_t*) m);
-	keccak_hash_update(&st, (uint8_t*)(m+72/4),  8);
-	keccak_hash_finish(&st, (uint8_t*)hash);
+    keccak_hash_state st;
+    keccak_hash_init(&st); 
+    keccak_hash_update72(&st, m);
+    keccak_hash_update(&st, m+72/4,  8);
+    keccak_hash_finish(&st, hash);
 }
 
 /* hmac */
 __device__ void
 pbkdf2_hmac_init(pbkdf2_hmac_state *st, const uint32_t *key) {
-	uint32_t pad[KECCAK_HASH_BLOCK_SIZE/4] = {0};
-	size_t i;
+    uint32_t pad[72/4] = {0};
+    size_t i;
 
-	keccak_hash_init(&st->inner);
-	keccak_hash_init(&st->outer);
+    keccak_hash_init(&st->inner);
+    keccak_hash_init(&st->outer);
 
-	/* key > blocksize bytes, hash it */
-	pbkdf2_hash(pad, key);
+    /* key > blocksize bytes, hash it */
+    pbkdf2_hash(pad, key);
 
-	/* inner = (key ^ 0x36) */
-	/* h(inner || ...) */
-	for (i = 0; i < KECCAK_HASH_BLOCK_SIZE/4; i++)
-		pad[i] ^= 0x36363636;
-	keccak_hash_update72(&st->inner, (uint8_t*)pad);
+    /* inner = (key ^ 0x36) */
+    /* h(inner || ...) */
+    for (i = 0; i < 72/4; i++)
+        pad[i] ^= 0x36363636;
+    keccak_hash_update72(&st->inner, pad);
 
-	/* outer = (key ^ 0x5c) */
-	/* h(outer || ...) */
-	for (i = 0; i < KECCAK_HASH_BLOCK_SIZE/4; i++)
-		pad[i] ^= 0x6a6a6a6a;
-	keccak_hash_update72(&st->outer, (uint8_t*)pad);
+    /* outer = (key ^ 0x5c) */
+    /* h(outer || ...) */
+    for (i = 0; i < 72/4; i++)
+        pad[i] ^= 0x6a6a6a6a;
+    keccak_hash_update72(&st->outer, pad);
 }
 
 // assuming there is no leftover data and exactly 72 bytes are incoming
 // we can directly call into the block hashing function
 __device__ void
 pbkdf2_hmac_update72(pbkdf2_hmac_state *st, const uint32_t *m) {
-	/* h(inner || m...) */
-	keccak_hash_update72(&st->inner, (const uint8_t*)m);
+    /* h(inner || m...) */
+    keccak_hash_update72(&st->inner, m);
 }
 
 __device__ void
 pbkdf2_hmac_update(pbkdf2_hmac_state *st, const uint32_t *m, size_t mlen) {
-	/* h(inner || m...) */
-	keccak_hash_update(&st->inner, (const uint8_t*)m, mlen);
+    /* h(inner || m...) */
+    keccak_hash_update(&st->inner, m, mlen);
 }
 
 __device__ void
 pbkdf2_hmac_finish(pbkdf2_hmac_state *st, uint32_t *mac) {
-	/* h(inner || m) */
-	keccak_hash_digest innerhash;
-	keccak_hash_finish(&st->inner, innerhash);
+    /* h(inner || m) */
+    uint32_t innerhash[16];
+    keccak_hash_finish(&st->inner, innerhash);
 
-	/* h(outer || h(inner || m)) */
-	keccak_hash_update(&st->outer, innerhash, sizeof(innerhash));
-	keccak_hash_finish(&st->outer, (uint8_t*)mac);
+    /* h(outer || h(inner || m)) */
+    keccak_hash_update(&st->outer, innerhash, sizeof(innerhash));
+    keccak_hash_finish(&st->outer, mac);
 }
 
 // ---------------------------- END PBKDF2 functions ------------------------------------
