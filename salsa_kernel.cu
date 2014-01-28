@@ -591,7 +591,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             checkCudaErrors(cudaMemcpy(d_idata, h_idata, mem_size, cudaMemcpyHostToDevice));
             free(h_idata);
 
-            double best_khash_sec = 0.0;
+            double best_hash_sec = 0.0;
             int best_wpb = 0;
 
             // auto-tuning loop
@@ -609,10 +609,10 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
                 for (int GRID_BLOCKS = MINB; !abort_flag && GRID_BLOCKS <= MAXB; ++GRID_BLOCKS)
                 {
-                    double kHash[32+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+                    double Hash[32+1] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
                     for (WARPS_PER_BLOCK = 1; !abort_flag && WARPS_PER_BLOCK <= kernel->max_warps_per_block(); ++WARPS_PER_BLOCK)
                     {
-                        double khash_sec = 0;
+                        double hash_sec = 0;
                         if (GRID_BLOCKS * WARPS_PER_BLOCK >= MINTW &&
                             GRID_BLOCKS * WARPS_PER_BLOCK <= MAXTW)
                         {
@@ -627,30 +627,27 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             gettimeofday(&tv_start, NULL);
                             int repeat = 0;
                             bool r = false;
-                            while (repeat < 3)  // average up to 3 measurements for better exactness
+                            do  // average several measurements for better exactness
                             {
                                 r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, LOOKUP_GAP, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
                                 gettimeofday(&tv_end, NULL);
-                                // bail out if 50ms taken (to speed up autotuning...)
-                                if ((1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) > 0.05) break;
-                            }
+                                // for a better result averaging, measure for at least 50ms
+                            } while ((tdelta=(1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec))) < 0.05);
                             if (cudaGetLastError() != cudaSuccess || !r) continue;
-
-                            tdelta = (1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec)) / repeat;
 
                             // for scrypt: in interactive mode only find launch configs where kernel launch times are short enough
                             // TODO: instead we could reduce the batchsize parameter to meet the launch time requirement.
                             if (opt_algo == ALGO_SCRYPT && device_interactive[thr_id] && GRID_BLOCKS > 2*props.multiProcessorCount && tdelta > 1.0/30)
                                 if (WARPS_PER_BLOCK == 1) goto skip; else goto skip2;
 
-                            khash_sec = (double)WU_PER_LAUNCH / (tdelta * 1e3);
-                            kHash[WARPS_PER_BLOCK] = khash_sec;
-                            if (khash_sec > best_khash_sec) {
+                            hash_sec = (double)WU_PER_LAUNCH / tdelta;
+                            Hash[WARPS_PER_BLOCK] = hash_sec;
+                            if (hash_sec > best_hash_sec) {
                                 optimal_blocks = GRID_BLOCKS;
-                                best_khash_sec = khash_sec;
+                                best_hash_sec = hash_sec;
                                 best_wpb = WARPS_PER_BLOCK;
                             }
                         }
@@ -667,18 +664,35 @@ skip2:              ;
                             }
                             applog(LOG_DEBUG, line);
                         }
+
+                        char kMGT = ' '; bool flag;
+                        for (int j=0; j < 4; ++j) {
+                            flag=false; for (int i=1; i<=kernel->max_warps_per_block(); flag|=Hash[i] >= 1000, i++);
+                            if (flag)   for (int i=1; i<=kernel->max_warps_per_block(); Hash[i] /= 1000, i++);
+                            else break;
+                                 if (kMGT == ' ') kMGT = 'k';
+                            else if (kMGT == 'k') kMGT = 'M';
+                            else if (kMGT == 'M') kMGT = 'G';
+                            else if (kMGT == 'G') kMGT = 'T';
+                        }
+                        char *format = "%5.4f%c";
+                        flag = false; for (int i=1; i<=kernel->max_warps_per_block(); flag|=Hash[i] >= 1, i++); if (flag) format = "%5.3f%c";
+                        flag = false; for (int i=1; i<=kernel->max_warps_per_block(); flag|=Hash[i] >= 10, i++); if (flag) format = "%5.2f%c";
+                        flag = false; for (int i=1; i<=kernel->max_warps_per_block(); flag|=Hash[i] >= 100, i++); if (flag) format = "%5.1f%c";
+
                         char line[512]; sprintf(line, "%3d:", GRID_BLOCKS);
                         for (int i=1; i<=kernel->max_warps_per_block(); ++i) {
                             char tmp[16];
-                            if (kHash[i]>0)
-                                sprintf(tmp, opt_algo == ALGO_SCRYPT_JANE ? "%5.3f%c" : "%5.1f%c", kHash[i], (i<kernel->max_warps_per_block())?'|':' ');
+                            if (Hash[i]>0)
+                                sprintf(tmp, format, Hash[i], (i<kernel->max_warps_per_block())?'|':' ');
                             else
                                 sprintf(tmp, "     %c", (i<kernel->max_warps_per_block())?'|':' ');
                             strcat(line, tmp);
                             if (cw == 80 && (i % 8 == 0 && i != kernel->max_warps_per_block()))
                                 strcat(line, "\n                          ");
                         }
-                        strcat(line, "kH/s");
+                        int n = strlen(line)-1; line[n++] = '|'; line[n++] = ' '; line[n++] = kMGT; line[n++] = '\0';
+                        strcat(line, "H/s");
                         applog(LOG_DEBUG, line);
                     }
                 }
@@ -689,7 +703,7 @@ skip:           ;
             checkCudaErrors(cudaFree(d_idata));
 
             WARPS_PER_BLOCK = best_wpb;
-            applog(LOG_INFO, "GPU #%d: %7.2f khash/s with configuration %c%dx%d", device_map[thr_id], best_khash_sec, kernel->get_identifier(), optimal_blocks, WARPS_PER_BLOCK);
+            applog(LOG_INFO, "GPU #%d: %7.2f hash/s with configuration %c%dx%d", device_map[thr_id], best_hash_sec, kernel->get_identifier(), optimal_blocks, WARPS_PER_BLOCK);
         }
         else
         {
