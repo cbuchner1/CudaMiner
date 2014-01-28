@@ -451,22 +451,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             // PROBLEM: one some devices, ALL allocations will fail if the first one failed. This sucks.
             size_t MEM_LIMIT = (unsigned long long)min((unsigned long long)MAXMEM, (unsigned long long)props.totalGlobalMem);
             int warpmax = (int)min((unsigned long long)TOTAL_WARP_LIMIT, (unsigned long long)MEM_LIMIT / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)));
-#if 0
-            warpmax = ((100-BACKOFF)*warpmax+50)/100;
-            for (int warp = warpmax; warp >= 1; --warp) {
-                cudaGetLastError(); // clear the error state
-                cudaMalloc((void **)&d_V, (size_t)SCRATCH * WU_PER_WARP * warp * sizeof(uint32_t));
-                if (cudaGetLastError() == cudaSuccess) {
-                    checkCudaErrors(cudaFree(d_V)); d_V = NULL;
-                    // Windows WDDM driver model needs some breathing room to operate safely
-                    // in particular when binding large 1D or 2D textures
-                    if (warp < warpmax)
-                        MAXWARPS[thr_id] = ((100-BACKOFF)*warp+50)/100;
-                    break;
-                }
-            }
-#else
-            // run a bisection algorithm for memory allocation
+
+            // run a bisection algorithm for memory allocation (way more reliable than the previous approach)
             int best = 0;
             int warp = (warpmax+1)/2;
             int interval = (warpmax+1)/2;
@@ -477,6 +463,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 if (cudaGetLastError() == cudaSuccess) {
                     checkCudaErrors(cudaFree(d_V)); d_V = NULL;
                     if (warp > best) best = warp;
+                    if (warp == warpmax) break;
                     interval = (interval+1)/2;
                     warp += interval;
                     if (warp > warpmax) warp = warpmax;
@@ -488,8 +475,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                     if (warp < 1) warp = 1;
                 }
             }
-            MAXWARPS[thr_id] = ((100-BACKOFF)*best+50)/100;;
-#endif
+            // back off a bit from the largest possible allocation size
+            MAXWARPS[thr_id] = ((100-BACKOFF)*best+50)/100;
         }
 
         // now allocate a buffer for determined MAXWARPS setting
