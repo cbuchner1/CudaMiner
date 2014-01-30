@@ -92,24 +92,48 @@ static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
 __device__ __forceinline__ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
-
-  *((uint4 *)(&scratch[start   ])) = b;
-  *((uint4 *)(&scratch[start+16])) = bx;
+  uint4 t=b, t2;
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
+  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 4)%32];
+  *s = bx.x; t2.x = *st;
+  *s = bx.y; t2.y = *st;
+  *s = bx.z; t2.z = *st;
+  *s = bx.w; t2.w = *st;
+  *s = start; int t2_start = *st + 4;
+  bool c = (threadIdx.x & 0x4);
+  *((uint4 *)(&scratch[c ? t2_start : start])) = (c ? t2 : t);
+  *((uint4 *)(&scratch[c ? start : t2_start])) = (c ? t : t2);
 }
 
-template <int ALGO, int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
+template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
-  uint32_t *scratch;
-  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
-
-       if (TEX_DIM == 0) b = *((uint4 *)(&scratch[start]));
-  else if (TEX_DIM == 1) b = tex1Dfetch(texRef1D_4_V, start/4);
-  else if (TEX_DIM == 2) b = tex2D(texRef2D_4_V, 0.5f + ((start/4)%TEXWIDTH), 0.5f + ((start/4)/TEXWIDTH));
-       if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[start+16]));
-  else if (TEX_DIM == 1) bx = tex1Dfetch(texRef1D_4_V, (start+16)/4);
-  else if (TEX_DIM == 2) bx = tex2D(texRef2D_4_V, 0.5f + (((start+16)/4)%TEXWIDTH), 0.5f + (((start+16)/4)/TEXWIDTH));
+  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
+  extern __shared__ unsigned char shared[];
+  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
+  *s = start; start = tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] + 8*(threadIdx.x%4);
+  *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
+  if (TEX_DIM > 0) { start /= 4; t2_start /= 4; }
+  bool c = (threadIdx.x & 0x4);
+  if (TEX_DIM == 0) {
+      b  = *((uint4 *)(&scratch[c ? t2_start : start]));
+      bx = *((uint4 *)(&scratch[c ? start : t2_start]));
+  } else if (TEX_DIM == 1) {
+      b  = tex1Dfetch(texRef1D_4_V, c ? t2_start : start);
+      bx = tex1Dfetch(texRef1D_4_V, c ? start : t2_start);
+  } else if (TEX_DIM == 2) {
+      b  = tex2D(texRef2D_4_V, 0.5f + ((c ? t2_start : start)%TEXWIDTH), 0.5f + ((c ? t2_start : start)/TEXWIDTH));
+      bx = tex2D(texRef2D_4_V, 0.5f + ((c ? start : t2_start)%TEXWIDTH), 0.5f + ((c ? start : t2_start)/TEXWIDTH));
+  }
+  uint4 temp = b; b = (c ? bx : b); bx = (c ? temp : bx);
+  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 28)%32];
+  *s = bx.x; bx.x = *st;
+  *s = bx.y; bx.y = *st;
+  *s = bx.z; bx.z = *st;
+  *s = bx.w; bx.w = *st;
 }
-
 
 
 __device__  __forceinline__ void primary_order_shuffle(uint4 &b, uint4 &bx) {
@@ -483,7 +507,7 @@ template <int ALGO> __global__ void test_scrypt_core_kernelA(const uint32_t *d_i
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = (scrypt_block*c_SCRATCH + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int i=begin;
 
@@ -491,7 +515,7 @@ template <int ALGO> __global__ void test_scrypt_core_kernelA(const uint32_t *d_i
     load_key<ALGO>(d_idata, b, bx);
     write_keys_direct(b, bx, start);
     ++i;
-  } else read_keys_direct<ALGO,0>(b, bx, start+32*(i-1));
+  } else read_keys_direct<0>(b, bx, start+32*(i-1));
   
   while (i < end) {
     block_mixer<ALGO>(b, bx, x1, x2, x3);
@@ -509,7 +533,7 @@ template <int ALGO> __global__ void test_scrypt_core_kernelA_LG(const uint32_t *
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = (scrypt_block*c_SCRATCH + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int i=begin;
 
@@ -519,7 +543,7 @@ template <int ALGO> __global__ void test_scrypt_core_kernelA_LG(const uint32_t *
     ++i;
   } else {
     int pos = (i-1)/LOOKUP_GAP, loop = (i-1)-pos*LOOKUP_GAP;
-    read_keys_direct<ALGO,0>(b, bx, start+32*pos);
+    read_keys_direct<0>(b, bx, start+32*pos);
     while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
   
@@ -546,7 +570,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH) + 4*(threadIdx.x%4);
+  int start = (scrypt_block*c_SCRATCH) + 8*(threadIdx.x%4);
   if (TEX_DIM == 0) start %= c_SCRATCH_WU_PER_WARP;
 
   int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -554,14 +578,14 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   if (begin == 0) {
-    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*c_N_1);
+    read_keys_direct<TEX_DIM>(b, bx, start+32*c_N_1);
     block_mixer<ALGO>(b, bx, x1, x2, x3);
   } else load_key<ALGO>(d_odata, b, bx);
 
   for (int i = begin; i < end; i++) {
     tmp[threadIdx.x/32][threadIdx.x%32] = bx.x;
     int j = (tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1));
-    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*j);
+    uint4 t, tx; read_keys_direct<TEX_DIM>(t, tx, start+32*j);
     b ^= t; bx ^= tx;
     block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
@@ -577,7 +601,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uin
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH) + 4*(threadIdx.x%4);
+  int start = (scrypt_block*c_SCRATCH) + 8*(threadIdx.x%4);
   if (TEX_DIM == 0) start %= c_SCRATCH_WU_PER_WARP;
 
   int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -586,7 +610,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uin
 
   if (begin == 0) {
     int pos = c_N_1/LOOKUP_GAP, loop = 1 + (c_N_1-pos*LOOKUP_GAP);
-    read_keys_direct<ALGO, TEX_DIM>(b, bx, start+32*pos);
+    read_keys_direct<TEX_DIM>(b, bx, start+32*pos);
     while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   } else load_key<ALGO>(d_odata, b, bx);
 
@@ -594,7 +618,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uin
     tmp[threadIdx.x/32][threadIdx.x%32] = bx.x;
     int j = (tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1));
     int pos = j/LOOKUP_GAP, loop = j-pos*LOOKUP_GAP;
-    uint4 t, tx; read_keys_direct<ALGO, TEX_DIM>(t, tx, start+32*pos);
+    uint4 t, tx; read_keys_direct<TEX_DIM>(t, tx, start+32*pos);
     while(loop--) block_mixer<ALGO>(t, tx, x1, x2, x3);
     b ^= t; bx ^= tx;
     block_mixer<ALGO>(b, bx, x1, x2, x3);
@@ -664,7 +688,6 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     if (N != prev_N) {
         uint32_t h_N = N;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
-        prev_N = N;
         uint32_t h_N_1 = N-1;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH = SCRATCH;
@@ -673,6 +696,7 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH_WU_PER_WARP_1 = (SCRATCH * WU_PER_WARP) - 1;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        prev_N = N;
     }
 
     // First phase: Sequential writes to scratchpad.

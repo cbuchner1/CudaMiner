@@ -59,6 +59,10 @@ static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
     return left;
 }
 
+static __device__ uint4 __shfl(const uint4 bx, int target_thread) {
+    return make_uint4(__shfl((int)bx.x, target_thread), __shfl((int)bx.y, target_thread), __shfl((int)bx.z, target_thread), __shfl((int)bx.w, target_thread));
+}
+
 /* write_keys writes the 8 keys being processed by a warp to the global
  * scratchpad. To effectively use memory bandwidth, it performs the writes
  * (and reads, for read_keys) 128 bytes at a time per memory location
@@ -86,19 +90,24 @@ static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
 __device__ __forceinline__ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
-
-  *((uint4 *)(&scratch[start   ])) = b;
-  *((uint4 *)(&scratch[start+16])) = bx;
+  int target_thread = (threadIdx.x + 4)%32;
+  uint4 t=b, t2=__shfl(bx, target_thread);
+  int t2_start = __shfl((int)start, target_thread) + 4;
+  bool c = (threadIdx.x & 0x4);
+  *((uint4 *)(&scratch[c ? t2_start : start])) = (c ? t2 : t);
+  *((uint4 *)(&scratch[c ? start : t2_start])) = (c ? t : t2);
 }
 
 __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
-
-  b  = __ldg(((uint4 *)(&scratch[start   ])));
-  bx = __ldg(((uint4 *)(&scratch[start+16])));
+  int t2_start = __shfl((int)start, (threadIdx.x + 4)%32) + 4;
+  bool c = (threadIdx.x & 0x4);
+  b  = __ldg((uint4 *)(&scratch[c ? t2_start : start]));
+  bx = __ldg((uint4 *)(&scratch[c ? start : t2_start]));
+  uint4 tmp = b; b = (c ? bx : b); bx = (c ? tmp : bx);
+  bx = __shfl(bx, (threadIdx.x + 28)%32);
 }
-
 
 __device__  __forceinline__ void primary_order_shuffle(uint32_t b[4], uint32_t bx[4]) {
   /* Inner loop shuffle targets */
@@ -476,7 +485,7 @@ template <int ALGO> __global__ void titan_scrypt_core_kernelA(const uint32_t *d_
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = (scrypt_block*c_SCRATCH + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int i=begin;
 
@@ -502,7 +511,7 @@ template <int ALGO> __global__ void titan_scrypt_core_kernelA_LG(const uint32_t 
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = (scrypt_block*c_SCRATCH + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int i=begin;
 
@@ -536,7 +545,7 @@ template <int ALGO> __global__ void titan_scrypt_core_kernelB(uint32_t *d_odata,
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = ((scrypt_block*c_SCRATCH) + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = ((scrypt_block*c_SCRATCH) + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
@@ -562,7 +571,7 @@ template <int ALGO> __global__ void titan_scrypt_core_kernelB_LG(uint32_t *d_oda
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = ((scrypt_block*c_SCRATCH) + 4*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = ((scrypt_block*c_SCRATCH) + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
   int x2 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+2)&0x3);
@@ -608,7 +617,6 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     if (N != prev_N) {
         uint32_t h_N = N;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
-        prev_N = N;
         uint32_t h_N_1 = N-1;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH = SCRATCH;
@@ -617,6 +625,7 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH_WU_PER_WARP_1 = (SCRATCH * WU_PER_WARP) - 1;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        prev_N = N;
     }
 
     // First phase: Sequential writes to scratchpad.
