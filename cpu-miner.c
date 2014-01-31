@@ -145,6 +145,7 @@ static bool opt_background = false;
 static bool opt_quiet = false;
 static int opt_retries = -1;
 static int opt_fail_pause = 15; // CB
+static int opt_time_limit = 0; // CB
 int opt_timeout = 270;
 int opt_scantime = 5;
 static json_t *opt_config;
@@ -237,7 +238,8 @@ Options:\n\
                         which assigns one static CPU core to each GPU.\n\
   -L, --lookup-gap      Divides the per-hash memory requirement by this factor\n\
                         by storing only every N'th value in the scratchpad.\n\
-                        Default is 1.\n"
+                        Default is 1.\n\
+      --time-limit      maximum time to mine before exiting the program.\n"
 
 #ifdef HAVE_SYSLOG_H
 "\
@@ -299,6 +301,7 @@ static struct option const options[] = {
 	{ "single-memory", 1, NULL, 'm' },
 	{ "hash-parallel", 1, NULL, 'H' },
 	{ "lookup-gap", 1, NULL, 'L' },
+	{ "time-limit", 1, NULL, 1008 },
 	{ 0, 0, 0, 0 }
 };
 
@@ -808,12 +811,22 @@ static void *miner_thread(void *userdata)
 		pthread_mutex_unlock(&g_work_lock);
 		work_restart[thr_id].restart = 0;
 		
+		static bool firstwork = true;
+		static time_t firstwork_time;
+
 		/* adjust max_nonce to meet target scan time */
 		if (have_stratum)
 			max64 = LP_SCANTIME;
 		else
 			max64 = g_work_time + (have_longpoll ? LP_SCANTIME : opt_scantime)
 			      - time(NULL);
+		if (opt_time_limit && firstwork == false) // CB
+		{
+			int passed = (int)(time(NULL) - firstwork_time);
+			int remain = (int)(opt_time_limit - passed);
+			if (remain < 0) { abort_flag = true; workio_abort(); break; }
+			if (remain < max64) max64 = remain;
+		}
 		max64 *= (int64_t)thr_hashrates[thr_id];
 		if (max64 <= 0)
 			max64 = opt_algo == (ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE) ? 0xfffLL : 0x1fffffLL; // CB
@@ -847,7 +860,13 @@ static void *miner_thread(void *userdata)
 			goto out;
 		}
 
-                // CB
+		if (firstwork) // CB
+		{
+			time(&firstwork_time);
+			firstwork = false;
+		}
+		
+		// CB
 		/* record scanhash elapsed time */
 		timeval_subtract(&diff, &tv_end, &tv_start);
 		if (diff.tv_usec || diff.tv_sec) {
@@ -1377,6 +1396,9 @@ static void parse_arg (int key, char *arg)
 			}
 			while (tmp_n_threads < 8) device_lookup_gap[tmp_n_threads++] = last;
 		}
+		break;
+	case 1008:
+		opt_time_limit = atoi(arg);
 		break;
 	case 'V':
 		show_version_and_exit();
