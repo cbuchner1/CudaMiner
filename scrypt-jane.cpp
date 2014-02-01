@@ -388,9 +388,9 @@ unsigned char GetNfactor(unsigned int nTimestamp) {
 		} else if (!strcmp(jane_params, "CACH") || !strcasecmp(jane_params, "CacheCoin")) {
 			// CacheCoin:1388949883, minN: 4, maxN: 30
 			Ntimestamp = 1388949883; minN= 4; maxN= 30;
-		} else if (!strcmp(jane_params, "MRC") || !strcasecmp(jane_params, "MicroCoin")) {
-			// MicroCoin:1389028879, minN: 4, maxN: 30
-			Ntimestamp = 1389028879; minN= 4; maxN= 30;
+		} else if (!strcmp(jane_params, "UTC") || !strcasecmp(jane_params, "UltraCoin")) {
+			// MicroCoin:1388361600, minN: 4, maxN: 30
+			Ntimestamp = 1388361600; minN= 4; maxN= 30;
 		} else if (!strcmp(jane_params, "VEL") || !strcasecmp(jane_params, "VelocityCoin")) {
 			// VelocityCoin:1387769316, minN: 4, maxN: 30
 			Ntimestamp = 1387769316; minN= 4; maxN= 30;
