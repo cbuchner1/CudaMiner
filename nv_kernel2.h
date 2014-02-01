@@ -18,6 +18,7 @@ public:
     virtual int max_warps_per_block() { return 25; };
     virtual int get_texel_width() { return 4; };
     virtual bool no_textures() { return true; }
+    virtual bool support_lookup_gap() { return true; }
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeFourByte; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferL1; }
 };
