@@ -43,7 +43,9 @@ __constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
 
 // iteration count N
 __constant__ uint32_t c_N;
-__constant__ uint32_t c_N_1;
+__constant__ uint32_t c_N_1; // N - 1
+__constant__ uint32_t c_spacing; // (N+LOOKUP_GAP-1)/LOOKUP_GAP
+
 
 NV2Kernel::NV2Kernel() : KernelInterface()
 {
@@ -68,6 +70,8 @@ bool NV2Kernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_N_1 = N-1;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+        uint32_t h_spacing = (N+LOOKUP_GAP-1)/LOOKUP_GAP;
+        checkCudaErrors(cudaMemcpyToSymbolAsync(c_spacing, &h_spacing, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         prev_N = N;
     }
 
@@ -79,7 +83,7 @@ bool NV2Kernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr
 
     do 
     {
-        if (LOOKUP_GAP == 0)
+        if (LOOKUP_GAP == 1)
             switch(opt_algo) {
                 case ALGO_SCRYPT:      nv2_scrypt_core_kernelA<ALGO_SCRYPT>     <<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
                 case ALGO_SCRYPT_JANE: nv2_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N)); break;
@@ -107,7 +111,7 @@ bool NV2Kernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr
             usleep(sleeptime);
         }
 
-        if (LOOKUP_GAP == 0)
+        if (LOOKUP_GAP == 1)
             switch(opt_algo) {
                 case ALGO_SCRYPT:      nv2_scrypt_core_kernelB<ALGO_SCRYPT     ><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
                 case ALGO_SCRYPT_JANE: nv2_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
@@ -591,18 +595,18 @@ template <int ALGO> __global__ void nv2_scrypt_core_kernelA_LG(uint32_t *g_idata
 
     if(i == 0) {
         __transposed_read_BC((uint4*)g_idata, B, C, 1, 0);
-        __transposed_write_BC(B, C, (uint4*)V, (c_N_1+LOOKUP_GAP)/LOOKUP_GAP); 
+        __transposed_write_BC(B, C, (uint4*)V, c_spacing); 
         ++i;
     } else {
         int pos = (i-1)/LOOKUP_GAP, loop = (i-1)-pos*LOOKUP_GAP;
-        __transposed_read_BC((uint4*)(V + pos*32), B, C, (c_N_1+LOOKUP_GAP)/LOOKUP_GAP, 0);
+        __transposed_read_BC((uint4*)(V + pos*32), B, C, c_spacing, 0);
         while(loop--) { block_mixer<ALGO>(B, C); block_mixer<ALGO>(C, B); }
     }
 
     while(i < end) {
         block_mixer<ALGO>(B, C); block_mixer<ALGO>(C, B);
         if (i % LOOKUP_GAP == 0)
-          __transposed_write_BC(B, C, (uint4*)(V + (i/LOOKUP_GAP)*32), (c_N_1+LOOKUP_GAP)/LOOKUP_GAP); 
+          __transposed_write_BC(B, C, (uint4*)(V + (i/LOOKUP_GAP)*32), c_spacing); 
         ++i;
     }
 }
@@ -638,7 +642,7 @@ template <int ALGO> __global__ void nv2_scrypt_core_kernelB_LG(uint32_t *g_odata
 
     if(begin == 0) {
       int pos = c_N_1/LOOKUP_GAP, loop = 1 + (c_N_1-pos*LOOKUP_GAP);
-      __transposed_read_BC((uint4*)V, B, C, (c_N_1+LOOKUP_GAP)/LOOKUP_GAP, pos);
+      __transposed_read_BC((uint4*)V, B, C, c_spacing, pos);
       while(loop--) { block_mixer<ALGO>(B, C); block_mixer<ALGO>(C, B); }
     } else {
         __transposed_read_BC((uint4*)g_odata, B, C, 1, 0);
@@ -647,7 +651,7 @@ template <int ALGO> __global__ void nv2_scrypt_core_kernelB_LG(uint32_t *g_odata
     for (int i = begin; i < end; i++)  {
         int slot = C[0].x & c_N_1;
         int pos = slot/LOOKUP_GAP, loop = slot-pos*LOOKUP_GAP;
-        uint4 b[4], c[4]; __transposed_read_BC((uint4*)(V), b, c, (c_N_1+LOOKUP_GAP)/LOOKUP_GAP, pos);
+        uint4 b[4], c[4]; __transposed_read_BC((uint4*)(V), b, c, c_spacing, pos);
         while(loop--) { block_mixer<ALGO>(b, c); block_mixer<ALGO>(c, b); }
 #pragma unroll 4
         for(int n = 0; n < 4; n++) { B[n] ^= b[n]; C[n] ^= c[n]; }
