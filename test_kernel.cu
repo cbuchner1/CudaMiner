@@ -29,6 +29,13 @@
 #define TEXWIDTH 32768
 #define THREADS_PER_WU 4  // four threads per hash
 
+typedef enum
+{
+    ANDERSEN,
+    SIMPLE
+} MemoryAccess;
+
+
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
 
@@ -89,49 +96,64 @@ static __host__ __device__ uint4& operator+=(uint4& left, const uint4& right)
  * the relative start location, as an attempt to reduce some recomputation.
  */
 
-__device__ __forceinline__ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
+template <MemoryAccess SCHEME> __device__ __forceinline__ void write_keys_direct(const uint4 &b, const uint4 &bx, uint32_t start) {
 
   uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
-  uint4 t=b, t2;
-  extern __shared__ unsigned char shared[];
-  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
-  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
-  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 4)%32];
-  *s = bx.x; t2.x = *st;
-  *s = bx.y; t2.y = *st;
-  *s = bx.z; t2.z = *st;
-  *s = bx.w; t2.w = *st;
-  *s = start; int t2_start = *st + 4;
-  bool c = (threadIdx.x & 0x4);
-  *((uint4 *)(&scratch[c ? t2_start : start])) = (c ? t2 : t);
-  *((uint4 *)(&scratch[c ? start : t2_start])) = (c ? t : t2);
+  if (SCHEME == ANDERSEN) {
+    uint4 t=b, t2;
+    extern __shared__ unsigned char shared[];
+    uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+    uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
+    uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 4)%32];
+    *s = bx.x; t2.x = *st;
+    *s = bx.y; t2.y = *st;
+    *s = bx.z; t2.z = *st;
+    *s = bx.w; t2.w = *st;
+    *s = start; int t2_start = *st + 4;
+    bool c = (threadIdx.x & 0x4);
+    *((uint4 *)(&scratch[c ? t2_start : start])) = (c ? t2 : t);
+    *((uint4 *)(&scratch[c ? start : t2_start])) = (c ? t : t2);
+  } else {
+    *((uint4 *)(&scratch[start   ])) = b;
+    *((uint4 *)(&scratch[start+16])) = bx;
+  }
 }
 
-template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
+template <MemoryAccess SCHEME, int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &b, uint4 &bx, uint32_t start) {
 
-  uint32_t *scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
-  extern __shared__ unsigned char shared[];
-  uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
-  uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
-  *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
-  if (TEX_DIM > 0) { start /= 4; t2_start /= 4; }
-  bool c = (threadIdx.x & 0x4);
-  if (TEX_DIM == 0) {
-      b  = *((uint4 *)(&scratch[c ? t2_start : start]));
-      bx = *((uint4 *)(&scratch[c ? start : t2_start]));
-  } else if (TEX_DIM == 1) {
-      b  = tex1Dfetch(texRef1D_4_V, c ? t2_start : start);
-      bx = tex1Dfetch(texRef1D_4_V, c ? start : t2_start);
-  } else if (TEX_DIM == 2) {
-      b  = tex2D(texRef2D_4_V, 0.5f + ((c ? t2_start : start)%TEXWIDTH), 0.5f + ((c ? t2_start : start)/TEXWIDTH));
-      bx = tex2D(texRef2D_4_V, 0.5f + ((c ? start : t2_start)%TEXWIDTH), 0.5f + ((c ? start : t2_start)/TEXWIDTH));
+  uint32_t *scratch;
+  if (TEX_DIM == 0) scratch = c_V[(blockIdx.x*blockDim.x + threadIdx.x)/32];
+  if (SCHEME == ANDERSEN) {
+    extern __shared__ unsigned char shared[];
+    uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
+    uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
+    *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
+    if (TEX_DIM > 0) { start /= 4; t2_start /= 4; }
+    bool c = (threadIdx.x & 0x4);
+    if (TEX_DIM == 0) {
+        b  = *((uint4 *)(&scratch[c ? t2_start : start]));
+        bx = *((uint4 *)(&scratch[c ? start : t2_start]));
+    } else if (TEX_DIM == 1) {
+        b  = tex1Dfetch(texRef1D_4_V, c ? t2_start : start);
+        bx = tex1Dfetch(texRef1D_4_V, c ? start : t2_start);
+    } else if (TEX_DIM == 2) {
+        b  = tex2D(texRef2D_4_V, 0.5f + ((c ? t2_start : start)%TEXWIDTH), 0.5f + ((c ? t2_start : start)/TEXWIDTH));
+        bx = tex2D(texRef2D_4_V, 0.5f + ((c ? start : t2_start)%TEXWIDTH), 0.5f + ((c ? start : t2_start)/TEXWIDTH));
+    }
+    uint4 temp = b; b = (c ? bx : b); bx = (c ? temp : bx);
+    uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 28)%32];
+    *s = bx.x; bx.x = *st;
+    *s = bx.y; bx.y = *st;
+    *s = bx.z; bx.z = *st;
+    *s = bx.w; bx.w = *st;
+  } else {
+         if (TEX_DIM == 0) b = *((uint4 *)(&scratch[start]));
+    else if (TEX_DIM == 1) b = tex1Dfetch(texRef1D_4_V, start/4);
+    else if (TEX_DIM == 2) b = tex2D(texRef2D_4_V, 0.5f + ((start/4)%TEXWIDTH), 0.5f + ((start/4)/TEXWIDTH));
+         if (TEX_DIM == 0) bx = *((uint4 *)(&scratch[start+16]));
+    else if (TEX_DIM == 1) bx = tex1Dfetch(texRef1D_4_V, (start+16)/4);
+    else if (TEX_DIM == 2) bx = tex2D(texRef2D_4_V, 0.5f + (((start+16)/4)%TEXWIDTH), 0.5f + (((start+16)/4)/TEXWIDTH));
   }
-  uint4 temp = b; b = (c ? bx : b); bx = (c ? temp : bx);
-  uint32_t *st = &tmp[threadIdx.x/32][(threadIdx.x + 28)%32];
-  *s = bx.x; bx.x = *st;
-  *s = bx.y; bx.y = *st;
-  *s = bx.z; bx.z = *st;
-  *s = bx.w; bx.w = *st;
 }
 
 
@@ -497,7 +519,7 @@ template <int ALGO> __device__  __forceinline__ void block_mixer(uint4 &b, uint4
  * and similarly for kx.
  */
 
-template <int ALGO> __global__ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
+template <int ALGO, MemoryAccess SCHEME> __global__ void test_scrypt_core_kernelA(const uint32_t *d_idata, int begin, int end) {
 
   uint4 b, bx;
 
@@ -506,24 +528,24 @@ template <int ALGO> __global__ void test_scrypt_core_kernelA(const uint32_t *d_i
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = (scrypt_block*c_SCRATCH + (SCHEME==ANDERSEN?8:4)*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int i=begin;
 
   if (i == 0) {
     load_key<ALGO>(d_idata, b, bx);
-    write_keys_direct(b, bx, start);
+    write_keys_direct<SCHEME>(b, bx, start);
     ++i;
-  } else read_keys_direct<0>(b, bx, start+32*(i-1));
+  } else read_keys_direct<SCHEME,0>(b, bx, start+32*(i-1));
   
   while (i < end) {
     block_mixer<ALGO>(b, bx, x1, x2, x3);
-    write_keys_direct(b, bx, start+32*i);
+    write_keys_direct<SCHEME>(b, bx, start+32*i);
     ++i;
   }
 }
 
-template <int ALGO> __global__ void test_scrypt_core_kernelA_LG(const uint32_t *d_idata, int begin, int end, unsigned int LOOKUP_GAP) {
+template <int ALGO, MemoryAccess SCHEME> __global__ void test_scrypt_core_kernelA_LG(const uint32_t *d_idata, int begin, int end, unsigned int LOOKUP_GAP) {
 
   uint4 b, bx;
 
@@ -532,24 +554,24 @@ template <int ALGO> __global__ void test_scrypt_core_kernelA_LG(const uint32_t *
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH + 8*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
+  int start = (scrypt_block*c_SCRATCH + (SCHEME==ANDERSEN?8:4)*(threadIdx.x%4)) % c_SCRATCH_WU_PER_WARP;
 
   int i=begin;
 
   if (i == 0) {
     load_key<ALGO>(d_idata, b, bx);
-    write_keys_direct(b, bx, start);
+    write_keys_direct<SCHEME>(b, bx, start);
     ++i;
   } else {
     int pos = (i-1)/LOOKUP_GAP, loop = (i-1)-pos*LOOKUP_GAP;
-    read_keys_direct<0>(b, bx, start+32*pos);
+    read_keys_direct<SCHEME,0>(b, bx, start+32*pos);
     while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
   
   while (i < end) {
     block_mixer<ALGO>(b, bx, x1, x2, x3);
     if (i % LOOKUP_GAP == 0)
-      write_keys_direct(b, bx, start+32*(i/LOOKUP_GAP));
+      write_keys_direct<SCHEME>(b, bx, start+32*(i/LOOKUP_GAP));
     ++i;
   }
 }
@@ -561,7 +583,7 @@ template <int ALGO> __global__ void test_scrypt_core_kernelA_LG(const uint32_t *
  * the scratch buffer in pseudorandom order, mixing the key as it goes.
  */
 
-template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
+template <int ALGO, MemoryAccess SCHEME, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32_t *d_odata, int begin, int end) {
 
   extern __shared__ unsigned char shared[];
   uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
@@ -569,7 +591,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH) + 8*(threadIdx.x%4);
+  int start = (scrypt_block*c_SCRATCH) + (SCHEME==ANDERSEN?8:4)*(threadIdx.x%4);
   if (TEX_DIM == 0) start %= c_SCRATCH_WU_PER_WARP;
 
   int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -577,14 +599,14 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32
   int x3 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+3)&0x3);
 
   if (begin == 0) {
-    read_keys_direct<TEX_DIM>(b, bx, start+32*c_N_1);
+    read_keys_direct<SCHEME,TEX_DIM>(b, bx, start+32*c_N_1);
     block_mixer<ALGO>(b, bx, x1, x2, x3);
   } else load_key<ALGO>(d_odata, b, bx);
 
   for (int i = begin; i < end; i++) {
     tmp[threadIdx.x/32][threadIdx.x%32] = bx.x;
     int j = (tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1));
-    uint4 t, tx; read_keys_direct<TEX_DIM>(t, tx, start+32*j);
+    uint4 t, tx; read_keys_direct<SCHEME,TEX_DIM>(t, tx, start+32*j);
     b ^= t; bx ^= tx;
     block_mixer<ALGO>(b, bx, x1, x2, x3);
   }
@@ -592,7 +614,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB(uint32
   store_key<ALGO>(d_odata, b, bx);
 }
 
-template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uint32_t *d_odata, int begin, int end, unsigned int LOOKUP_GAP) {
+template <int ALGO, MemoryAccess SCHEME, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uint32_t *d_odata, int begin, int end, unsigned int LOOKUP_GAP) {
 
   extern __shared__ unsigned char shared[];
   uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
@@ -600,7 +622,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uin
   uint4 b, bx;
 
   int scrypt_block = (blockIdx.x*blockDim.x + threadIdx.x)/THREADS_PER_WU;
-  int start = (scrypt_block*c_SCRATCH) + 8*(threadIdx.x%4);
+  int start = (scrypt_block*c_SCRATCH) + (SCHEME==ANDERSEN?8:4)*(threadIdx.x%4);
   if (TEX_DIM == 0) start %= c_SCRATCH_WU_PER_WARP;
 
   int x1 = (threadIdx.x & 0x1c) + (((threadIdx.x & 0x03)+1)&0x3);
@@ -609,7 +631,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uin
 
   if (begin == 0) {
     int pos = c_N_1/LOOKUP_GAP, loop = 1 + (c_N_1-pos*LOOKUP_GAP);
-    read_keys_direct<TEX_DIM>(b, bx, start+32*pos);
+    read_keys_direct<SCHEME,TEX_DIM>(b, bx, start+32*pos);
     while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   } else load_key<ALGO>(d_odata, b, bx);
 
@@ -617,7 +639,7 @@ template <int ALGO, int TEX_DIM> __global__ void test_scrypt_core_kernelB_LG(uin
     tmp[threadIdx.x/32][threadIdx.x%32] = bx.x;
     int j = (tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] & (c_N_1));
     int pos = j/LOOKUP_GAP, loop = j-pos*LOOKUP_GAP;
-    uint4 t, tx; read_keys_direct<TEX_DIM>(t, tx, start+32*pos);
+    uint4 t, tx; read_keys_direct<SCHEME,TEX_DIM>(t, tx, start+32*pos);
     while(loop--) block_mixer<ALGO>(t, tx, x1, x2, x3);
     b ^= t; bx ^= tx;
     block_mixer<ALGO>(b, bx, x1, x2, x3);
@@ -715,11 +737,11 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
     do 
     {
         if (LOOKUP_GAP == 1) switch(opt_algo) {
-            case ALGO_SCRYPT:      test_scrypt_core_kernelA<ALGO_SCRYPT     ><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
-            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT:      test_scrypt_core_kernelA<ALGO_SCRYPT     , ANDERSEN><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
+            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA<ALGO_SCRYPT_JANE, SIMPLE  ><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N)); break;
         } else switch(opt_algo) {
-            case ALGO_SCRYPT:      test_scrypt_core_kernelA_LG<ALGO_SCRYPT     ><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+            case ALGO_SCRYPT:      test_scrypt_core_kernelA_LG<ALGO_SCRYPT     , ANDERSEN><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+            case ALGO_SCRYPT_JANE: test_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE, SIMPLE  ><<< grid, threads, shared, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
         } 
 
         // Optional sleep in between kernels
@@ -744,24 +766,24 @@ bool TestKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int th
 
         if (LOOKUP_GAP == 1) {
             if (texture_cache == 0) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     , ANDERSEN, 0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE, SIMPLE,   0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
             else if (texture_cache == 1) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     , ANDERSEN, 1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE, SIMPLE,   1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
             else if (texture_cache == 2) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     ,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB<ALGO_SCRYPT     , ANDERSEN, 2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB<ALGO_SCRYPT_JANE, SIMPLE,   2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N)); break; }
         } else {
             if (texture_cache == 0) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     , ANDERSEN, 0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE, SIMPLE,   0><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
             else if (texture_cache == 1) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     , ANDERSEN, 1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE, SIMPLE,   1><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
             else if (texture_cache == 2) switch(opt_algo) {
-                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     ,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
-                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
+                    case ALGO_SCRYPT:      test_scrypt_core_kernelB_LG<ALGO_SCRYPT     , ANDERSEN, 2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: test_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE, SIMPLE,   2><<< grid, threads, shared, stream >>>(d_odata, pos, min(pos+batch, N), LOOKUP_GAP); break; }
         }
 
         pos += batch;
