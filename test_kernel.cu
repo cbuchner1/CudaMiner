@@ -113,7 +113,6 @@ template <int TEX_DIM> __device__  __forceinline__ void read_keys_direct(uint4 &
   extern __shared__ unsigned char shared[];
   uint32_t (*tmp)[32+1] = (uint32_t (*)[32+1])(shared);
   uint32_t *s = &tmp[threadIdx.x/32][threadIdx.x%32];
-  *s = start; start = tmp[threadIdx.x/32][(threadIdx.x & 0x1c)] + 8*(threadIdx.x%4);
   *s = start; int t2_start = tmp[threadIdx.x/32][(threadIdx.x + 4)%32] + 4;
   if (TEX_DIM > 0) { start /= 4; t2_start /= 4; }
   bool c = (threadIdx.x & 0x4);
