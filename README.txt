@@ -350,6 +350,8 @@ Further Optimization:
   the thread state in the entire thread block)
 - allow for more optimized Keccak or SHA2 implementations for
   specific hardware (like Compute 3.5 using the funnel shifter)
+- make a direct port of the nv_kernel.cu to Fermi, using warp
+  shuffle emulation with shared memory.
 
 
 >>> AUTHORS <<<

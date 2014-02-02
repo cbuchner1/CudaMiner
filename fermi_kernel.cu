@@ -9,6 +9,8 @@
 //
 // NOTE: compile this .cu module for compute_20,sm_20 with --maxrregcount=63
 //
+// TODO: batch-size support for this kernel
+//
 
 #ifdef WIN32
 #include <windows.h>
@@ -36,7 +38,6 @@
 #include "fermi_kernel.h"
 
 #define THREADS_PER_WU 1  // single thread per hash 
-#define LOOKUP_GAP 1      // no support for LOOKUP_GAP
 
 #define TEXWIDTH 32768
 
@@ -44,6 +45,9 @@
 template <int ALGO> __global__ void fermi_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N);
 template <int ALGO> __global__ void fermi_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N);
 template <int ALGO, int TEX_DIM> __global__ void fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N);
+template <int ALGO> __global__ void fermi_scrypt_core_kernelA_LG(uint32_t *g_idata, unsigned int N, unsigned int LOOKUP_GAP);
+template <int ALGO> __global__ void fermi_scrypt_core_kernelB_LG(uint32_t *g_odata, unsigned int N, unsigned int LOOKUP_GAP);
+template <int ALGO, int TEX_DIM> __global__ void fermi_scrypt_core_kernelB_LG_tex(uint32_t *g_odata, unsigned int N, unsigned int LOOKUP_GAP);
 
 // scratchbuf constants (pointers to scratch buffer for each warp, i.e. 32 hashes)
 __constant__ uint32_t* c_V[TOTAL_WARP_LIMIT];
@@ -99,7 +103,7 @@ void FermiKernel::set_scratchbuf_constants(int MAXWARPS, uint32_t** h_V)
     checkCudaErrors(cudaMemcpyToSymbol(c_V, h_V, MAXWARPS*sizeof(uint32_t*), 0, cudaMemcpyHostToDevice));
 }
 
-bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, unsigned int LUGA, bool interactive, bool benchmark, int texture_cache)
+bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_id, cudaStream_t stream, uint32_t* d_idata, uint32_t* d_odata, unsigned int N, unsigned int LOOKUP_GAP, bool interactive, bool benchmark, int texture_cache)
 {
     bool success = true;
 
@@ -119,11 +123,16 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
 
     // First phase: Sequential writes to scratchpad.
 
-    switch(opt_algo)
-    {
-      case ALGO_SCRYPT:      fermi_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_idata, N); break;
-      case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, N); break;
-    }
+    if (LOOKUP_GAP == 1)
+        switch(opt_algo) {
+          case ALGO_SCRYPT:      fermi_scrypt_core_kernelA<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_idata, N); break;
+          case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelA<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, N); break;
+        }
+    else
+        switch(opt_algo) {
+          case ALGO_SCRYPT:      fermi_scrypt_core_kernelA_LG<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_idata, N, LOOKUP_GAP); break;
+          case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, N, LOOKUP_GAP); break;
+        }
 
     // Optional sleep in between kernels
     if (!benchmark && interactive) {
@@ -133,27 +142,43 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
 
     // Second phase: Random read access from scratchpad.
 
-    if (texture_cache)
-    {
-        if (texture_cache == 1)
-            switch(opt_algo)
-            {
-                case ALGO_SCRYPT:      fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT,1><<< grid, threads, shared, stream >>>(d_odata, N); break;
-                case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, N); break;
+    if (LOOKUP_GAP == 1) {
+        if (texture_cache) {
+            if (texture_cache == 1)
+                switch(opt_algo) {
+                    case ALGO_SCRYPT:      fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT,1><<< grid, threads, shared, stream >>>(d_odata, N); break;
+                    case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, N); break;
+                }
+            else if (texture_cache == 2)
+                switch(opt_algo) {
+                    case ALGO_SCRYPT:      fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT,2><<< grid, threads, shared, stream >>>(d_odata, N); break;
+                    case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, N); break;
+                }
+            else success = false;
+        } else {
+            switch(opt_algo) {
+                case ALGO_SCRYPT:      fermi_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_odata, N); break;
+                case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_odata, N); break;
             }
-        else if (texture_cache == 2)
-            switch(opt_algo)
-            {
-                case ALGO_SCRYPT:      fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT,2><<< grid, threads, shared, stream >>>(d_odata, N); break;
-                case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB_tex<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, N); break;
+        }
+    } else {
+        if (texture_cache) {
+            if (texture_cache == 1)
+                switch(opt_algo) {
+                    case ALGO_SCRYPT:      fermi_scrypt_core_kernelB_LG_tex<ALGO_SCRYPT,1><<< grid, threads, shared, stream >>>(d_odata, N, LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB_LG_tex<ALGO_SCRYPT_JANE,1><<< grid, threads, shared, stream >>>(d_odata, N, LOOKUP_GAP); break;
+                }
+            else if (texture_cache == 2)
+                switch(opt_algo) {
+                    case ALGO_SCRYPT:      fermi_scrypt_core_kernelB_LG_tex<ALGO_SCRYPT,2><<< grid, threads, shared, stream >>>(d_odata, N, LOOKUP_GAP); break;
+                    case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB_LG_tex<ALGO_SCRYPT_JANE,2><<< grid, threads, shared, stream >>>(d_odata, N, LOOKUP_GAP); break;
+                }
+            else success = false;
+        } else {
+            switch(opt_algo) {
+                case ALGO_SCRYPT:      fermi_scrypt_core_kernelB_LG<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_odata, N, LOOKUP_GAP); break;
+                case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB_LG<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_odata, N, LOOKUP_GAP); break;
             }
-        else success = false;
-    }
-    else {
-        switch(opt_algo)
-        {
-            case ALGO_SCRYPT:      fermi_scrypt_core_kernelB<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_odata, N); break;
-            case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelB<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_odata, N); break;
         }
     }
 
@@ -459,6 +484,7 @@ fermi_scrypt_core_kernelA(uint32_t *g_idata, unsigned int N)
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
+    const unsigned int LOOKUP_GAP = 1;
 
     // variables supporting the large memory transaction magic
     unsigned int Y = warpThread/4;
@@ -517,6 +543,7 @@ fermi_scrypt_core_kernelB(uint32_t *g_odata, unsigned int N)
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
+    const unsigned int LOOKUP_GAP = 1;
 
     // variables supporting the large memory transaction magic
     unsigned int Y = warpThread/4;
@@ -595,6 +622,7 @@ fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
 
     int warpIdx        = threadIdx.x / warpSize;
     int warpThread     = threadIdx.x % warpSize;
+    const unsigned int LOOKUP_GAP = 1;
 
     // variables supporting the large memory transaction magic
     unsigned int Y = warpThread/4;
@@ -651,6 +679,264 @@ fermi_scrypt_core_kernelB_tex(uint32_t *g_odata, unsigned int N)
                         tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
 #pragma unroll 4
         for (int idx=0; idx < 4; idx++) C[idx] ^= *((uint4*)&XX[4*idx]);
+
+        switch(ALGO) {
+          case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+          case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
+    }
+
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) *((uint4*)&XX[4*idx]) = B[idx];
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)(&g_odata[32*(wu+Y)+Z])) = *((ulonglong2*)XB[wu]);
+
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) *((uint4*)&XX[4*idx]) = C[idx];
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)(&g_odata[32*(wu+Y)+16+Z])) = *((ulonglong2*)XB[wu]);
+}
+
+//
+// Lookup-Gap variations of the above functions
+//
+
+template <int ALGO> __global__ void
+fermi_scrypt_core_kernelA_LG(uint32_t *g_idata, unsigned int N, unsigned int LOOKUP_GAP)
+{
+    extern __shared__ unsigned char x[];
+    uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
+
+    int warpIdx        = threadIdx.x / warpSize;
+    int warpThread     = threadIdx.x % warpSize;
+
+    // variables supporting the large memory transaction magic
+    unsigned int Y = warpThread/4;
+    unsigned int Z = 4*(warpThread%4);
+
+    // add block specific offsets
+    int WARPS_PER_BLOCK = blockDim.x / 32;
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_idata += 32 * offset;
+    uint32_t * V = c_V[offset / WU_PER_WARP]  + SCRATCH*Y + Z;
+
+    // registers to store an entire work unit
+    uint4 B[4], C[4];
+
+    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx][Y][Z];
+    uint32_t *XX = X[warpIdx][warpThread];
+
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)(&V[SCRATCH*wu])) = *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&g_idata[32*(wu+Y)+Z]));
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) B[idx] = *((uint4*)&XX[4*idx]);
+
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)(&V[SCRATCH*wu+16])) = *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&g_idata[32*(wu+Y)+16+Z]));
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
+
+    for (int i = 1; i < N; i++) {
+
+        switch(ALGO) {
+          case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+          case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
+
+        if (i % LOOKUP_GAP == 0) {
+#pragma unroll 4
+            for (int idx=0; idx < 4; idx++) *((uint4*)&XX[4*idx]) = B[idx];
+#pragma unroll 4
+            for (int wu=0; wu < 32; wu+=8)
+                *((ulonglong2*)(&V[SCRATCH*wu + (i/LOOKUP_GAP)*32])) = *((ulonglong2*)XB[wu]);
+
+#pragma unroll 4
+            for (int idx=0; idx < 4; idx++) *((uint4*)&XX[4*idx]) = C[idx];
+#pragma unroll 4
+            for (int wu=0; wu < 32; wu+=8)
+                *((ulonglong2*)(&V[SCRATCH*wu + (i/LOOKUP_GAP)*32 + 16])) = *((ulonglong2*)XB[wu]);
+        }
+    }
+}
+
+template <int ALGO> __global__ void
+fermi_scrypt_core_kernelB_LG(uint32_t *g_odata, unsigned int N, unsigned int LOOKUP_GAP)
+{
+    extern __shared__ unsigned char x[];
+    uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
+
+    int warpIdx        = threadIdx.x / warpSize;
+    int warpThread     = threadIdx.x % warpSize;
+
+    // variables supporting the large memory transaction magic
+    unsigned int Y = warpThread/4;
+    unsigned int Z = 4*(warpThread%4);
+
+    // add block specific offsets
+    int WARPS_PER_BLOCK = blockDim.x / 32;
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_odata += 32 * offset;
+    uint32_t * V = c_V[offset / WU_PER_WARP] + SCRATCH*Y + Z;
+
+    // registers to store an entire work unit
+    uint4 B[4], C[4];
+
+    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx][Y][Z];
+    uint32_t *XX = X[warpIdx][warpThread];
+
+    uint32_t pos = (N-1)/LOOKUP_GAP; uint32_t loop = 1 + (N-1)-pos*LOOKUP_GAP;
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&V[SCRATCH*wu + pos*32]));
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) B[idx] = *((uint4*)&XX[4*idx]);
+
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&V[SCRATCH*wu + pos*32 + 16]));
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
+
+    while (loop--)
+        switch(ALGO) {
+            case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+            case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
+
+    for (int i = 0; i < N; i++) {
+
+        uint32_t j = C[0].x & (N-1);
+        uint32_t pos = j / LOOKUP_GAP; uint32_t loop = j - pos*LOOKUP_GAP;
+        XX[16] = 32 * pos;
+
+        uint4 b[4], c[4];
+#pragma unroll 4
+        for (int wu=0; wu < 32; wu+=8)
+            *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z]]));
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) b[idx] = *((uint4*)&XX[4*idx]);
+
+#pragma unroll 4
+        for (int wu=0; wu < 32; wu+=8)
+            *((ulonglong2*)XB[wu]) = *((ulonglong2*)(&V[SCRATCH*wu + XB[wu][16-Z] + 16]));
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) c[idx] = *((uint4*)&XX[4*idx]);
+
+        while (loop--)
+            switch(ALGO) {
+              case ALGO_SCRYPT:      xor_salsa8(b, c); xor_salsa8(c, b); break;
+              case ALGO_SCRYPT_JANE: xor_chacha8(b, c); xor_chacha8(c, b); break;
+            }
+
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) B[idx] ^= b[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) C[idx] ^= c[idx];
+
+        switch(ALGO) {
+          case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+          case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
+    }
+
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) *((uint4*)&XX[4*idx]) = B[idx];
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)(&g_odata[32*(wu+Y)+Z])) = *((ulonglong2*)XB[wu]);
+
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) *((uint4*)&XX[4*idx]) = C[idx];
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8)
+        *((ulonglong2*)(&g_odata[32*(wu+Y)+16+Z])) = *((ulonglong2*)XB[wu]);
+
+}
+
+template <int ALGO, int TEX_DIM> __global__ void
+fermi_scrypt_core_kernelB_LG_tex(uint32_t *g_odata, unsigned int N, unsigned int LOOKUP_GAP)
+{
+    extern __shared__ unsigned char x[];
+    uint32_t ((*X)[WU_PER_WARP][16+4]) = (uint32_t (*)[WU_PER_WARP][16+4]) x;
+
+    int warpIdx        = threadIdx.x / warpSize;
+    int warpThread     = threadIdx.x % warpSize;
+
+    // variables supporting the large memory transaction magic
+    unsigned int Y = warpThread/4;
+    unsigned int Z = 4*(warpThread%4);
+
+    // add block specific offsets
+    int WARPS_PER_BLOCK = blockDim.x / 32;
+    int offset = blockIdx.x * WU_PER_BLOCK + warpIdx * WU_PER_WARP;
+    g_odata += 32 * offset;
+
+    // registers to store an entire work unit
+    uint4 B[4], C[4];
+
+    uint32_t ((*XB)[16+4]) = (uint32_t (*)[16+4])&X[warpIdx][Y][Z];
+    uint32_t *XX = X[warpIdx][warpThread];
+
+    uint32_t pos = (N-1)/LOOKUP_GAP; uint32_t loop = 1 + (N-1)-pos*LOOKUP_GAP;
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + pos*32 + Z)/4;
+        *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
+                    tex1Dfetch(texRef1D_4_V, loc) :
+                    tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) B[idx] = *((uint4*)&XX[4*idx]);
+
+#pragma unroll 4
+    for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + pos*32 + 16+Z)/4;
+        *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
+                    tex1Dfetch(texRef1D_4_V, loc) :
+                    tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
+#pragma unroll 4
+    for (int idx=0; idx < 4; idx++) C[idx] = *((uint4*)&XX[4*idx]);
+
+    while (loop--)
+        switch(ALGO) {
+            case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
+            case ALGO_SCRYPT_JANE: xor_chacha8(B, C); xor_chacha8(C, B); break;
+        }
+
+    for (int i = 0; i < N; i++) {
+
+        uint32_t j = C[0].x & (N-1);
+        uint32_t pos = j / LOOKUP_GAP; uint32_t loop = j - pos*LOOKUP_GAP;
+        XX[16] = 32 * pos;
+
+        uint4 b[4], c[4];
+#pragma unroll 4
+        for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + Z)/4;
+            *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
+                        tex1Dfetch(texRef1D_4_V, loc) :
+                        tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) b[idx] = *((uint4*)&XX[4*idx]);
+
+#pragma unroll 4
+        for (int wu=0; wu < 32; wu+=8) { unsigned int loc = (SCRATCH*(offset+wu+Y) + XB[wu][16-Z] + 16+Z)/4;
+            *((uint4*)XB[wu]) = ((TEX_DIM == 1) ?
+                        tex1Dfetch(texRef1D_4_V, loc) :
+                        tex2D(texRef2D_4_V, 0.5f + (loc%TEXWIDTH), 0.5f + (loc/TEXWIDTH))); }
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) c[idx] = *((uint4*)&XX[4*idx]);
+
+        while (loop--)
+            switch(ALGO) {
+              case ALGO_SCRYPT:      xor_salsa8(b, c); xor_salsa8(c, b); break;
+              case ALGO_SCRYPT_JANE: xor_chacha8(b, c); xor_chacha8(c, b); break;
+            }
+
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) B[idx] ^= b[idx];
+#pragma unroll 4
+        for (int idx=0; idx < 4; idx++) C[idx] ^= c[idx];
 
         switch(ALGO) {
           case ALGO_SCRYPT:      xor_salsa8(B, C); xor_salsa8(C, B); break;
