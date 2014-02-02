@@ -180,7 +180,7 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
             switch (kernelid)
             {
                 case 'T': case 'Z': *kernel = new NV2Kernel(); break;
-                case 't': *kernel = new TitanKernel(); break;
+                case 't':           *kernel = new TitanKernel(); break;
                 case 'K': case 'Y': *kernel = new NVKernel(); break;
                 case 'k':           *kernel = new KeplerKernel(); break;
                 case 'F': case 'L': *kernel = new FermiKernel(); break;

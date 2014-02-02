@@ -348,6 +348,8 @@ Further Optimization:
 - reduce the thread divergence in the lookup-gap feature by
   sorting threads by loop trip count (requires a swapping of
   the thread state in the entire thread block)
+- allow for more optimized Keccak or SHA2 implementations for
+  specific hardware (like Compute 3.5 using the funnel shifter)
 
 
 >>> AUTHORS <<<
