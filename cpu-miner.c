@@ -56,7 +56,7 @@ char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2014-01-20"
+#define PROGRAM_VERSION		"2014-02-02"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -192,10 +192,17 @@ struct option {
 static char const usage[] = "\
 Usage: " PROGRAM_NAME " [OPTIONS]\n\
 Options:\n\
-  -a, --algo=ALGO       specify the algorithm to use\n\
-                          scrypt       scrypt-salsa20/8(1024, 1, 1) (default)\n\
-                          scrypt-jane  scrypt-chacha20/8(N, 1, 1)\n\
-                          sha256d      SHA-256d\n\
+  -a, --algo=ALGO       specify the algorithm to use (default is scrypt)\n\
+                          scrypt       scrypt Salsa20/8(1024, 1, 1), PBKDF2(SHA2)\n\
+                          scrypt:N     scrypt Salsa20/8(N, 1, 1), PBKDF2(SHA2)\n\
+                          scrypt-jane  scrypt Chacha20/8(N, 1, 1), PBKDF2(Keccak)\n\
+                          scrypt-jane:Coin\n\
+                                       Coin must be one of the supported coins.\n\
+                          scrypt-jane:Nfactor\n\
+                                       scrypt-chacha20/8(2*2^Nfactor, 1, 1)\n\
+                          scrypt-jane:StartTime,Nfmin,Nfmax\n\
+                                       like above nFactor derived from Unix time.\n\
+                          sha256d      SHA-256d (don't use this! No GPU acceleration)\n\
   -o, --url=URL         URL of mining server (default: " DEF_RPC_URL ")\n\
   -O, --userpass=U:P    username:password pair for mining server\n\
   -u, --user=USERNAME   username for mining server\n\
@@ -208,7 +215,7 @@ Options:\n\
   -R, --retry-pause=N   time to pause between retries, in seconds (default: 30)\n\
   -T, --timeout=N       network timeout, in seconds (default: 270)\n\
   -s, --scantime=N      upper bound on time spent scanning current work when\n\
-                          long polling is unavailable, in seconds (default: 5)\n\
+                        long polling is unavailable, in seconds (default: 5)\n\
       --no-longpoll     disable X-Long-Polling support\n\
       --no-stratum      disable X-Stratum support\n\
   -q, --quiet           disable per-thread hashmeter output\n\
@@ -216,8 +223,9 @@ Options:\n\
   -P, --protocol-dump   verbose dump of protocol-level activities\n\
       --no-autotune     disable auto-tuning of kernel launch parameters\n\
   -d, --devices         takes a comma separated list of CUDA devices to use.\n\
-                        This implies the -t option with the threads set to the\n\
-                        number of devices.\n\
+                        Device IDs start counting from 0! Alternatively takes\n\
+                        string names of your cards like gtx780ti or gt640#2\n\
+                        (matching 2nd gt640 in the PC)\n\
   -l, --launch-config   gives the launch configuration for each kernel\n\
                         in a comma separated list, one per device.\n\
   -i, --interactive     comma separated list of flags (0/1) specifying\n\
@@ -232,14 +240,15 @@ Options:\n\
   -m, --single-memory   comma separated list of flags (0/1) specifying\n\
                         which of the CUDA devices shall allocate their\n\
                         scrypt scratchbuffers in a single memory block.\n\
-  -H, --hash-parallel   1 to enable parallel SHA256 hashing on the CPU. May\n\
-                        use more CPU overall, but distributes hashing load\n\
-                        neatly across all CPU cores. 0 is now the default\n\
-                        which assigns one static CPU core to each GPU.\n\
+  -H, --hash-parallel   determines how the PBKDF2 based SHA2 or Keccak\n\
+                        parts of scrypt and scrypt-jane are computed:\n\
+                        0 hashes this single threaded on the CPU.\n\
+                        1 to enable multithreaded hashing on the CPU.\n\
+                        2 offloads everything to the GPU (default)\n\
   -L, --lookup-gap      Divides the per-hash memory requirement by this factor\n\
                         by storing only every N'th value in the scratchpad.\n\
                         Default is 1.\n\
-      --time-limit      maximum time to mine before exiting the program.\n"
+      --time-limit      maximum time [s] to mine before exiting the program.\n"
 
 #ifdef HAVE_SYSLOG_H
 "\
@@ -1529,7 +1538,9 @@ int main(int argc, char *argv[])
 	printf("\t             This is version "PROGRAM_VERSION" (beta)\n");
 	printf("\tbased on pooler-cpuminer 2.3.2 (c) 2010 Jeff Garzik, 2012 pooler\n");
 	printf("\t    Cuda additions Copyright 2013,2014 Christian Buchner\n");
-	printf("\t   My donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm\n\n");
+	printf("\t  LTC donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm\n");
+	printf("\t  BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM\n");
+	printf("\t  YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4\n");
 
 	rpc_url = strdup(DEF_RPC_URL);
 	rpc_user = strdup("");
