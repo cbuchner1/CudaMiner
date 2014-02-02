@@ -15,7 +15,7 @@ public:
     virtual bool unbindtexture_1D();
     virtual bool unbindtexture_2D();
 
-    virtual char get_identifier() { return 'X'; };
+    virtual char get_identifier() { return 'f'; };
     virtual int get_major_version() { return 1; };
     virtual int get_minor_version() { return 0; };
 

@@ -110,16 +110,10 @@
     <ClInclude Include="salsa_kernel.h">
       <Filter>Header Files\CUDA</Filter>
     </ClInclude>
-    <ClInclude Include="spinlock_kernel.h">
-      <Filter>Header Files\CUDA</Filter>
-    </ClInclude>
     <ClInclude Include="titan_kernel.h">
       <Filter>Header Files\CUDA</Filter>
     </ClInclude>
     <ClInclude Include="fermi_kernel.h">
-      <Filter>Header Files\CUDA</Filter>
-    </ClInclude>
-    <ClInclude Include="legacy_kernel.h">
       <Filter>Header Files\CUDA</Filter>
     </ClInclude>
     <ClInclude Include="test_kernel.h">
@@ -184,16 +178,10 @@
     <CudaCompile Include="titan_kernel.cu">
       <Filter>Source Files\CUDA</Filter>
     </CudaCompile>
-    <CudaCompile Include="spinlock_kernel.cu">
-      <Filter>Source Files\CUDA</Filter>
-    </CudaCompile>
     <CudaCompile Include="salsa_kernel.cu">
       <Filter>Source Files\CUDA</Filter>
     </CudaCompile>
     <CudaCompile Include="fermi_kernel.cu">
-      <Filter>Source Files\CUDA</Filter>
-    </CudaCompile>
-    <CudaCompile Include="legacy_kernel.cu">
       <Filter>Source Files\CUDA</Filter>
     </CudaCompile>
     <CudaCompile Include="test_kernel.cu">

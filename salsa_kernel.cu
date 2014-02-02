@@ -23,9 +23,7 @@
 #include "salsa_kernel.h"
 
 #include "titan_kernel.h"
-#include "spinlock_kernel.h"
 #include "fermi_kernel.h"
-#include "legacy_kernel.h"
 #include "test_kernel.h"
 #include "nv_kernel.h"
 #include "nv_kernel2.h"
@@ -135,13 +133,40 @@ extern "C" int cuda_finddevice(char *name)
     return -1;
 }
 
+KernelInterface *Best_Kernel_Heuristics(cudaDeviceProp *props)
+{
+    KernelInterface *kernel = NULL;
+    if (opt_algo == -ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192))
+    {
+                if (props->major == 3 && props->minor == 5)
+            kernel = new TitanKernel();
+        else if (props->major == 3 && props->minor == 0)
+            kernel = new KeplerKernel();
+        else if (props->major == 2 || props->major == 1)
+            kernel = new FermiKernel();
+        return kernel;
+    }
+    else
+    {
+       if (props->major == 3 && props->minor == 5)
+            kernel = new NV2Kernel();
+        else if (props->major == 3 && props->minor == 0)
+            kernel = new NVKernel();
+        else if (props->major == 2 || props->major == 1)
+            kernel = new TestKernel();
+        return kernel;
+    }
+}
+
+
 bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NULL, cudaDeviceProp *props = NULL)
 {
     bool success = false;
     char kernelid = ' ';
     if (config != NULL)
     {
-        if (config[0] == 'T' || config[0] == 'S' || config[0] == 'K' || config[0] == 'F' || config[0] == 'L' ||
+        if (config[0] == 'T' || config[0] == 'K' || config[0] == 'F' || config[0] == 'L' ||
+            config[0] == 't' || config[0] == 'k' || config[0] == 'f' ||
             config[0] == 'X' || config[0] == 'Y' || config[0] == 'Z') {
             kernelid = config[0];
             config++;
@@ -156,22 +181,13 @@ bool validate_config(char *config, int &b, int &w, KernelInterface **kernel = NU
             switch (kernelid)
             {
                 case 'T': *kernel = new TitanKernel(); break;
-                case 'S': *kernel = new SpinlockKernel(); break;
+                case 't': case 'Z': *kernel = new NV2Kernel(); break;
                 case 'K': *kernel = new KeplerKernel(); break;
-                case 'F': *kernel = new FermiKernel(); break;
-                case 'L': *kernel = new LegacyKernel(); break;
-                case 'X': *kernel = new TestKernel(); break;
-                case 'Y': *kernel = new NVKernel(); break;
-                case 'Z': *kernel = new NV2Kernel(); break;
+                case 'k': case 'Y': *kernel = new NVKernel(); break;
+                case 'F': case 'L': *kernel = new FermiKernel(); break;
+                case 'f': case 'X': *kernel = new TestKernel(); break;
                 case ' ': // choose based on device architecture
-                     if (props->major == 3 && props->minor == 5)
-                    *kernel = new TitanKernel();
-                else if (props->major == 3 && props->minor == 0)
-                    *kernel = new KeplerKernel();
-                else if (props->major == 2)
-                    *kernel = new FermiKernel();
-                else if (props->major == 1)
-                    *kernel = new LegacyKernel();
+                    *kernel = Best_Kernel_Heuristics(props);
                 break;
             }
         }
@@ -370,26 +386,19 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     // figure out which kernel implementation to use
     if (!validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK, &kernel, &props)) {
-             if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'T') ||
-                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && (props.major == 3 && props.minor == 5)))
+             if (device_config[thr_id] != NULL && device_config[thr_id][0] == 'T')
             kernel = new TitanKernel();
-        else if  (device_config[thr_id] != NULL && device_config[thr_id][0] == 'S')
-            kernel = new SpinlockKernel();
-        else if  ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'K') ||
-                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && (props.major == 3 && props.minor == 0)))
-            kernel = new KeplerKernel();
-        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'F') ||
-                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && props.major == 2))
-            kernel = new FermiKernel();
-        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'L') ||
-                 ((device_config[thr_id] == NULL || !strcasecmp(device_config[thr_id], "auto")) && props.major == 1))
-            kernel = new LegacyKernel();
-        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'X'))
-            kernel = new TestKernel();
-        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'Y'))
-            kernel = new NVKernel();
-        else if ((device_config[thr_id] != NULL && device_config[thr_id][0] == 'Z'))
+        else if (device_config[thr_id] != NULL && ((device_config[thr_id][0] == 't') || device_config[thr_id][0] == 'Z'))
             kernel = new NV2Kernel();
+        else if (device_config[thr_id] != NULL && device_config[thr_id][0] == 'K')
+            kernel = new KeplerKernel();
+        else if (device_config[thr_id] != NULL && ((device_config[thr_id][0] == 'k') || device_config[thr_id][0] == 'Y'))
+            kernel = new NVKernel();
+        else if (device_config[thr_id] != NULL && device_config[thr_id][0] == 'F')
+            kernel = new FermiKernel();
+        else if (device_config[thr_id] != NULL && ((device_config[thr_id][0] == 'f') || device_config[thr_id][0] == 'X'))
+            kernel = new TestKernel();
+        if (kernel == NULL) kernel = Best_Kernel_Heuristics(&props);
     }
 
     if (kernel->get_major_version() > props.major || kernel->get_major_version() == props.major && kernel->get_minor_version() > props.minor)
