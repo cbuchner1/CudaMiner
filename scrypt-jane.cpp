@@ -449,12 +449,21 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 		scrypt_fatal_error("scrypt: N out of range");
 	}
 	
-	N = (1 << (Nfactor + 1));
-
 	if (Nfactor != s_Nfactor)
 	{
-		s_Nfactor = Nfactor;
 		applog(LOG_INFO, "Nfactor is %d (N=%d)!", Nfactor, N);
+
+		// all of this isn't very thread-safe...
+		N = (1 << (Nfactor + 1));
+
+		if (s_Nfactor != 0) {
+			// handle N-factor increase at runtime
+			// by adjusting the lookup_gap by factor 2
+			if (s_Nfactor == Nfactor-1)
+				for (int i=0; i < 8; ++i)
+					device_lookup_gap[i] *= 2;
+		}
+		s_Nfactor = Nfactor;
 	}
 
 	int throughput = cuda_throughput(thr_id);
