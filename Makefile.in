@@ -56,9 +56,9 @@ PROGRAMS = $(bin_PROGRAMS)
 am_cudaminer_OBJECTS = cudaminer-cpu-miner.$(OBJEXT) \
 	cudaminer-util.$(OBJEXT) cudaminer-sha2.$(OBJEXT) \
 	cudaminer-scrypt.$(OBJEXT) cudaminer-scrypt-jane.$(OBJEXT) \
-	salsa_kernel.$(OBJEXT) spinlock_kernel.$(OBJEXT) \
-	legacy_kernel.$(OBJEXT) fermi_kernel.$(OBJEXT) \
-	kepler_kernel.$(OBJEXT) test_kernel.$(OBJEXT) \
+	salsa_kernel.$(OBJEXT) sha256.$(OBJEXT) keccak.$(OBJEXT) \
+	fermi_kernel.$(OBJEXT) kepler_kernel.$(OBJEXT) \
+	test_kernel.$(OBJEXT) nv_kernel.$(OBJEXT) nv_kernel2.$(OBJEXT) \
 	titan_kernel.$(OBJEXT)
 cudaminer_OBJECTS = $(am_cudaminer_OBJECTS)
 cudaminer_DEPENDENCIES =
@@ -269,11 +269,13 @@ cudaminer_SOURCES = elist.h miner.h compat.h \
 			  scrypt.cpp \
 			  scrypt-jane.cpp scrypt-jane.h \
 			  salsa_kernel.cu salsa_kernel.h \
-			  spinlock_kernel.cu spinlock_kernel.h \
-			  legacy_kernel.cu legacy_kernel.h \
+			  sha256.cu sha256.h \
+			  keccak.cu keccak.h \
 			  fermi_kernel.cu fermi_kernel.h \
 			  kepler_kernel.cu kepler_kernel.h \
 			  test_kernel.cu test_kernel.h \
+			  nv_kernel.cu nv_kernel.h \
+			  nv_kernel2.cu nv_kernel2.h \
 			  titan_kernel.cu titan_kernel.h
 
 cudaminer_LDFLAGS = $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
@@ -943,11 +945,15 @@ uninstall-am: uninstall-binPROGRAMS
 .cu.o:
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
-spinlock_kernel.o: spinlock_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+sha256.o: sha256.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
 
+keccak.o: keccak.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 --ptxas-options=-v $(JANSSON_INCLUDES) -o $@ -c $<
+
+# NOTE: now compiling for compute 1.0 again, as it's using less power and runs way faster on Linux
 fermi_kernel.o: fermi_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_20 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=64 $(JANSSON_INCLUDES) -o $@ -c $<
 
 kepler_kernel.o: kepler_kernel.cu
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
@@ -955,8 +961,15 @@ kepler_kernel.o: kepler_kernel.cu
 titan_kernel.o: titan_kernel.cu
 	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_35 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
 
+# NOTE: now compiling for compute 1.0 again, as it's using less power and runs way faster on Linux
 test_kernel.o: test_kernel.cu
-	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_20 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=compute_10 --maxrregcount=32 $(JANSSON_INCLUDES) -o $@ -c $<
+
+nv_kernel.o: nv_kernel.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_30 --maxrregcount=63 $(JANSSON_INCLUDES) -o $@ -c $<
+
+nv_kernel2.o: nv_kernel2.cu
+	$(NVCC) @CFLAGS@ -Xptxas "-abi=no -v" -arch=sm_35 --maxrregcount=80 $(JANSSON_INCLUDES) -o $@ -c $<
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.
