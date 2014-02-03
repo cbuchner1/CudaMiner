@@ -138,19 +138,21 @@ KernelInterface *Best_Kernel_Heuristics(cudaDeviceProp *props)
     KernelInterface *kernel = NULL;
     if (opt_algo == ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192))
     {
+        // high register count kernels (scrypt, low N-factor scrypt-jane)
         if (props->major == 3 && props->minor == 5)
-            kernel = new TitanKernel();
+            kernel = new NV2Kernel();
         else if (props->major == 3 && props->minor == 0)
-            kernel = new KeplerKernel();
+            kernel = new NVKernel();
         else if (props->major == 2 || props->major == 1)
             kernel = new FermiKernel();
     }
     else
     {
+       // low register count kernels (high N-factor scrypt-jane)
        if (props->major == 3 && props->minor == 5)
-            kernel = new NV2Kernel();
+            kernel = new TitanKernel();
         else if (props->major == 3 && props->minor == 0)
-            kernel = new NVKernel();
+            kernel = new KeplerKernel();
         else if (props->major == 2 || props->major == 1)
             kernel = new TestKernel();
     }
