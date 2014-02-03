@@ -136,7 +136,7 @@ extern "C" int cuda_finddevice(char *name)
 KernelInterface *Best_Kernel_Heuristics(cudaDeviceProp *props)
 {
     KernelInterface *kernel = NULL;
-    if (opt_algo == -ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192))
+    if (opt_algo == ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192))
     {
         if (props->major == 3 && props->minor == 5)
             kernel = new TitanKernel();
