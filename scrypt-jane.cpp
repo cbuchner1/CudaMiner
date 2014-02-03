@@ -451,10 +451,10 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 	
 	if (Nfactor != s_Nfactor)
 	{
-		applog(LOG_INFO, "Nfactor is %d (N=%d)!", Nfactor, N);
-
 		// all of this isn't very thread-safe...
 		N = (1 << (Nfactor + 1));
+
+		applog(LOG_INFO, "Nfactor is %d (N=%d)!", Nfactor, N);
 
 		if (s_Nfactor != 0) {
 			// handle N-factor increase at runtime
