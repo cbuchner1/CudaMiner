@@ -188,11 +188,7 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     return success;
 }
 
-// By using #if 1 here the scrypt hashing performance increases to the levels seen in the 2013-12-18 release,
-// i.e. it fixes the performance regression seen in the 2014-02-02 version. Thanks to Choseh for testing this
-// out for me. BUT HOW? The #if selectes between two different versions of the ChaCha round function used in
-// scrypt-jane only. How can this affect scrypt hashing?
-#if 1
+#if 0
 
 #define ROTL(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
 
