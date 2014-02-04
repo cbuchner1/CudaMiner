@@ -1,5 +1,5 @@
 
-CudaMiner release February 2nd 2014 - beta release
+CudaMiner release February 4th 2014 - beta release
 ---------------------------------------------------
 
 ***************************************************************
@@ -82,9 +82,6 @@ Additional cudaminer specific command line options are:
                  to operate on. Device IDs start counting from 0!
                  Alternatively give string names of your card like
                  gtx780ti or gt640#2 (matching 2nd gt640 in the PC).
-                 WARNING: Multi-GPU support may cause crashes with the
-                 latest nVidia drivers. Best to specify a single device
-                 per cudaminer instance.
 
 --launch-config  [-l] specify the kernel launch configuration per device.
                  This replaces autotune or heuristic selection. You can
@@ -285,13 +282,6 @@ from your old clunkers.
 Compute 1.0 through 1.3 devices seem to run faster on Windows XP or Linux
 because these OS'es use a more efficient driver model.
 
-Multi-GPU support seems broken with very recent driver versions. I have
-received reports that the driver shipping with the CUDA 5.5 toolkit still
-works fine hashing on multiple GPUs with a single cudaminer instance. If you
-have to stick to the latest nVidia drivers, it's advisable to run one
-cudaminer per GPU and to specify a different GPU with the -d option for
-each cudaminer instance.
-
 Some coins mine a bit faster with the 32 bit cudaminer versions, other mine
 faster with the 64 bit cudaminer version. If your computer runs a 64 bit OS,
 try running both versions and compare the mining speeds!
@@ -311,6 +301,12 @@ best to re-tune your kernel configuration after every N-factor change.
 
 
 >>> RELEASE HISTORY <<<
+
+  The February 4th release fixes a problem with very apparently incorrect
+  autotune measurements and it also repairs the multi-GPU support. So you
+  can again use a single cudaminer to drive all your GPUs. It wasn't the
+  driver's fault after all, I was sloppy about some initialization of
+  constant memory on the GPUs.
 
   The Febrary 2nd 2014 release supports scrypt-jane for the first time
   and includes faster scrypt kernels kindly submitted by nVidia.
