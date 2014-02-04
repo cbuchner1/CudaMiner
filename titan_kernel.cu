@@ -629,8 +629,8 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
     cudaGetLastError();
 
     // make some constants available to kernel, update only initially and when changing
-    static int prev_N = 0;
-    if (N != prev_N) {
+    static int prev_N[8] = {0,0,0,0,0,0,0,0};
+    if (N != prev_N[thr_id]) {
         uint32_t h_N = N;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_N_1 = N-1;
@@ -641,7 +641,7 @@ bool TitanKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH_WU_PER_WARP_1 = (SCRATCH * WU_PER_WARP) - 1;
         checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
-        prev_N = N;
+        prev_N[thr_id] = N;
     }
 
     // First phase: Sequential writes to scratchpad.

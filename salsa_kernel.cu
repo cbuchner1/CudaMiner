@@ -638,6 +638,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             } while ((tdelta=(1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec))) < 0.05);
                             if (cudaGetLastError() != cudaSuccess || !r) continue;
 
+                            tdelta /= repeat; // BUGFIX: this averaging over multiple measurements was missing
+
                             // for scrypt: in interactive mode only find launch configs where kernel launch times are short enough
                             // TODO: instead we could reduce the batchsize parameter to meet the launch time requirement.
                             if (opt_algo == ALGO_SCRYPT && device_interactive[thr_id] && GRID_BLOCKS > 2*props.multiProcessorCount && tdelta > 1.0/30)
