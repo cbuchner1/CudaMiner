@@ -54,17 +54,21 @@
 // define some error checking macros
 #undef checkCudaErrors
 
+#if WIN32
+#define DELIMITER '\\'
+#else
+#define DELIMITER '/'
+#endif
+#define __FILENAME__ ( strrchr(__FILE__, DELIMITER) != NULL ? strrchr(__FILE__, DELIMITER)+1 : __FILE__ )
+
 #define checkCudaErrors(x) \
 { \
     cudaGetLastError(); \
     x; \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) \
-    { \
-        applog(LOG_ERR, "GPU #%d: cudaError %d (%s) calling '%s' (%s line %d)\n", device_map[thr_id], err, cudaGetErrorString(err), #x, __FILE__, __LINE__); \
-    } \
+        applog(LOG_ERR, "GPU #%d: cudaError %d (%s) calling '%s' (%s line %d)\n", device_map[thr_id], err, cudaGetErrorString(err), #x, __FILENAME__, __LINE__); \
 }
-
 
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
