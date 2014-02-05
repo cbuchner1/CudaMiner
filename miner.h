@@ -154,6 +154,8 @@ extern int scanhash_scrypt(int thr_id, uint32_t *pdata, // CB
 	const uint32_t *ptarget, uint32_t max_nonce, struct timeval *tv_start, struct timeval *tv_end, unsigned long *hashes_done);
 extern int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,  // CB
 	const uint32_t *ptarget, uint32_t max_nonce, struct timeval *tv_start, struct timeval *tv_end, unsigned long *hashes_done);
+extern int scanhash_keccak(int thr_id, uint32_t *pdata,
+	const uint32_t *ptarget, uint32_t max_nonce, struct timeval *tv_start, struct timeval *tv_end, unsigned long *hashes_done);
 
 struct thr_info {
 	int		id;
@@ -171,6 +173,7 @@ enum sha256_algos {
 	ALGO_SCRYPT,		/* scrypt(1024,1,1) */
 	ALGO_SCRYPT_JANE,	/* CB: scrypt-jane(N,1,1) */
 	ALGO_SHA256D,		/* SHA-256d */
+	ALGO_KECCAK,		/* SHA-3 Keccak */
 };
 
 extern int num_processors; // CB

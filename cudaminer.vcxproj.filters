@@ -78,6 +78,12 @@
     <ClCompile Include="scrypt-jane.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="maxcoin.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="keccak.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="compat.h">
@@ -172,6 +178,12 @@
     </ClInclude>
     <ClInclude Include="keccak.h">
       <Filter>Header Files\CUDA</Filter>
+    </ClInclude>
+    <ClInclude Include="sph_keccak.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sph_types.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

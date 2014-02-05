@@ -130,6 +130,7 @@ static const char *algo_names[] = {
 	"scrypt",
 	"scrypt-jane",
 	"sha256d",
+	"keccak",
 };
 
 bool opt_debug = false;
@@ -203,6 +204,7 @@ Options:\n\
                           scrypt-jane:StartTime,Nfmin,Nfmax\n\
                                        like above nFactor derived from Unix time.\n\
                           sha256d      SHA-256d (don't use this! No GPU acceleration)\n\
+                          keccak       Keccak (SHA-3)\n\
   -o, --url=URL         URL of mining server (default: " DEF_RPC_URL ")\n\
   -O, --userpass=U:P    username:password pair for mining server\n\
   -u, --user=USERNAME   username for mining server\n\
@@ -861,6 +863,11 @@ static void *miner_thread(void *userdata)
 
 		case ALGO_SHA256D:
 			rc = scanhash_sha256d(thr_id, work.data, work.target, // CB
+			                      max_nonce, &tv_start, &tv_end, &hashes_done);
+			break;
+
+		case ALGO_KECCAK:
+			rc = scanhash_keccak(thr_id, work.data, work.target,
 			                      max_nonce, &tv_start, &tv_end, &hashes_done);
 			break;
 

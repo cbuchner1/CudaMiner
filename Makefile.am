@@ -19,6 +19,8 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  cpu-miner.c util.c \
 			  sha2.c \
 			  scrypt.cpp \
+			  maxcoin.cpp \
+			  keccak.cpp sph_keccak.h sph_types.h \
 			  scrypt-jane.cpp scrypt-jane.h \
 			  salsa_kernel.cu salsa_kernel.h \
 			  sha256.cu sha256.h \

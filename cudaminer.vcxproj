@@ -316,6 +316,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">/TP %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">/TP %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ClCompile Include="keccak.cpp" />
+    <ClCompile Include="maxcoin.cpp" />
     <ClCompile Include="scrypt-jane.cpp" />
     <ClCompile Include="scrypt.cpp" />
     <ClCompile Include="sha2.c">
@@ -361,6 +363,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="salsa_kernel.h" />
     <ClInclude Include="scrypt-jane.h" />
     <ClInclude Include="sha256.h" />
+    <ClInclude Include="sph_keccak.h" />
+    <ClInclude Include="sph_types.h" />
     <ClInclude Include="test_kernel.h" />
     <ClInclude Include="titan_kernel.h" />
   </ItemGroup>
