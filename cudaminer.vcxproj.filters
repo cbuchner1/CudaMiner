@@ -81,7 +81,7 @@
     <ClCompile Include="maxcoin.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="keccak.cpp">
+    <ClCompile Include="sha3.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -179,10 +179,7 @@
     <ClInclude Include="keccak.h">
       <Filter>Header Files\CUDA</Filter>
     </ClInclude>
-    <ClInclude Include="sph_keccak.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="sph_types.h">
+    <ClInclude Include="sha3.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
