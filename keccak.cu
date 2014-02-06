@@ -904,6 +904,9 @@ extern "C" uint32_t do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
 
+    // the -1 makes the CPU not sleep, and possibly enter a busy wait for the result
+    checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 0, thr_id));
+    
     // synchronous copy. This implies synchronization.
     checkCudaErrors(cudaMemcpy(&result, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
@@ -919,9 +922,6 @@ extern "C" uint32_t do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_
         fprintf(stderr, "$%016llx\n", nonce[0]);
     }
 #endif
-    
-    // the -1 makes the CPU not sleep, and possibly enter a busy wait for the result
-//    checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], -1, thr_id));
     
     return result;
 }
