@@ -131,10 +131,16 @@ AC_CONFIG_FILES([
 
 dnl find out what version we are running
 ARCH=`uname -m`
+OS=`uname`
 if [[ $ARCH == "x86_64" ]];
 then
   SUFFIX="64"
 else
+  SUFFIX=""
+fi
+
+if [[ $OS == "Darwin" ]];
+then
   SUFFIX=""
 fi
 
