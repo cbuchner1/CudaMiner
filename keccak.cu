@@ -522,7 +522,7 @@ __constant__ uint64_t ptarget64[4];
 
 __constant__ uint64_t KeccakF_RoundConstants[24];
 
-uint64_t host_KeccakF_RoundConstants[24] = 
+static uint64_t host_KeccakF_RoundConstants[24] = 
 {
     (uint64_t)0x0000000000000001ULL,
     (uint64_t)0x0000000000008082ULL,
@@ -810,9 +810,9 @@ __global__ void crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_good, 
     }
 }
 
-std::map<int, uint32_t *> context_good[2];
+static std::map<int, uint32_t *> context_good[2];
 
-extern "C" void prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
+extern "C" void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
 {
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
@@ -830,7 +830,7 @@ extern "C" void prepare_keccak256(int thr_id, const uint32_t host_pdata[20], con
     cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
 }
 
-extern "C" uint32_t do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+extern "C" uint32_t default_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
     uint32_t result = 0xffffffff;
   
@@ -853,24 +853,11 @@ extern "C" uint32_t do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
 
-    // the -1 makes the CPU not sleep, and possibly enter a busy wait for the result
+    // synchronize without hogging the CPU
     checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 0, thr_id));
     
     // synchronous copy. This implies synchronization.
     checkCudaErrors(cudaMemcpy(&result, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
-#if 0
-    if (result != 0xffffffff)
-    {
-        uint64_t nonce[4];
-        checkCudaErrors(cudaMemcpy(nonce, context_good[stream][thr_id], 8*sizeof(uint32_t), cudaMemcpyDeviceToHost));
-        fprintf(stderr, "result=$%08x\n", result);
-        fprintf(stderr, "$%016llx\n", nonce[3]);
-        fprintf(stderr, "$%016llx\n", nonce[2]);
-        fprintf(stderr, "$%016llx\n", nonce[1]);
-        fprintf(stderr, "$%016llx\n", nonce[0]);
-    }
-#endif
-    
     return result;
 }

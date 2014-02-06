@@ -38,7 +38,13 @@ extern void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream);
 extern void cuda_scrypt_sync(int thr_id, int stream);
 extern void cuda_scrypt_flush(int thr_id, int stream);
 
+extern void cuda_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]);
+extern uint32_t cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h);
+
 extern void computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V);
+
+extern void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]);
+extern uint32_t default_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h);
 
 #ifdef __NVCC__
 #include <cuda_runtime.h>
@@ -76,6 +82,13 @@ public:
     virtual bool support_lookup_gap() { return false; }
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeDefault; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferNone; }
+
+    virtual void prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]) {
+        default_prepare_keccak256(thr_id, host_pdata, ptarget);
+    }
+    virtual uint32_t do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h = false) {
+        return default_do_keccak256(thr_id, stream, hash, nonce, throughput, do_d2h);
+    }
 };
 
 // Define work unit size

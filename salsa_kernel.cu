@@ -957,6 +957,16 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
     context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, LOOKUP_GAP, device_interactive[thr_id], opt_benchmark, device_texturecache[thr_id]);
 }
 
+extern "C" void cuda_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8])
+{
+    context_kernel[thr_id]->prepare_keccak256(thr_id, host_pdata, ptarget);
+}
+
+extern "C" uint32_t cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+{
+    return context_kernel[thr_id]->do_keccak256(thr_id, stream, hash, nonce, throughput, do_d2h);
+}
+
 extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
 {
     unsigned int GRID_BLOCKS = context_blocks[thr_id];

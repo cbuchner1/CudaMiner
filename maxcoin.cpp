@@ -28,7 +28,7 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 	for (int kk=0; kk < 20; kk++)
 		be32enc(&endiandata[kk], ((uint32_t*)pdata)[kk]);
 
-	prepare_keccak256(thr_id, endiandata, ptarget);
+	cuda_prepare_keccak256(thr_id, endiandata, ptarget);
 
 	uint32_t *cuda_hash64 = (uint32_t *)cuda_hashbuffer(thr_id, 0);
 	memset(cuda_hash64, 0xff, throughput * 8 * sizeof(uint32_t));
@@ -36,7 +36,7 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 	do {
 		int nonce = n+1;
 
-		uint32_t result = do_keccak256(thr_id, 0, cuda_hash64, nonce, throughput, validate);
+		uint32_t result = cuda_do_keccak256(thr_id, 0, cuda_hash64, nonce, throughput, validate);
 		n += throughput;
 
 //		cuda_scrypt_sync(thr_id, 0);

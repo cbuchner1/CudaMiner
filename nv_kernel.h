@@ -25,6 +25,9 @@ public:
     virtual bool support_lookup_gap() { return true; }
     virtual cudaSharedMemConfig shared_mem_config() { return cudaSharedMemBankSizeFourByte; }
     virtual cudaFuncCache cache_config() { return cudaFuncCachePreferL1; }
+
+    virtual void prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]);
+    virtual uint32_t do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h = false);
 };
 
 #endif // #ifndef NV_KERNEL_H

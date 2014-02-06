@@ -727,3 +727,371 @@ template <int ALGO, int TEX_DIM> __global__ void nv_scrypt_core_kernelB_LG(uint3
 
     __transposed_write_BC(B, C, (uint4*)(g_odata), 1);
 }
+
+
+
+//
+// Maxcoin related Keccak implementation (Keccak256)
+//
+
+#include <stdint.h>
+#include <map>
+
+// from salsa_kernel.cu
+extern std::map<int, int> context_blocks;
+extern std::map<int, int> context_wpb;
+extern std::map<int, KernelInterface *> context_kernel;
+extern std::map<int, cudaStream_t> context_streams[2];
+extern std::map<int, uint32_t *> context_hash[2];
+
+__constant__ uint64_t ptarget64[4];
+
+#define ROL(a, offset) ((((uint64_t)a) << ((offset) % 64)) ^ (((uint64_t)a) >> (64-((offset) % 64))))
+#define ROL_mult8(a, offset) ROL(a, offset)
+
+__constant__ uint64_t KeccakF_RoundConstants[24];
+
+static uint64_t host_KeccakF_RoundConstants[24] = 
+{
+    (uint64_t)0x0000000000000001ULL,
+    (uint64_t)0x0000000000008082ULL,
+    (uint64_t)0x800000000000808aULL,
+    (uint64_t)0x8000000080008000ULL,
+    (uint64_t)0x000000000000808bULL,
+    (uint64_t)0x0000000080000001ULL,
+    (uint64_t)0x8000000080008081ULL,
+    (uint64_t)0x8000000000008009ULL,
+    (uint64_t)0x000000000000008aULL,
+    (uint64_t)0x0000000000000088ULL,
+    (uint64_t)0x0000000080008009ULL,
+    (uint64_t)0x000000008000000aULL,
+    (uint64_t)0x000000008000808bULL,
+    (uint64_t)0x800000000000008bULL,
+    (uint64_t)0x8000000000008089ULL,
+    (uint64_t)0x8000000000008003ULL,
+    (uint64_t)0x8000000000008002ULL,
+    (uint64_t)0x8000000000000080ULL,
+    (uint64_t)0x000000000000800aULL,
+    (uint64_t)0x800000008000000aULL,
+    (uint64_t)0x8000000080008081ULL,
+    (uint64_t)0x8000000000008080ULL,
+    (uint64_t)0x0000000080000001ULL,
+    (uint64_t)0x8000000080008008ULL
+};
+
+__constant__ uint64_t pdata64[10];
+
+static __device__ uint32_t cuda_swab32(uint32_t x)
+{
+    return (((x << 24) & 0xff000000u) | ((x << 8) & 0x00ff0000u)
+          | ((x >> 8) & 0x0000ff00u) | ((x >> 24) & 0x000000ffu));
+}
+
+__global__ void kepler_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_good, bool validate )
+{
+    uint64_t Aba, Abe, Abi, Abo, Abu;
+    uint64_t Aga, Age, Agi, Ago, Agu;
+    uint64_t Aka, Ake, Aki, Ako, Aku;
+    uint64_t Ama, Ame, Ami, Amo, Amu;
+    uint64_t Asa, Ase, Asi, Aso, Asu;
+    uint64_t BCa, BCe, BCi, BCo, BCu;
+    uint64_t Da, De, Di, Do, Du;
+    uint64_t Eba, Ebe, Ebi, Ebo, Ebu;
+    uint64_t Ega, Ege, Egi, Ego, Egu;
+    uint64_t Eka, Eke, Eki, Eko, Eku;
+    uint64_t Ema, Eme, Emi, Emo, Emu;
+    uint64_t Esa, Ese, Esi, Eso, Esu;
+
+    //copyFromState(A, state)
+    Aba = pdata64[0];
+    Abe = pdata64[1];
+    Abi = pdata64[2];
+    Abo = pdata64[3];
+    Abu = pdata64[4];
+    Aga = pdata64[5];
+    Age = pdata64[6];
+    Agi = pdata64[7];
+    Ago = pdata64[8];
+    Agu = (pdata64[9] & 0x00000000FFFFFFFFULL) | (((uint64_t)cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x))) << 32);
+    Aka = 0x0000000000000001ULL;
+    Ake = 0;
+    Aki = 0;
+    Ako = 0;
+    Aku = 0;
+    Ama = 0;
+    Ame = 0x8000000000000000ULL;
+    Ami = 0;
+    Amo = 0;
+    Amu = 0;
+    Asa = 0;
+    Ase = 0;
+    Asi = 0;
+    Aso = 0;
+    Asu = 0;
+
+#pragma unroll 12
+    for( int laneCount = 0; laneCount < 24; laneCount += 2 )
+    {
+        //    prepareTheta
+        BCa = Aba^Aga^Aka^Ama^Asa;
+        BCe = Abe^Age^Ake^Ame^Ase;
+        BCi = Abi^Agi^Aki^Ami^Asi;
+        BCo = Abo^Ago^Ako^Amo^Aso;
+        BCu = Abu^Agu^Aku^Amu^Asu;
+
+        //thetaRhoPiChiIotaPrepareTheta(round  , A, E)
+        Da = BCu^ROL(BCe, 1);
+        De = BCa^ROL(BCi, 1);
+        Di = BCe^ROL(BCo, 1);
+        Do = BCi^ROL(BCu, 1);
+        Du = BCo^ROL(BCa, 1);
+
+        Aba ^= Da;
+        BCa = Aba;
+        Age ^= De;
+        BCe = ROL(Age, 44);
+        Aki ^= Di;
+        BCi = ROL(Aki, 43);
+        Amo ^= Do;
+        BCo = ROL(Amo, 21);
+        Asu ^= Du;
+        BCu = ROL(Asu, 14);
+        Eba =   BCa ^((~BCe)&  BCi );
+        Eba ^= (uint64_t)KeccakF_RoundConstants[laneCount];
+        Ebe =   BCe ^((~BCi)&  BCo );
+        Ebi =   BCi ^((~BCo)&  BCu );
+        Ebo =   BCo ^((~BCu)&  BCa );
+        Ebu =   BCu ^((~BCa)&  BCe );
+
+        Abo ^= Do;
+        BCa = ROL(Abo, 28);
+        Agu ^= Du;
+        BCe = ROL(Agu, 20);
+        Aka ^= Da;
+        BCi = ROL(Aka,  3);
+        Ame ^= De;
+        BCo = ROL(Ame, 45);
+        Asi ^= Di;
+        BCu = ROL(Asi, 61);
+        Ega =   BCa ^((~BCe)&  BCi );
+        Ege =   BCe ^((~BCi)&  BCo );
+        Egi =   BCi ^((~BCo)&  BCu );
+        Ego =   BCo ^((~BCu)&  BCa );
+        Egu =   BCu ^((~BCa)&  BCe );
+
+        Abe ^= De;
+        BCa = ROL(Abe,  1);
+        Agi ^= Di;
+        BCe = ROL(Agi,  6);
+        Ako ^= Do;
+        BCi = ROL(Ako, 25);
+        Amu ^= Du;
+        BCo = ROL_mult8(Amu,  8);
+        Asa ^= Da;
+        BCu = ROL(Asa, 18);
+        Eka =   BCa ^((~BCe)&  BCi );
+        Eke =   BCe ^((~BCi)&  BCo );
+        Eki =   BCi ^((~BCo)&  BCu );
+        Eko =   BCo ^((~BCu)&  BCa );
+        Eku =   BCu ^((~BCa)&  BCe );
+
+        Abu ^= Du;
+        BCa = ROL(Abu, 27);
+        Aga ^= Da;
+        BCe = ROL(Aga, 36);
+        Ake ^= De;
+        BCi = ROL(Ake, 10);
+        Ami ^= Di;
+        BCo = ROL(Ami, 15);
+        Aso ^= Do;
+        BCu = ROL_mult8(Aso, 56);
+        Ema =   BCa ^((~BCe)&  BCi );
+        Eme =   BCe ^((~BCi)&  BCo );
+        Emi =   BCi ^((~BCo)&  BCu );
+        Emo =   BCo ^((~BCu)&  BCa );
+        Emu =   BCu ^((~BCa)&  BCe );
+
+        Abi ^= Di;
+        BCa = ROL(Abi, 62);
+        Ago ^= Do;
+        BCe = ROL(Ago, 55);
+        Aku ^= Du;
+        BCi = ROL(Aku, 39);
+        Ama ^= Da;
+        BCo = ROL(Ama, 41);
+        Ase ^= De;
+        BCu = ROL(Ase,  2);
+        Esa =   BCa ^((~BCe)&  BCi );
+        Ese =   BCe ^((~BCi)&  BCo );
+        Esi =   BCi ^((~BCo)&  BCu );
+        Eso =   BCo ^((~BCu)&  BCa );
+        Esu =   BCu ^((~BCa)&  BCe );
+
+        //    prepareTheta
+        BCa = Eba^Ega^Eka^Ema^Esa;
+        BCe = Ebe^Ege^Eke^Eme^Ese;
+        BCi = Ebi^Egi^Eki^Emi^Esi;
+        BCo = Ebo^Ego^Eko^Emo^Eso;
+        BCu = Ebu^Egu^Eku^Emu^Esu;
+
+        //thetaRhoPiChiIotaPrepareTheta(round+1, E, A)
+        Da = BCu^ROL(BCe, 1);
+        De = BCa^ROL(BCi, 1);
+        Di = BCe^ROL(BCo, 1);
+        Do = BCi^ROL(BCu, 1);
+        Du = BCo^ROL(BCa, 1);
+
+        Eba ^= Da;
+        BCa = Eba;
+        Ege ^= De;
+        BCe = ROL(Ege, 44);
+        Eki ^= Di;
+        BCi = ROL(Eki, 43);
+        Emo ^= Do;
+        BCo = ROL(Emo, 21);
+        Esu ^= Du;
+        BCu = ROL(Esu, 14);
+        Aba =   BCa ^((~BCe)&  BCi );
+        Aba ^= (uint64_t)KeccakF_RoundConstants[laneCount+1];
+        Abe =   BCe ^((~BCi)&  BCo );
+        Abi =   BCi ^((~BCo)&  BCu );
+        Abo =   BCo ^((~BCu)&  BCa );
+        Abu =   BCu ^((~BCa)&  BCe );
+
+        Ebo ^= Do;
+        BCa = ROL(Ebo, 28);
+        Egu ^= Du;
+        BCe = ROL(Egu, 20);
+        Eka ^= Da;
+        BCi = ROL(Eka, 3);
+        Eme ^= De;
+        BCo = ROL(Eme, 45);
+        Esi ^= Di;
+        BCu = ROL(Esi, 61);
+        Aga =   BCa ^((~BCe)&  BCi );
+        Age =   BCe ^((~BCi)&  BCo );
+        Agi =   BCi ^((~BCo)&  BCu );
+        Ago =   BCo ^((~BCu)&  BCa );
+        Agu =   BCu ^((~BCa)&  BCe );
+
+        Ebe ^= De;
+        BCa = ROL(Ebe, 1);
+        Egi ^= Di;
+        BCe = ROL(Egi, 6);
+        Eko ^= Do;
+        BCi = ROL(Eko, 25);
+        Emu ^= Du;
+        BCo = ROL_mult8(Emu, 8);
+        Esa ^= Da;
+        BCu = ROL(Esa, 18);
+        Aka =   BCa ^((~BCe)&  BCi );
+        Ake =   BCe ^((~BCi)&  BCo );
+        Aki =   BCi ^((~BCo)&  BCu );
+        Ako =   BCo ^((~BCu)&  BCa );
+        Aku =   BCu ^((~BCa)&  BCe );
+
+        Ebu ^= Du;
+        BCa = ROL(Ebu, 27);
+        Ega ^= Da;
+        BCe = ROL(Ega, 36);
+        Eke ^= De;
+        BCi = ROL(Eke, 10);
+        Emi ^= Di;
+        BCo = ROL(Emi, 15);
+        Eso ^= Do;
+        BCu = ROL_mult8(Eso, 56);
+        Ama =   BCa ^((~BCe)&  BCi );
+        Ame =   BCe ^((~BCi)&  BCo );
+        Ami =   BCi ^((~BCo)&  BCu );
+        Amo =   BCo ^((~BCu)&  BCa );
+        Amu =   BCu ^((~BCa)&  BCe );
+
+        Ebi ^= Di;
+        BCa = ROL(Ebi, 62);
+        Ego ^= Do;
+        BCe = ROL(Ego, 55);
+        Eku ^= Du;
+        BCi = ROL(Eku, 39);
+        Ema ^= Da;
+        BCo = ROL(Ema, 41);
+        Ese ^= De;
+        BCu = ROL(Ese, 2);
+        Asa =   BCa ^((~BCe)&  BCi );
+        Ase =   BCe ^((~BCi)&  BCo );
+        Asi =   BCi ^((~BCo)&  BCu );
+        Aso =   BCo ^((~BCu)&  BCa );
+        Asu =   BCu ^((~BCa)&  BCe );
+    }
+
+    if (validate) {
+        g_out += 4 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+        g_out[3] = Abo;
+        g_out[2] = Abi;
+        g_out[1] = Abe;
+        g_out[0] = Aba;
+    }
+    
+    // the likelyhood of meeting the hashing target is so low, that we're not guarding this
+    // with atomic writes, locks or similar...
+    uint64_t *g_good64 = (uint64_t*)g_good;
+    if (Abo <=  ptarget64[3]) {
+        if (Abo < g_good64[3]) {
+            g_good64[3] = Abo;
+            g_good64[2] = Abi;
+            g_good64[1] = Abe;
+            g_good64[0] = Aba;
+            g_good[8] = nonce + ((blockIdx.x * blockDim.x) + threadIdx.x);
+        }
+    }
+}
+
+static std::map<int, uint32_t *> context_good[2];
+
+void NVKernel::prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
+{
+    static bool init[8] = {false, false, false, false, false, false, false, false};
+    if (!init[thr_id])
+    {
+        cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice);
+
+        // allocate pinned host memory for good hashes
+        uint32_t *tmp;
+        checkCudaErrors(cudaMalloc((void **) &tmp, 9*sizeof(uint32_t))); context_good[0][thr_id] = tmp;
+        checkCudaErrors(cudaMalloc((void **) &tmp, 9*sizeof(uint32_t))); context_good[1][thr_id] = tmp;
+
+        init[thr_id] = true;
+    }
+    cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+}
+
+uint32_t NVKernel::do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+{
+    uint32_t result = 0xffffffff;
+  
+    unsigned int GRID_BLOCKS = context_blocks[thr_id];
+    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
+
+    // setup execution parameters
+    dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
+    dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
+
+    checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t)));
+
+    kepler_crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
+
+    // copy device memory to host
+    if (do_d2h) {
+        size_t mem_size = throughput * sizeof(uint32_t) * 8;
+        checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
+                        cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
+    }
+
+    // synchronize without hogging the CPU
+    checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 0, thr_id));
+    
+    // synchronous copy. This implies synchronization.
+    checkCudaErrors(cudaMemcpy(&result, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
+
+    return result;
+}
