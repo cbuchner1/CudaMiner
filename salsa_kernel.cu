@@ -285,6 +285,11 @@ extern "C" int cuda_throughput(int thr_id)
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[0][thr_id] = tmp;
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[1][thr_id] = tmp;
         }
+        else if (opt_algo == ALGO_KECCAK)
+        {
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[0][thr_id] = tmp;
+            checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[1][thr_id] = tmp;
+        }
 
         // create two CUDA streams
         cudaStream_t tmp2;

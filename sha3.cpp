@@ -25,92 +25,66 @@ http://creativecommons.org/publicdomain/zero/1.0/
 
 // WARNING: This implementation assumes a little-endian platform. Support for big-endinanness is not yet implemented.
 
-#include    <string.h>
-#define cKeccakR 1088
-#define cKeccakR_SizeInBytes    (cKeccakR / 8)
+#include <string.h>
+#include <stdint.h>
 
-#define cKeccakB    1600
-#define crypto_hash_BYTES 32
-typedef unsigned long long  UINT64;
-typedef UINT64 tKeccakLane;
-#define cKeccakNumberOfRounds   24
-
-#define cKeccakLaneSizeInBits   (sizeof(tKeccakLane) * 8)
-
-#define ROL(a, offset) ((((tKeccakLane)a) << ((offset) % cKeccakLaneSizeInBits)) ^ (((tKeccakLane)a) >> (cKeccakLaneSizeInBits-((offset) % cKeccakLaneSizeInBits))))
-#if ((cKeccakB/25) == 8)
-    #define ROL_mult8(a, offset) ((tKeccakLane)a)
-#else
-    #define ROL_mult8(a, offset) ROL(a, offset)
-#endif
-void KeccakF( tKeccakLane * state, const tKeccakLane *in, int laneCount );
+#define ROL(a, offset) ((((uint64_t)a) << ((offset) % 64)) ^ (((uint64_t)a) >> (64-((offset) % 64))))
+#define ROL_mult8(a, offset) ROL(a, offset)
+void KeccakF( uint64_t * state, const uint64_t *in, int laneCount );
 
 extern "C" int crypto_hash( unsigned char *out, const unsigned char *in, unsigned long long inlen )
 {
-    tKeccakLane    state[5 * 5];
-#if (crypto_hash_BYTES >= cKeccakR_SizeInBytes)
-    #define temp out
-#else
-    unsigned char temp[cKeccakR_SizeInBytes];
-#endif
+    uint64_t    state[5 * 5];
+    unsigned char temp[136];
 
     memset( state, 0, sizeof(state) );
 
-    for ( /* empty */; inlen >= cKeccakR_SizeInBytes; inlen -= cKeccakR_SizeInBytes, in += cKeccakR_SizeInBytes )
+    for ( /* empty */; inlen >= 136; inlen -= 136, in += 136 )
     {
-        KeccakF( state, (const tKeccakLane*)in, cKeccakR_SizeInBytes / sizeof(tKeccakLane) );
+        KeccakF( state, (const uint64_t*)in, 136 / sizeof(uint64_t) );
     }
 
     //    padding
     memcpy( temp, in, (size_t)inlen );
     temp[inlen++] = 1;
-    memset( temp+inlen, 0, cKeccakR_SizeInBytes - (size_t)inlen );
-    temp[cKeccakR_SizeInBytes-1] |= 0x80;
-    KeccakF( state, (const tKeccakLane*)temp, cKeccakR_SizeInBytes / sizeof(tKeccakLane) );
-    memcpy( out, state, crypto_hash_BYTES );
-    #if (crypto_hash_BYTES >= cKeccakR_SizeInBytes)
-    #undef temp
-    #endif
+    memset( temp+inlen, 0, 136 - (size_t)inlen );
+    temp[136-1] |= 0x80;
+    KeccakF( state, (const uint64_t*)temp, 136 / sizeof(uint64_t) );
+    memcpy( out, state, 32 );
 
     return ( 0 );
 }
 
 
-const tKeccakLane KeccakF_RoundConstants[cKeccakNumberOfRounds] = 
+const uint64_t KeccakF_RoundConstants[24] = 
 {
-    (tKeccakLane)0x0000000000000001ULL,
-    (tKeccakLane)0x0000000000008082ULL,
-    (tKeccakLane)0x800000000000808aULL,
-    (tKeccakLane)0x8000000080008000ULL,
-    (tKeccakLane)0x000000000000808bULL,
-    (tKeccakLane)0x0000000080000001ULL,
-    (tKeccakLane)0x8000000080008081ULL,
-    (tKeccakLane)0x8000000000008009ULL,
-    (tKeccakLane)0x000000000000008aULL,
-    (tKeccakLane)0x0000000000000088ULL,
-    (tKeccakLane)0x0000000080008009ULL,
-    (tKeccakLane)0x000000008000000aULL,
-    (tKeccakLane)0x000000008000808bULL,
-    (tKeccakLane)0x800000000000008bULL,
-    (tKeccakLane)0x8000000000008089ULL,
-    (tKeccakLane)0x8000000000008003ULL,
-    (tKeccakLane)0x8000000000008002ULL,
-    (tKeccakLane)0x8000000000000080ULL
-	#if		(cKeccakB	>= 400)
-  , (tKeccakLane)0x000000000000800aULL,
-    (tKeccakLane)0x800000008000000aULL
-	#if		(cKeccakB	>= 800)
-  , (tKeccakLane)0x8000000080008081ULL,
-    (tKeccakLane)0x8000000000008080ULL
-	#if		(cKeccakB	== 1600)
-  , (tKeccakLane)0x0000000080000001ULL,
-    (tKeccakLane)0x8000000080008008ULL
-	#endif
-	#endif
-	#endif
+    (uint64_t)0x0000000000000001ULL,
+    (uint64_t)0x0000000000008082ULL,
+    (uint64_t)0x800000000000808aULL,
+    (uint64_t)0x8000000080008000ULL,
+    (uint64_t)0x000000000000808bULL,
+    (uint64_t)0x0000000080000001ULL,
+    (uint64_t)0x8000000080008081ULL,
+    (uint64_t)0x8000000000008009ULL,
+    (uint64_t)0x000000000000008aULL,
+    (uint64_t)0x0000000000000088ULL,
+    (uint64_t)0x0000000080008009ULL,
+    (uint64_t)0x000000008000000aULL,
+    (uint64_t)0x000000008000808bULL,
+    (uint64_t)0x800000000000008bULL,
+    (uint64_t)0x8000000000008089ULL,
+    (uint64_t)0x8000000000008003ULL,
+    (uint64_t)0x8000000000008002ULL,
+    (uint64_t)0x8000000000000080ULL,
+    (uint64_t)0x000000000000800aULL,
+    (uint64_t)0x800000008000000aULL,
+    (uint64_t)0x8000000080008081ULL,
+    (uint64_t)0x8000000000008080ULL,
+    (uint64_t)0x0000000080000001ULL,
+    (uint64_t)0x8000000080008008ULL
 };
 
-void KeccakF( tKeccakLane * state, const tKeccakLane *in, int laneCount )
+void KeccakF( uint64_t * state, const uint64_t *in, int laneCount )
 {
 
     {
@@ -121,19 +95,18 @@ void KeccakF( tKeccakLane * state, const tKeccakLane *in, int laneCount )
     }
 
     {
-        tKeccakLane Aba, Abe, Abi, Abo, Abu;
-        tKeccakLane Aga, Age, Agi, Ago, Agu;
-        tKeccakLane Aka, Ake, Aki, Ako, Aku;
-        tKeccakLane Ama, Ame, Ami, Amo, Amu;
-        tKeccakLane Asa, Ase, Asi, Aso, Asu;
-        tKeccakLane BCa, BCe, BCi, BCo, BCu;
-        tKeccakLane Da, De, Di, Do, Du;
-        tKeccakLane Eba, Ebe, Ebi, Ebo, Ebu;
-        tKeccakLane Ega, Ege, Egi, Ego, Egu;
-        tKeccakLane Eka, Eke, Eki, Eko, Eku;
-        tKeccakLane Ema, Eme, Emi, Emo, Emu;
-        tKeccakLane Esa, Ese, Esi, Eso, Esu;
-        #define    round    laneCount
+        uint64_t Aba, Abe, Abi, Abo, Abu;
+        uint64_t Aga, Age, Agi, Ago, Agu;
+        uint64_t Aka, Ake, Aki, Ako, Aku;
+        uint64_t Ama, Ame, Ami, Amo, Amu;
+        uint64_t Asa, Ase, Asi, Aso, Asu;
+        uint64_t BCa, BCe, BCi, BCo, BCu;
+        uint64_t Da, De, Di, Do, Du;
+        uint64_t Eba, Ebe, Ebi, Ebo, Ebu;
+        uint64_t Ega, Ege, Egi, Ego, Egu;
+        uint64_t Eka, Eke, Eki, Eko, Eku;
+        uint64_t Ema, Eme, Emi, Emo, Emu;
+        uint64_t Esa, Ese, Esi, Eso, Esu;
 
         //copyFromState(A, state)
         Aba = state[ 0];
@@ -162,7 +135,7 @@ void KeccakF( tKeccakLane * state, const tKeccakLane *in, int laneCount )
         Aso = state[23];
         Asu = state[24];
 
-        for( round = 0; round < cKeccakNumberOfRounds; round += 2 )
+        for( laneCount = 0; laneCount < 24; laneCount += 2 )
         {
             //    prepareTheta
             BCa = Aba^Aga^Aka^Ama^Asa;
@@ -189,7 +162,7 @@ void KeccakF( tKeccakLane * state, const tKeccakLane *in, int laneCount )
             Asu ^= Du;
             BCu = ROL(Asu, 14);
             Eba =   BCa ^((~BCe)&  BCi );
-            Eba ^= (tKeccakLane)KeccakF_RoundConstants[round];
+            Eba ^= (uint64_t)KeccakF_RoundConstants[laneCount];
             Ebe =   BCe ^((~BCi)&  BCo );
             Ebi =   BCi ^((~BCo)&  BCu );
             Ebo =   BCo ^((~BCu)&  BCa );
@@ -284,7 +257,7 @@ void KeccakF( tKeccakLane * state, const tKeccakLane *in, int laneCount )
             Esu ^= Du;
             BCu = ROL(Esu, 14);
             Aba =   BCa ^((~BCe)&  BCi );
-            Aba ^= (tKeccakLane)KeccakF_RoundConstants[round+1];
+            Aba ^= (uint64_t)KeccakF_RoundConstants[laneCount+1];
             Abe =   BCe ^((~BCi)&  BCo );
             Abi =   BCi ^((~BCo)&  BCu );
             Abo =   BCo ^((~BCu)&  BCa );
@@ -381,8 +354,5 @@ void KeccakF( tKeccakLane * state, const tKeccakLane *in, int laneCount )
         state[22] = Asi;
         state[23] = Aso;
         state[24] = Asu;
-
-        #undef    round
     }
-
 }
