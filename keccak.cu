@@ -393,7 +393,7 @@ static __device__ uint32_t cuda_swab32(uint32_t x)
           | ((x >> 8) & 0x0000ff00u) | ((x >> 24) & 0x000000ffu));
 }
 
-__global__ void cuda_pre_keccak512(uint32_t *g_idata, uint32_t nonce)
+__global__ __launch_bounds__(128) void cuda_pre_keccak512(uint32_t *g_idata, uint32_t nonce)
 {
     nonce        +=       (blockIdx.x * blockDim.x) + threadIdx.x; 
     g_idata      += 32 * ((blockIdx.x * blockDim.x) + threadIdx.x);
@@ -433,7 +433,7 @@ __global__ void cuda_pre_keccak512(uint32_t *g_idata, uint32_t nonce)
 }
 
 
-__global__ void cuda_post_keccak512(uint32_t *g_odata, uint32_t *g_hash, uint32_t nonce)
+__global__ __launch_bounds__(128) void cuda_post_keccak512(uint32_t *g_odata, uint32_t *g_hash, uint32_t nonce)
 {
     nonce        +=       (blockIdx.x * blockDim.x) + threadIdx.x; 
     g_odata      += 32 * ((blockIdx.x * blockDim.x) + threadIdx.x);
