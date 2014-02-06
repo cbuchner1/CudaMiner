@@ -1,5 +1,5 @@
 
-CudaMiner release February 4th 2014 - beta release
+CudaMiner release February 6th 2014 - MaxCoin release
 ---------------------------------------------------
 
 ***************************************************************
@@ -9,6 +9,7 @@ If you find this tool useful and like to support its continued
   LTC donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm
   BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM
   YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4
+  VTC donation address: VrjeFzMgvteCGarLw85KivBzmsiH9fqp4a
 ***************************************************************
 
 >>> Introduction <<<
@@ -23,6 +24,7 @@ This application is currently supporting
 1) scrypt mining with N=1024 (LiteCoin and many, many clones)
 2) scrypt-jane mining (Yacoin and several clones)
 3) scrypt mining with larger N (VertCoin)
+4) NEW: MaxCoin mining (SHA-3 i.e. Keccak256)  <<< SEE MAXCOIN SPECIFICS SECTION
 
 You should see a notable speed-up compared to OpenCL based miners.
 
@@ -47,6 +49,7 @@ its command line interface and options.
                           scrypt-jane:StartTime,Nfmin,Nfmax
                                        like above nFactor derived from Unix time.
                           sha256d      SHA-256d (don't use this! No GPU acceleration)
+                          keccak       Keccak256 as used in MaxCoin
   -o, --url=URL         URL of mining server (default: " DEF_RPC_URL ")
   -O, --userpass=U:P    username:password pair for mining server
   -u, --user=USERNAME   username for mining server
@@ -270,6 +273,67 @@ To mine new coins with different chain start time and minimum and maximum
 N-factors, you can pass the parameters to the --algo option like this:
 
 -algo=scrypt-jane:1389196388,4,30
+
+
+
+>>> MaxCoin Specifics <<<
+
+MaxCoin support was possible on short notice only because the coin's launch
+was delayed by 24 hours and a cpuminer source code was posted to bitcointalk
+prematurely. The keccak hashing feature is not complete and user friendly
+yet, but it should be good enough to get you instamining AT COIN LAUNCH
+with several dozen megahashes at least.
+
+GTX 780Ti devices have been reported to do 170 MHash/s. Yay!
+A GTX 660Ti can do nearly 100 MHash/s.
+
+The CudaMiner Windows binary release is made around 19:00 GMT on February 6th.
+You have about 30 minutes to find suitable launch configurations for all your
+cards before the coin actually launches.
+
+The MaxCoin wallet will be available from 19:30 GMT onwards on
+http://maxcoin.co.uk
+
+The following problems remain with the keccak algorithm:
+-Autotune for keccak is not working yet.
+-The scrypt scratchpad is still allocated on the GPU. You must use a large -L
+ (lookup gap) value in the order of 64 or 128 to allow the scratchpad to fit into
+ your GPU memory when using large launch configurations.
+-The K kernel works better on Compute 3.5 devices than the T kernel. Duh?
+
+The F, K, T kernels support keccak mining. Maybe the K kernels run faster on
+Compute 3.5 devices. Best to try. Launch configs should look somewhat like this
+(do not exceed the warp figures given here)
+
+-l F1000x16
+-l K1000x32   << fastest on my GTX 780
+-l T1000x24
+
+Best to replace the 1000 blocks with a large multiple of your card's
+multiprocessor count. At least a few hundred, but probably less than 3000.
+
+Pick a pool or solo-mine. Good luck!
+
+
+Example benchmarking session:
+
+cudaminer.exe --algo=keccak -d gtx780 -l K1024x32 -L 128 --benchmark
+
+[2014-02-06 19:09:38] 1 miner threads started, using 'keccak' algorithm.
+[2014-02-06 19:09:44] GPU #0: GeForce GTX 780 with compute capability 3.5
+[2014-02-06 19:09:44] GPU #0: interactive: 1, tex-cache: 0 , single-alloc: 0
+[2014-02-06 19:09:44] GPU #0: 32 hashes / 0.0 MB per warp.
+[2014-02-06 19:09:45] GPU #0: using launch configuration K1024x32
+[2014-02-06 19:09:48] GPU #0: GeForce GTX 780, 130181 khash/s
+[2014-02-06 19:09:48] Total: 130181 khash/s
+[2014-02-06 19:09:53] GPU #0: GeForce GTX 780, 144760 khash/s
+[2014-02-06 19:09:53] Total: 144760 khash/s
+[2014-02-06 19:09:58] GPU #0: GeForce GTX 780, 138692 khash/s
+[2014-02-06 19:09:58] Total: 138692 khash/s
+[2014-02-06 19:10:03] GPU #0: GeForce GTX 780, 130204 khash/s
+[2014-02-06 19:10:03] Total: 130204 khash/s
+[2014-02-06 19:10:08] GPU #0: GeForce GTX 780, 142979 khash/s
+[2014-02-06 19:10:08] Total: 142979 khash/s
 
 
 

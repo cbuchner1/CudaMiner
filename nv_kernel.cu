@@ -9,6 +9,8 @@
 // NOTE: compile this .cu module for compute_30,sm_30 with --maxrregcount=63
 //
 
+#include <map>
+
 #ifdef WIN32
 #include <windows.h>
 #endif
@@ -733,9 +735,6 @@ template <int ALGO, int TEX_DIM> __global__ void nv_scrypt_core_kernelB_LG(uint3
 //
 // Maxcoin related Keccak implementation (Keccak256)
 //
-
-#include <stdint.h>
-#include <map>
 
 // from salsa_kernel.cu
 extern std::map<int, int> context_blocks;
