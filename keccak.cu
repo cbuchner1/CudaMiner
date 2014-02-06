@@ -470,7 +470,7 @@ __global__ void cuda_post_keccak512(uint32_t *g_odata, uint32_t *g_hash, uint32_
 // callable host code to initialize constants and to call kernels
 //
 
-extern "C" void prepare_keccak512(int thr_id, uint32_t host_pdata[20])
+extern "C" void prepare_keccak512(int thr_id, const uint32_t host_pdata[20])
 {
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
@@ -509,6 +509,13 @@ extern "C" void post_keccak512(int thr_id, int stream, uint32_t nonce, uint32_t 
 //
 
 #include <stdint.h>
+
+#include <map>
+extern std::map<int, int> context_blocks;
+extern std::map<int, int> context_wpb;
+extern std::map<int, KernelInterface *> context_kernel;
+
+__constant__ uint64_t ptarget64[4];
 
 #define ROL(a, offset) ((((uint64_t)a) << ((offset) % 64)) ^ (((uint64_t)a) >> (64-((offset) % 64))))
 #define ROL_mult8(a, offset) ROL(a, offset)
@@ -814,10 +821,10 @@ __device__ __forceinline__ void KeccakF( uint64_t *state, const uint64_t *in )
 
 __constant__ uint64_t pdata64[10];
 
-__global__ void crypto_hash( uint64_t *out, uint32_t nonce )
+__global__ void crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_good )
 {
-    out += 4 * ((blockIdx.x * blockDim.x) + threadIdx.x);
-    nonce = cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x));
+    g_out += 4 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+    uint32_t be_nonce = cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x));
 
     uint64_t temp[17]; // 136 bytes
 
@@ -825,7 +832,7 @@ __global__ void crypto_hash( uint64_t *out, uint32_t nonce )
 #pragma unroll 10
     for (int i=0; i < 9;  ++i) temp[i]  = pdata64[i];
     // mask out nonce from pdata64 and insert the thread specific nonce
-    temp[9]  = (pdata64[9] & 0x00000000FFFFFFFFULL) | (((uint64_t)nonce) << 32);
+    temp[9]  = (pdata64[9] & 0x00000000FFFFFFFFULL) | (((uint64_t)be_nonce) << 32);
     // padding
     temp[10] = 0x0000000000000001ULL;
     temp[12] = 0;
@@ -840,28 +847,44 @@ __global__ void crypto_hash( uint64_t *out, uint32_t nonce )
     KeccakF( state, (const uint64_t*)temp );
 
 #pragma unroll 4
-    for (int i=0; i < 4; ++i) out[i] = state[i];
+    for (int i=0; i < 4; ++i) g_out[i] = state[i];
+    
+    uint64_t *g_good64 = (uint64_t*)g_good;
+    if (state[3] <=  ptarget64[3]) {
+        if (state[3] < g_good64[3]) {
+            g_good64[3] = state[3];
+            g_good64[2] = state[2];
+            g_good64[1] = state[1];
+            g_good64[0] = state[0];
+            g_good[8] = nonce + ((blockIdx.x * blockDim.x) + threadIdx.x);
+        }
+    }
 }
 
+std::map<int, uint32_t *> context_good[2];
 
-extern "C" void prepare_keccak256(int thr_id, uint32_t host_pdata[20])
+extern "C" void prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
 {
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
     {
         cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice);
+
+	// allocate pinned host memory for good hashes
+	uint32_t *tmp;
+        checkCudaErrors(cudaMalloc((void **) &tmp, 9*sizeof(uint32_t))); context_good[0][thr_id] = tmp;
+        checkCudaErrors(cudaMalloc((void **) &tmp, 9*sizeof(uint32_t))); context_good[1][thr_id] = tmp;
+	
         init[thr_id] = true;
     }
     cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
 }
 
-#include <map>
-extern std::map<int, int> context_blocks;
-extern std::map<int, int> context_wpb;
-extern std::map<int, KernelInterface *> context_kernel;
-
-extern "C" void do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput)
+extern "C" uint32_t do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
+    uint32_t result = 0xffffffff;
+  
     unsigned int GRID_BLOCKS = context_blocks[thr_id];
     unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
     unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
@@ -870,11 +893,35 @@ extern "C" void do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t no
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
-    crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce);
+    checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t)));
 
-    size_t mem_size = throughput * sizeof(uint32_t) * 8;
+    crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id]);
 
     // copy device memory to host
-    checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
-                    cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
+    if (do_d2h) {
+        size_t mem_size = throughput * sizeof(uint32_t) * 8;
+        checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
+                        cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
+    }
+
+    // synchronous copy. This implies synchronization.
+    checkCudaErrors(cudaMemcpy(&result, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
+
+#if 0
+    if (result != 0xffffffff)
+    {
+        uint64_t nonce[4];
+        checkCudaErrors(cudaMemcpy(nonce, context_good[stream][thr_id], 8*sizeof(uint32_t), cudaMemcpyDeviceToHost));
+	fprintf(stderr, "result=$%08x\n", result);
+        fprintf(stderr, "$%016llx\n", nonce[3]);
+        fprintf(stderr, "$%016llx\n", nonce[2]);
+        fprintf(stderr, "$%016llx\n", nonce[1]);
+        fprintf(stderr, "$%016llx\n", nonce[0]);
+    }
+#endif
+    
+    // the -1 makes the CPU not sleep, and possibly enter a busy wait for the result
+//    checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], -1, thr_id));
+    
+    return result;
 }
