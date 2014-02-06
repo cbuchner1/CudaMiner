@@ -584,7 +584,7 @@ static bool send_line(curl_socket_t sock, char *s)
 	s[len++] = '\n';
 
 	while (len > 0) {
-		struct timeval timeout = {0, 0};
+		struct timeval timeout = {15, 0};
 		ssize_t n;
 		fd_set wd;
 
