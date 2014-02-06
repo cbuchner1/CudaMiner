@@ -24,26 +24,41 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 	for (int kk=0; kk < 20; kk++)
 		be32enc(&endiandata[kk], ((uint32_t*)pdata)[kk]);
 
+	prepare_keccak256(thr_id, endiandata);
+
+	uint32_t *cuda_hash64 = (uint32_t *)cuda_hashbuffer(thr_id, 0);
+
 	do {
-		pdata[19] = ++n;
-		be32enc(&endiandata[19], n); 
+		int nonce = n+1;
 
-		prepare_keccak256(thr_id, endiandata);
+		do_keccak256(thr_id, 0, cuda_hash64, nonce, throughput);
+		n += throughput;
 
-		uint32_t hash64[8];
-		crypto_hash( (unsigned char*)hash64, (unsigned char*)&endiandata[0], 80 );
+		cuda_scrypt_sync(thr_id, 0);
 
-		uint32_t cuda_hash64[8];
-		do_keccak256(thr_id, 0, cuda_hash64);
+		// CPU validation
+#if 0
+		for (int i=0; i < throughput; ++i)
+		{
+			uint32_t hash64[8];
+			be32enc(&endiandata[19], nonce+i); 
+			crypto_hash( (unsigned char*)hash64, (unsigned char*)&endiandata[0], 80 );
 
-		if (memcmp(hash64, cuda_hash64, 32))
-			fprintf(stderr, "CPU and CUDA hashes differ!\n");
+			if (memcmp(hash64, &cuda_hash64[8*i], 32))
+				fprintf(stderr, "CPU and CUDA hashes (i=%d) differ!\n", i);
+		}
+#endif
 
-		if (hash64[7] <= Htarg && // if (((hash64[7]&0xFFFFFF00)==0) && 
-				fulltest(hash64, ptarget)) {
-			*hashes_done = n - first_nonce + 1;
-			gettimeofday(tv_end, NULL);
-			return true;
+		for (int i=0; i < throughput; ++i)
+		{
+			uint32_t *hash64 = &cuda_hash64[8*i];
+			if (hash64[7] <= Htarg &&
+					fulltest(hash64, ptarget)) {
+				pdata[19] = nonce+i;
+				*hashes_done = n - first_nonce + 1;
+				gettimeofday(tv_end, NULL);
+				return true;
+			}
 		}
 	} while (n < max_nonce && !work_restart[thr_id].restart);
 	

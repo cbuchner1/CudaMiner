@@ -814,13 +814,18 @@ __device__ __forceinline__ void KeccakF( uint64_t *state, const uint64_t *in )
 
 __constant__ uint64_t pdata64[10];
 
-__global__ void crypto_hash( uint64_t *out )
+__global__ void crypto_hash( uint64_t *out, uint32_t nonce )
 {
+    out += 4 * ((blockIdx.x * blockDim.x) + threadIdx.x);
+    nonce = cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x));
+
     uint64_t temp[17]; // 136 bytes
 
     // padding
 #pragma unroll 10
-    for (int i=0; i < 10;  ++i) temp[i]  = pdata64[i];
+    for (int i=0; i < 9;  ++i) temp[i]  = pdata64[i];
+    // mask out nonce from pdata64 and insert the thread specific nonce
+    temp[9]  = (pdata64[9] & 0x00000000FFFFFFFFULL) | (((uint64_t)nonce) << 32);
     // padding
     temp[10] = 0x0000000000000001ULL;
     temp[12] = 0;
@@ -850,16 +855,24 @@ extern "C" void prepare_keccak256(int thr_id, uint32_t host_pdata[20])
     cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
 }
 
-extern "C" void do_keccak256(int thr_id, int stream, uint32_t *hash)
+#include <map>
+extern std::map<int, int> context_blocks;
+extern std::map<int, int> context_wpb;
+extern std::map<int, KernelInterface *> context_kernel;
+
+extern "C" void do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput)
 {
-    // SINGLE THREADED! ONE HASH ONLY! HAHA ;)
+    unsigned int GRID_BLOCKS = context_blocks[thr_id];
+    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
 
-    dim3 block(1);
-    dim3 grid(1);
+    // setup execution parameters
+    dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
+    dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
-    crypto_hash<<<grid, block, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id]);
+    crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce);
 
-    size_t mem_size = 32;
+    size_t mem_size = throughput * sizeof(uint32_t) * 8;
 
     // copy device memory to host
     checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
