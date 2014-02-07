@@ -10,6 +10,7 @@ If you find this tool useful and like to support its continued
   BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM
   YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4
   VTC donation address: VrjeFzMgvteCGarLw85KivBzmsiH9fqp4a
+  MAX donation address: mHrhQP9EFArechWxTFJ97s9D3jvcCvEEnt
 ***************************************************************
 
 >>> Introduction <<<
@@ -365,6 +366,12 @@ best to re-tune your kernel configuration after every N-factor change.
 
 
 >>> RELEASE HISTORY <<<
+
+  The February 7th release adds fixes for stratum pool mining.
+
+  The February 6th release added a first, but working keccak algorithm
+  support to instamine at the MaxCoin launch. The miner worked, and we
+  basically owned the coin.
 
   The February 4th release fixes a problem with very apparently incorrect
   autotune measurements and it also repairs the multi-GPU support. So you
