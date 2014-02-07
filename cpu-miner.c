@@ -35,6 +35,7 @@
 #endif
 #include <jansson.h>
 #include <curl/curl.h>
+#include <openssl/sha.h>
 #include "compat.h"
 #include "miner.h"
 #include "salsa_kernel.h"
@@ -56,7 +57,7 @@ char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2014-02-06"
+#define PROGRAM_VERSION		"2014-02-07"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -719,7 +720,10 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 	memcpy(work->xnonce2, sctx->job.xnonce2, sctx->xnonce2_size);
 
 	/* Generate merkle root */
-	sha256d(merkle_root, sctx->job.coinbase, (int)sctx->job.coinbase_size);
+	if (opt_algo != ALGO_KECCAK) // CB: fix for stratum pools with MaxCoin
+		sha256d(merkle_root, sctx->job.coinbase, (int)sctx->job.coinbase_size);
+	else
+		SHA256((unsigned char*)sctx->job.coinbase, sctx->job.coinbase_size, (unsigned char*)merkle_root);
 	for (i = 0; i < sctx->job.merkle_count; i++) {
 		memcpy(merkle_root + 32, sctx->job.merkle[i], 32);
 		sha256d(merkle_root, merkle_root, 64);
@@ -749,8 +753,10 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 		free(xnonce2str);
 	}
 
-	if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE) // CB
+	if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE)
 		diff_to_target(work->target, sctx->job.diff / 65536.0);
+	else if (opt_algo == ALGO_KECCAK)
+		diff_to_target(work->target, sctx->job.diff / 256.0);
 	else
 		diff_to_target(work->target, sctx->job.diff);
 }
