@@ -1019,7 +1019,8 @@ uint32_t NV2Kernel::do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_
     }
     else {
         // asynchronous copy of winning nonce (just 4 bytes...)
-        checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t),
+                        cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
 
     return result;
