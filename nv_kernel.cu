@@ -1079,18 +1079,16 @@ uint32_t NVKernel::do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t
 
     kepler_crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
 
-    // copy device memory to host
+    // copy hashes from device memory to host (ALL hashes, lots of data...)
     if (do_d2h) {
         size_t mem_size = throughput * sizeof(uint32_t) * 8;
         checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
-
-    // synchronize without hogging the CPU
-//    checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 0, thr_id));
-    
-    // synchronous copy. This implies synchronization.
-    checkCudaErrors(cudaMemcpy(&result, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
+    else {
+        // asynchronous copy of winning nonce (just 4 bytes...)
+        checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
+    }
 
     return result;
 }

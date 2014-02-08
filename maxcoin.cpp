@@ -30,64 +30,61 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 
 	cuda_prepare_keccak256(thr_id, endiandata, ptarget);
 
-	uint32_t *cuda_hash64 = (uint32_t *)cuda_hashbuffer(thr_id, 0);
-	memset(cuda_hash64, 0xff, throughput * 8 * sizeof(uint32_t));
+	uint32_t *cuda_hash64[2] = { (uint32_t *)cuda_hashbuffer(thr_id, 0), (uint32_t *)cuda_hashbuffer(thr_id, 1) };
+	memset(cuda_hash64[0], 0xff, throughput * 8 * sizeof(uint32_t));
+	memset(cuda_hash64[1], 0xff, throughput * 8 * sizeof(uint32_t));
+
 	bool validate = false;
+	uint32_t nonce[2];
+	int cur = 0, nxt = 1;
+
+	// begin work on first CUDA stream
+	nonce[cur] = n+1; n += throughput;
+	cuda_do_keccak256(thr_id, 0, cuda_hash64[cur], nonce[cur], throughput, validate);
+
 	do {
-		int nonce = n+1;
 
-		uint32_t result = cuda_do_keccak256(thr_id, 0, cuda_hash64, nonce, throughput, validate);
-		n += throughput;
+		// begin work on next CUDA stream
+		nonce[nxt] = n+1; n += throughput;
+		cuda_do_keccak256(thr_id, 0, cuda_hash64[nxt], nonce[nxt], throughput, validate);
 
-//		cuda_scrypt_sync(thr_id, 0);
+		// synchronize current stream and get the "winning" nonce index, if any
+		cuda_scrypt_sync(thr_id, cur);
+		uint32_t result =  *cuda_hash64[cur];
 
-		// optional full CPU based validation
+		// optional full CPU based validation (see validate flag)
 		if (validate)
 		{
 			for (int i=0; i < throughput; ++i)
 			{
 				uint32_t hash64[8];
-				be32enc(&endiandata[19], nonce+i); 
+				be32enc(&endiandata[19], nonce[cur]+i); 
 				crypto_hash( (unsigned char*)hash64, (unsigned char*)&endiandata[0], 80 );
 	
 				if (memcmp(hash64, &cuda_hash64[8*i], 32))
 					fprintf(stderr, "CPU and CUDA hashes (i=%d) differ!\n", i);
 			}
 		}
-
-#if 0
-		// copying all hashes from device to host is too slow, hence the following
-		// CPU based hash verification loop is now commented out
-		for (int i=0; i < throughput; ++i)
-		{
-			uint32_t *hash64 = &cuda_hash64[8*i];
-			if (hash64[7] <= Htarg &&
-					fulltest(hash64, ptarget)) {
-				pdata[19] = nonce+i;
-				*hashes_done = n - first_nonce + 1;
-				gettimeofday(tv_end, NULL);
-				return true;
-			}
-		}
-#endif
-		if (result != 0xffffffff)
+		else if (result != 0xffffffff)
 		{
 			uint32_t hash64[8];
 			be32enc(&endiandata[19], result);
 			crypto_hash( (unsigned char*)hash64, (unsigned char*)&endiandata[0], 80 );
-			if (result >= nonce && result < nonce+throughput && hash64[7] <= Htarg && fulltest(hash64, ptarget)) {
+			if (result >= nonce[cur] && result < nonce[cur]+throughput && hash64[7] <= Htarg && fulltest(hash64, ptarget)) {
 				pdata[19] = result;
-				*hashes_done = n - first_nonce + 1;
+				*hashes_done = n-throughput - first_nonce + 1;
 				gettimeofday(tv_end, NULL);
 				return true;
 			} else {
 				applog(LOG_INFO, "GPU #%d: %s result for nonce $%08x does not validate on CPU!", device_map[thr_id], device_name[thr_id], result);
 			}
 		}
+		cur = (cur + 1) % 2;
+		nxt = (nxt + 1) % 2;
 	} while (n < max_nonce && !work_restart[thr_id].restart);
 	
-	*hashes_done = n - first_nonce + 1;
-	pdata[19] = n;
+	*hashes_done = n-throughput - first_nonce + 1;
+	pdata[19] = n-throughput;
 	gettimeofday(tv_end, NULL);
 	return 0;
 }
