@@ -81,7 +81,7 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 		}
 		cur = (cur + 1) % 2;
 		nxt = (nxt + 1) % 2;
-	} while (n < max_nonce && !work_restart[thr_id].restart);
+	} while ((n-throughput) < max_nonce && !work_restart[thr_id].restart);
 	
 	*hashes_done = n-throughput - first_nonce + 1;
 	pdata[19] = n-throughput;
