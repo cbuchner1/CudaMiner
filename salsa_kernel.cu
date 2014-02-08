@@ -73,8 +73,8 @@
 // some globals containing pointers to device memory (for chunked allocation)
 // [8] indexes up to 8 threads (0...7)
 int       MAXWARPS[8];
-uint32_t* h_V[8][TOTAL_WARP_LIMIT];
-uint32_t  h_V_extra[8][TOTAL_WARP_LIMIT];
+uint32_t* h_V[8][TOTAL_WARP_LIMIT*64];          // NOTE: the *64 prevents buffer overflow for --keccak
+uint32_t  h_V_extra[8][TOTAL_WARP_LIMIT*64];    //       with really large kernel launch configurations
 
 extern "C" int cuda_num_devices()
 {
@@ -568,7 +568,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         MAXWARPS[thr_id] = warp;
     }
-    kernel->set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+    if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE) kernel->set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
 
     if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
     {
@@ -844,7 +844,7 @@ skip:           ;
                 }
 
                 // update pointers to scratch buffer in constant memory after reallocation
-                kernel->set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
+                if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE) kernel->set_scratchbuf_constants(MAXWARPS[thr_id], h_V[thr_id]);
             }
             else
             {

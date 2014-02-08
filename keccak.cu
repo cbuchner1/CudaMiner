@@ -854,7 +854,7 @@ extern "C" uint32_t default_do_keccak256(int thr_id, int stream, uint32_t *hash,
     }
 
     // synchronize without hogging the CPU
-    checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 0, thr_id));
+//    checkCudaErrors(MyStreamSynchronize(context_streams[stream][thr_id], 0, thr_id));
     
     // synchronous copy. This implies synchronization.
     checkCudaErrors(cudaMemcpy(&result, context_good[stream][thr_id]+8, sizeof(uint32_t), cudaMemcpyDeviceToHost));
