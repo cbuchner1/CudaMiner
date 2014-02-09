@@ -44,9 +44,12 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 
 	do {
 
-		// begin work on next CUDA stream
 		nonce[nxt] = n+1; n += throughput;
-		cuda_do_keccak256(thr_id, 0, cuda_hash64[nxt], nonce[nxt], throughput, validate);
+		if ((n-throughput) < max_nonce && !work_restart[thr_id].restart)
+		{
+			// begin work on next CUDA stream
+			cuda_do_keccak256(thr_id, 0, cuda_hash64[nxt], nonce[nxt], throughput, validate);
+		}
 
 		// synchronize current stream and get the "winning" nonce index, if any
 		cuda_scrypt_sync(thr_id, cur);
