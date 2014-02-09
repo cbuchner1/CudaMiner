@@ -781,8 +781,8 @@ static void *miner_thread(void *userdata)
 		drop_policy();
 	}
 
-        if (!parallel) // CB
-        {
+	if (!parallel) // CB
+	{
 		if (!opt_quiet)
 			applog(LOG_INFO, "Binding thread %d to cpu %d",
 			       thr_id, thr_id % num_processors);
@@ -799,8 +799,9 @@ static void *miner_thread(void *userdata)
 			while (!*g_work.job_id || time(NULL) >= g_work_time + 120)
 				sleep(1);
 			pthread_mutex_lock(&g_work_lock);
-			if (work.data[19] >= end_nonce)
+			if (work.data[19] >= end_nonce) {
 				stratum_gen_work(&stratum, &g_work);
+			}
 		} else {
 			/* obtain new work from internal workio thread */
 			pthread_mutex_lock(&g_work_lock);
@@ -847,7 +848,7 @@ static void *miner_thread(void *userdata)
 		max64 *= (int64_t)thr_hashrates[thr_id];
 		if (max64 <= 0)
 			max64 = opt_algo == (ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE) ? 0xfffLL : 0x1fffffLL; // CB
-		if (work.data[19] + max64 > end_nonce)
+		if ((int64_t)work.data[19] + max64 > end_nonce)
 			max_nonce = end_nonce;
 		else
 			max_nonce = (uint32_t)(work.data[19] + max64);
@@ -915,8 +916,8 @@ static void *miner_thread(void *userdata)
 		}
 
 		/* if nonce found, submit work */
-		if (rc && !opt_benchmark && !submit_work(mythr, &work))
-			break;
+		if (rc && !opt_benchmark && !submit_work(mythr, &work)) break;
+
 	} while (!abort_flag); // CB
 
 out:

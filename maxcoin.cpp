@@ -25,7 +25,7 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 
 	uint32_t endiandata[20];
 	for (int kk=0; kk < 20; kk++)
-		be32enc(&endiandata[kk], ((uint32_t*)pdata)[kk]);
+		be32enc(&endiandata[kk], pdata[kk]);
 
 	cuda_prepare_keccak256(thr_id, endiandata, ptarget);
 
@@ -67,14 +67,14 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 					fprintf(stderr, "CPU and CUDA hashes (i=%d) differ!\n", i);
 			}
 		}
-		else if (result != 0xffffffff)
+		else if (result != 0xffffffff && result > pdata[19])
 		{
 			uint32_t hash64[8];
 			be32enc(&endiandata[19], result);
 			crypto_hash( (unsigned char*)hash64, (unsigned char*)&endiandata[0], 80 );
 			if (result >= nonce[cur] && result < nonce[cur]+throughput && hash64[7] <= Htarg && fulltest(hash64, ptarget)) {
-				pdata[19] = result;
 				*hashes_done = n-throughput - pdata[19] + 1;
+				pdata[19] = result;
 				gettimeofday(tv_end, NULL);
 				return true;
 			} else {
@@ -87,7 +87,8 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 	
 	*hashes_done = n-throughput - pdata[19] + 1;
 	if (n-throughput > pdata[19])
-		pdata[19] = min(max_nonce, n-throughput); // CB: don't report values bigger max_nonce
+		// CB: don't report values bigger max_nonce
+		pdata[19] = max_nonce > n-throughput ? n-throughput : max_nonce;
 	else
 		pdata[19] = 0xffffffffU; // CB: prevent nonce space overflow.
 	gettimeofday(tv_end, NULL);
