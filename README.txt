@@ -1,6 +1,6 @@
 
-CudaMiner release February 6th 2014 - MaxCoin release
----------------------------------------------------
+CudaMiner release February 9th 2014 - MaxCoin release #3
+--------------------------------------------------------
 
 ***************************************************************
 If you find this tool useful and like to support its continued 
@@ -310,8 +310,8 @@ Compute 3.5 devices. Best to try. Launch configs should look somewhat like this
 -l K1000x32   << fastest on my GTX 780
 -l T1000x24
 
-Best to replace the 1000 blocks with a large multiple of your card's
-multiprocessor count. At least a few hundred, but probably less than 3000.
+Best to replace the 1000 blocks with the number of your card's CUDA
+cores, or even twice that value. It seems fastest that way,
 
 Pick a pool or solo-mine. Good luck!
 
@@ -366,6 +366,9 @@ best to re-tune your kernel configuration after every N-factor change.
 
 
 >>> RELEASE HISTORY <<<
+
+  The February 9th release adds performance improvements and a fix
+  for stratum rejects in maxcoin (duplicate submitted shares).
 
   The February 7th release adds fixes for stratum pool mining.
 

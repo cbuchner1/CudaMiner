@@ -17,7 +17,6 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 	gettimeofday(tv_start, NULL);
 
 	uint32_t n = pdata[19] - 1;
-	const uint32_t first_nonce = pdata[19];
 	
 	// TESTING ONLY
 //	((uint32_t*)ptarget)[7] = 0x0000000f;
@@ -75,7 +74,7 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 			crypto_hash( (unsigned char*)hash64, (unsigned char*)&endiandata[0], 80 );
 			if (result >= nonce[cur] && result < nonce[cur]+throughput && hash64[7] <= Htarg && fulltest(hash64, ptarget)) {
 				pdata[19] = result;
-				*hashes_done = n-throughput - first_nonce + 1;
+				*hashes_done = n-throughput - pdata[19] + 1;
 				gettimeofday(tv_end, NULL);
 				return true;
 			} else {
@@ -86,8 +85,11 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 		nxt = (nxt + 1) % 2;
 	} while ((n-throughput) < max_nonce && !work_restart[thr_id].restart);
 	
-	*hashes_done = n-throughput - first_nonce + 1;
-	pdata[19] = n-throughput;
+	*hashes_done = n-throughput - pdata[19] + 1;
+	if (n-throughput > pdata[19])
+		pdata[19] = min(max_nonce, n-throughput); // CB: don't report values bigger max_nonce
+	else
+		pdata[19] = 0xffffffffU; // CB: prevent nonce space overflow.
 	gettimeofday(tv_end, NULL);
 	return 0;
 }
