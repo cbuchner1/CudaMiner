@@ -986,7 +986,7 @@ start:
 			goto out;
 		}
 		if (likely(val)) {
-			applog(LOG_INFO, "LONGPOLL detected new block");
+			if (!opt_quiet) applog(LOG_INFO, "LONGPOLL detected new block");
 			soval = json_object_get(json_object_get(val, "result"), "submitold");
 			submit_old = soval ? json_is_true(soval) : false;
 			pthread_mutex_lock(&g_work_lock);
@@ -1096,7 +1096,7 @@ static void *stratum_thread(void *userdata)
 			time(&g_work_time);
 			pthread_mutex_unlock(&g_work_lock);
 			if (stratum.job.clean) {
-				applog(LOG_INFO, "Stratum detected new block");
+				if (!opt_quiet) applog(LOG_INFO, "Stratum detected new block");
 				restart_threads();
 			}
 		}

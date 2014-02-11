@@ -437,7 +437,7 @@ David Andersen (USA, Carnegie Mellon University): designed a low
                         improved memory access. Currently best
                         performing with high N-factor scrypt-jane.
 
-Alexey Panteleev (USA, nVidia): submitted a kernel with improved
+Alexey Panteleev (Moscow, nVidia): submitted a kernel with improved
                         memory access functions for Kepler devices 
                         providing the fastest scrypt performance.
 
