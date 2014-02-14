@@ -143,7 +143,7 @@ KernelInterface *Best_Kernel_Heuristics(cudaDeviceProp *props)
     if (opt_algo == ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192))
     {
         // high register count kernels (scrypt, low N-factor scrypt-jane)
-        if (props->major == 3 && props->minor == 5)
+        if (props->major > 3 || (props->major == 3 && props->minor == 5))
             kernel = new NV2Kernel();
         else if (props->major == 3 && props->minor == 0)
             kernel = new NVKernel();
