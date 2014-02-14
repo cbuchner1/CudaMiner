@@ -1007,7 +1007,7 @@ uint32_t NV2Kernel::do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
-    checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t)));
+    checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t), context_streams[stream][thr_id]));
 
     titan_crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
 
