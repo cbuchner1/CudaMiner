@@ -624,12 +624,16 @@ static bool socket_full(curl_socket_t sock, int timeout)
 	struct timeval tv;
 	fd_set rd;
 
-	FD_ZERO(&rd);
-	FD_SET(sock, &rd);
-	tv.tv_sec = timeout;
-	tv.tv_usec = 0;
-	if (select(sock + 1, &rd, NULL, NULL, &tv) > 0)
-		return true;
+	// CB: do not block on the socket for more than 1 second
+	for (int t = 0; t < timeout && !abort_flag; ++t)
+	{
+		FD_ZERO(&rd);
+		FD_SET(sock, &rd);
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		if (select(sock + 1, &rd, NULL, NULL, &tv) > 0)
+			return true;
+	}
 	return false;
 }
 

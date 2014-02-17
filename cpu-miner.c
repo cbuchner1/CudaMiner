@@ -1102,14 +1102,13 @@ static void *stratum_thread(void *userdata)
 		}
 		
 		if (!stratum_socket_full(&stratum, 120)) {
-			applog(LOG_ERR, "Stratum connection timed out");
+			if (!abort_flag) applog(LOG_ERR, "Stratum connection timed out");
 			s = NULL;
 		} else
 			s = stratum_recv_line(&stratum);
 		if (!s) {
-			applog(LOG_ERR, "Disconnecting stratum connection...");
 			stratum_disconnect(&stratum);
-			applog(LOG_ERR, "Stratum connection interrupted");
+			if (!abort_flag) applog(LOG_ERR, "Stratum connection interrupted");
 			continue;
 		}
 		if (!stratum_handle_method(&stratum, s))
