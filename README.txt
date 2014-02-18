@@ -1,16 +1,19 @@
 
-CudaMiner release February 9th 2014 - MaxCoin release #3
---------------------------------------------------------
+CudaMiner release February 18th 2014 - Maxwell launch release
+-------------------------------------------------------------
 
 ***************************************************************
 If you find this tool useful and like to support its continued 
           development, then consider a donation.
 
-  LTC donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm
-  BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM
-  YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4
-  VTC donation address: VrjeFzMgvteCGarLw85KivBzmsiH9fqp4a
-  MAX donation address: mHrhQP9EFArechWxTFJ97s9D3jvcCvEEnt
+   LTC donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm
+   BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM
+   YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4
+   VTC donation address: VrjeFzMgvteCGarLw85KivBzmsiH9fqp4a
+   MAX donation address: mHrhQP9EFArechWxTFJ97s9D3jvcCvEEnt
+  DOGE donation address: DT9ghsGmez6ojVdEZgvaZbT2Z3TruXG6yP
+ PANDA donation address: PvgtxJ2ZKaudRogCXfUMLXVaWUMcKQgRed
+   MRC donation address; 1Lxc4JPDpQRJB8BN4YwhmSQ3Rcu8gjj2Kd
 ***************************************************************
 
 >>> Introduction <<<
@@ -184,7 +187,7 @@ launch configurations are given as a character string, e.g. F27x3
 Available kernel prefixes are:
 F or f - Fermi and Legacy cards (Compute 1.x and 2.x)
 K or k - Kepler cards (Compute 3.0)
-T or t - Titan, GTX 780 and GK208 based cards (Compute 3.5)
+T or t - Titan, GTX 780, GK208 and GM107 based cards (Compute 3.5 or later)
 
 Upper case kernel prefixes mean high register count kernels.
 Lower case kernel prefixes mean low register count kernels.
@@ -296,7 +299,6 @@ The MaxCoin wallet will be available from 19:30 GMT onwards on
 http://maxcoin.co.uk
 
 The following problems remain with the keccak algorithm:
--Autotune for keccak is not working yet.
 -The scrypt scratchpad is still allocated on the GPU. You must use a large -L
  (lookup gap) value in the order of 64 or 128 to allow the scratchpad to fit into
  your GPU memory when using large launch configurations.
@@ -366,6 +368,13 @@ best to re-tune your kernel configuration after every N-factor change.
 
 
 >>> RELEASE HISTORY <<<
+
+  The February 18th release fixes a crash when encountering newer
+  compute capabilities such as 3.7 or 5.0. As 5.0 is reported by Maxwell
+  chips, this will improve the user experience. This release also contains
+  some minor fixes, for example after a CTRL-C or after expiry of the time
+  limit the program will terminate faster. I also made autotune work with
+  Keccak, even though its usefulness is kind of limited.
 
   The February 9th release adds performance improvements and a fix
   for stratum rejects in maxcoin (duplicate submitted shares).

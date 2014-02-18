@@ -830,33 +830,28 @@ extern "C" void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[
     cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
 }
 
-extern "C" uint32_t default_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+extern "C" bool default_do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
-    uint32_t result = 0xffffffff;
+    bool success = true;
   
-    unsigned int GRID_BLOCKS = context_blocks[thr_id];
-    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
-    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
-
-    // setup execution parameters
-    dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
-    dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
-
     checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t), context_streams[stream][thr_id]));
 
     crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
 
     // copy hashes from device memory to host (ALL hashes, lots of data...)
-    if (do_d2h) {
+    if (do_d2h && hash != NULL) {
         size_t mem_size = throughput * sizeof(uint32_t) * 8;
         checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
-    else {
+    else if (hash != NULL) {
         // asynchronous copy of winning nonce (just 4 bytes...)
         checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t),
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
 
-    return result;
+        // catch any kernel launch failures
+    if (cudaPeekAtLastError() != cudaSuccess) success = false;
+
+    return success;
 }

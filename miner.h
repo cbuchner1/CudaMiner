@@ -174,6 +174,7 @@ enum sha256_algos {
 	ALGO_SCRYPT_JANE,	/* CB: scrypt-jane(N,1,1) */
 	ALGO_SHA256D,		/* SHA-256d */
 	ALGO_KECCAK,		/* SHA-3 Keccak */
+	ALGO_BLAKE256,		/* Blake256 */
 };
 
 extern int num_processors; // CB

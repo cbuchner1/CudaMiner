@@ -588,17 +588,23 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
             applog(LOG_INFO, "GPU #%d: Performing auto-tuning (Patience...)", device_map[thr_id]);
 
             // allocate device memory
-            unsigned int mem_size = MAXWARPS[thr_id] * WU_PER_WARP * sizeof(uint32_t) * 32;
-            uint32_t *d_idata;
-            checkCudaErrors(cudaMalloc((void **) &d_idata, mem_size));
-            uint32_t *d_odata;
-            checkCudaErrors(cudaMalloc((void **) &d_odata, mem_size));
+            uint32_t *d_idata = NULL, *d_odata = NULL;
+            if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE) {
+                unsigned int mem_size = MAXWARPS[thr_id] * WU_PER_WARP * sizeof(uint32_t) * 32;
+                checkCudaErrors(cudaMalloc((void **) &d_idata, mem_size));
+                checkCudaErrors(cudaMalloc((void **) &d_odata, mem_size));
 
-            // pre-initialize some device memory
-            uint32_t *h_idata = (uint32_t*)malloc(mem_size);
-            for (unsigned int i=0; i < mem_size/sizeof(uint32_t); ++i) h_idata[i] = i*2654435761UL; // knuth's method
-            checkCudaErrors(cudaMemcpy(d_idata, h_idata, mem_size, cudaMemcpyHostToDevice));
-            free(h_idata);
+                // pre-initialize some device memory
+                uint32_t *h_idata = (uint32_t*)malloc(mem_size);
+                for (unsigned int i=0; i < mem_size/sizeof(uint32_t); ++i) h_idata[i] = i*2654435761UL; // knuth's method
+                checkCudaErrors(cudaMemcpy(d_idata, h_idata, mem_size, cudaMemcpyHostToDevice));
+                free(h_idata);
+            } else if (opt_algo == ALGO_KECCAK)
+            {
+                uint32_t pdata[20] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
+                uint32_t ptarget[8] = {0,0,0,0,0,0,0,0};
+                kernel->prepare_keccak256(thr_id, pdata, ptarget);
+            }
 
             double best_hash_sec = 0.0;
             int best_wpb = 0;
@@ -613,6 +619,9 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 // we want to have blocks for half the multiprocessors at least
                 int MINB = props.multiProcessorCount / 2;
                 int MAXB = MAXTW;
+
+                double tmin = 0.05;
+                if (opt_algo == ALGO_KECCAK) tmin = 0.01;
 
                 applog(LOG_INFO, "GPU #%d: maximum total warps (BxW): %d", device_map[thr_id], MAXTW);
 
@@ -638,13 +647,17 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             bool r = false;
                             do  // average several measurements for better exactness
                             {
-                                r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, LOOKUP_GAP, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                uint32_t hash;
+                                if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE)
+                                    r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, LOOKUP_GAP, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                else if (opt_algo == ALGO_KECCAK)
+                                    r=kernel->do_keccak256(grid, threads, thr_id, 0, NULL, rand(), WU_PER_LAUNCH, false);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
                                 gettimeofday(&tv_end, NULL);
-                                // for a better result averaging, measure for at least 50ms
-                            } while ((tdelta=(1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec))) < 0.05);
+                                // for a better result averaging, measure for at least 50ms (10ms for Keccak)
+                            } while ((tdelta=(1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec))) < tmin);
                             if (cudaGetLastError() != cudaSuccess || !r) continue;
 
                             tdelta /= repeat; // BUGFIX: this averaging over multiple measurements was missing
@@ -710,8 +723,10 @@ skip2:              ;
 skip:           ;
             }
 
-            checkCudaErrors(cudaFree(d_odata));
-            checkCudaErrors(cudaFree(d_idata));
+            if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE) {
+                checkCudaErrors(cudaFree(d_odata));
+                checkCudaErrors(cudaFree(d_idata));
+            }
 
             WARPS_PER_BLOCK = best_wpb;
             applog(LOG_INFO, "GPU #%d: %7.2f hash/s with configuration %c%dx%d", device_map[thr_id], best_hash_sec, kernel->get_identifier(), optimal_blocks, WARPS_PER_BLOCK);
@@ -962,9 +977,17 @@ extern "C" void cuda_prepare_keccak256(int thr_id, const uint32_t host_pdata[20]
     context_kernel[thr_id]->prepare_keccak256(thr_id, host_pdata, ptarget);
 }
 
-extern "C" uint32_t cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+extern "C" bool cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
-    return context_kernel[thr_id]->do_keccak256(thr_id, stream, hash, nonce, throughput, do_d2h);
+    unsigned int GRID_BLOCKS = context_blocks[thr_id];
+    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
+
+    // setup execution parameters
+    dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
+    dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
+
+    return context_kernel[thr_id]->do_keccak256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
 }
 
 extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)

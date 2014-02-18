@@ -57,7 +57,7 @@ char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 #define PROGRAM_NAME		"cudaminer"
-#define PROGRAM_VERSION		"2014-02-09"
+#define PROGRAM_VERSION		"2014-02-18"
 #define DEF_RPC_URL		"http://127.0.0.1:9332/"
 #define LP_SCANTIME		60
 
@@ -132,6 +132,7 @@ static const char *algo_names[] = {
 	"scrypt-jane",
 	"sha256d",
 	"keccak",
+	"blake256",
 };
 
 bool opt_debug = false;
