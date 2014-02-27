@@ -584,14 +584,60 @@ template <int ALGO, MemoryAccess SCHEME, int TEX_DIM> __global__ void kepler_scr
     while(loop--) block_mixer<ALGO>(b, bx, x1, x2, x3);
   } else load_key<ALGO>(d_odata, b, bx);
 
-  for (int i = begin; i < end; i++) {
+  if (SCHEME == SIMPLE)
+  {
+    // better divergent thread handling submitted by nVidia engineers, but
+    // supposedly this does not run with the ANDERSEN memory access scheme
     int j = (__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1));
-    int pos = j/LOOKUP_GAP, loop = j-pos*LOOKUP_GAP;
-    uint4 t, tx; read_keys_direct<SCHEME,TEX_DIM>(t, tx, start+32*pos);
-    while(loop--) block_mixer<ALGO>(t, tx, x1, x2, x3);
-    b ^= t; bx ^= tx;
-    block_mixer<ALGO>(b, bx, x1, x2, x3);
+    int pos = j/LOOKUP_GAP;
+    int loop = -1;
+    uint4 t, tx;
+ 
+    int i = begin;
+    while(i < end) {
+      if(loop==-1)
+      {
+        j = (__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1));
+        pos = j/LOOKUP_GAP;
+        loop = j-pos*LOOKUP_GAP;
+        read_keys_direct<SCHEME,TEX_DIM>(t, tx, start+32*pos);
+      }
+      if(loop==0)
+      {
+        b ^= t; bx ^= tx;
+        t=b;tx=bx;
+      }
+      block_mixer<ALGO>(t, tx, x1, x2, x3);
+      if(loop==0)
+      {
+        b=t;bx=tx;
+        i++;
+      }
+      loop--;
+    }
   }
+  else
+  {
+    // this is my original implementation, now used with the ANDERSEN
+    // memory access scheme only.
+    for (int i = begin; i < end; i++) {
+      int j = (__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1));
+      int pos = j/LOOKUP_GAP, loop = j-pos*LOOKUP_GAP;
+      uint4 t, tx; read_keys_direct<SCHEME,TEX_DIM>(t, tx, start+32*pos);
+      while(loop--) block_mixer<ALGO>(t, tx, x1, x2, x3);
+      b ^= t; bx ^= tx;
+      block_mixer<ALGO>(b, bx, x1, x2, x3);
+    }
+  }
+
+//  for (int i = begin; i < end; i++) {
+//    int j = (__shfl((int)bx.x, (threadIdx.x & 0x1c)) & (c_N_1));
+//    int pos = j/LOOKUP_GAP, loop = j-pos*LOOKUP_GAP;
+//    uint4 t, tx; read_keys_direct<SCHEME,TEX_DIM>(t, tx, start+32*pos);
+//    while(loop--) block_mixer<ALGO>(t, tx, x1, x2, x3);
+//    b ^= t; bx ^= tx;
+//    block_mixer<ALGO>(b, bx, x1, x2, x3);
+//  }
 
   store_key<ALGO>(d_odata, b, bx);
 }
