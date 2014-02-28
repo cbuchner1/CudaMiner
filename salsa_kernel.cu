@@ -143,9 +143,9 @@ KernelInterface *Best_Kernel_Heuristics(cudaDeviceProp *props)
     if (opt_algo == ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192) || opt_algo == ALGO_KECCAK)
     {
         // high register count kernels (scrypt, low N-factor scrypt-jane)
-        if (opt_algo != ALGO_KECCAK && (props->major > 3 || (props->major == 3 && props->minor >= 5)))
+        if (props->major > 3 || (props->major == 3 && props->minor >= 5))
             kernel = new NV2Kernel(); // we don't want this for Keccak though
-        else if ((props->major == 3 && props->minor == 0) || (opt_algo == ALGO_KECCAK && (props->major > 3 || (props->major == 3 && props->minor >= 5))))
+        else if (props->major == 3 && props->minor == 0)
             kernel = new NVKernel();
         else if (props->major == 2 || props->major == 1)
             kernel = new FermiKernel();

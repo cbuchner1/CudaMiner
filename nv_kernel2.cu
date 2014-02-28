@@ -677,8 +677,30 @@ extern std::map<int, uint32_t *> context_hash[2];
 
 __constant__ uint64_t ptarget64[4];
 
-#define ROL(a, offset) ((((uint64_t)a) << ((offset) % 64)) ^ (((uint64_t)a) >> (64-((offset) % 64))))
+// ROL macro replaced with the inline assembly code below to work around a compiler issue
+//#define ROL(a, offset) ((((uint64_t)a) << ((offset) % 64)) ^ (((uint64_t)a) >> (64-((offset) % 64))))
 #define ROL_mult8(a, offset) ROL(a, offset)
+
+__inline__ __device__ uint64_t devectorize(uint2 v) { return __double_as_longlong(__hiloint2double(v.y, v.x)); }
+__inline__ __device__ uint2 vectorize(uint64_t v) { return make_uint2(__double2loint(__longlong_as_double(v)), __double2hiint(__longlong_as_double(v))); }
+
+__inline__ __device__ uint2 operator^ (uint2 a, uint2 b) { return make_uint2(a.x ^ b.x, a.y ^ b.y); }
+__inline__ __device__ uint2 operator& (uint2 a, uint2 b) { return make_uint2(a.x & b.x, a.y & b.y); }
+__inline__ __device__ uint2 operator| (uint2 a, uint2 b) { return make_uint2(a.x | b.x, a.y | b.y); }
+__inline__ __device__ uint2 operator~ (uint2 a) { return make_uint2(~a.x, ~a.y); }
+__inline__ __device__ void operator^= (uint2 &a, uint2 b) { a = a ^ b; }
+
+__inline__ __device__ uint2 ROL(uint2 a, int offset) {
+    uint2 result;
+    if(offset >= 32) {
+        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.x) : "r"(a.x), "r"(a.y), "r"(offset));
+        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.y) : "r"(a.y), "r"(a.x), "r"(offset));
+    } else {
+        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.x) : "r"(a.y), "r"(a.x), "r"(offset));
+        asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.y) : "r"(a.x), "r"(a.y), "r"(offset));
+    }
+    return result;
+}
 
 __constant__ uint64_t KeccakF_RoundConstants[24];
 
@@ -720,47 +742,47 @@ static __device__ uint32_t cuda_swab32(uint32_t x)
 
 __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_good, bool validate )
 {
-    uint64_t Aba, Abe, Abi, Abo, Abu;
-    uint64_t Aga, Age, Agi, Ago, Agu;
-    uint64_t Aka, Ake, Aki, Ako, Aku;
-    uint64_t Ama, Ame, Ami, Amo, Amu;
-    uint64_t Asa, Ase, Asi, Aso, Asu;
-    uint64_t BCa, BCe, BCi, BCo, BCu;
-    uint64_t Da, De, Di, Do, Du;
-    uint64_t Eba, Ebe, Ebi, Ebo, Ebu;
-    uint64_t Ega, Ege, Egi, Ego, Egu;
-    uint64_t Eka, Eke, Eki, Eko, Eku;
-    uint64_t Ema, Eme, Emi, Emo, Emu;
-    uint64_t Esa, Ese, Esi, Eso, Esu;
+    uint2 Aba, Abe, Abi, Abo, Abu;
+    uint2 Aga, Age, Agi, Ago, Agu;
+    uint2 Aka, Ake, Aki, Ako, Aku;
+    uint2 Ama, Ame, Ami, Amo, Amu;
+    uint2 Asa, Ase, Asi, Aso, Asu;
+    uint2 BCa, BCe, BCi, BCo, BCu;
+    uint2 Da, De, Di, Do, Du;
+    uint2 Eba, Ebe, Ebi, Ebo, Ebu;
+    uint2 Ega, Ege, Egi, Ego, Egu;
+    uint2 Eka, Eke, Eki, Eko, Eku;
+    uint2 Ema, Eme, Emi, Emo, Emu;
+    uint2 Esa, Ese, Esi, Eso, Esu;
 
     //copyFromState(A, state)
-    Aba = pdata64[0];
-    Abe = pdata64[1];
-    Abi = pdata64[2];
-    Abo = pdata64[3];
-    Abu = pdata64[4];
-    Aga = pdata64[5];
-    Age = pdata64[6];
-    Agi = pdata64[7];
-    Ago = pdata64[8];
-    Agu = (pdata64[9] & 0x00000000FFFFFFFFULL) | (((uint64_t)cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x))) << 32);
-    Aka = 0x0000000000000001ULL;
-    Ake = 0;
-    Aki = 0;
-    Ako = 0;
-    Aku = 0;
-    Ama = 0;
-    Ame = 0x8000000000000000ULL;
-    Ami = 0;
-    Amo = 0;
-    Amu = 0;
-    Asa = 0;
-    Ase = 0;
-    Asi = 0;
-    Aso = 0;
-    Asu = 0;
+    Aba = vectorize(pdata64[0]);
+    Abe = vectorize(pdata64[1]);
+    Abi = vectorize(pdata64[2]);
+    Abo = vectorize(pdata64[3]);
+    Abu = vectorize(pdata64[4]);
+    Aga = vectorize(pdata64[5]);
+    Age = vectorize(pdata64[6]);
+    Agi = vectorize(pdata64[7]);
+    Ago = vectorize(pdata64[8]);
+    Agu = vectorize((pdata64[9] & 0x00000000FFFFFFFFULL) | (((uint64_t)cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x))) << 32));
+    Aka = vectorize(0x0000000000000001ULL);
+    Ake = vectorize(0);
+    Aki = vectorize(0);
+    Ako = vectorize(0);
+    Aku = vectorize(0);
+    Ama = vectorize(0);
+    Ame = vectorize(0x8000000000000000ULL);
+    Ami = vectorize(0);
+    Amo = vectorize(0);
+    Amu = vectorize(0);
+    Asa = vectorize(0);
+    Ase = vectorize(0);
+    Asi = vectorize(0);
+    Aso = vectorize(0);
+    Asu = vectorize(0);
 
-#pragma unroll 12
+//#pragma unroll 12
     for( int laneCount = 0; laneCount < 24; laneCount += 2 )
     {
         //    prepareTheta
@@ -788,7 +810,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Asu ^= Du;
         BCu = ROL(Asu, 14);
         Eba =   BCa ^((~BCe)&  BCi );
-        Eba ^= (uint64_t)KeccakF_RoundConstants[laneCount];
+        Eba ^= vectorize(KeccakF_RoundConstants[laneCount]);
         Ebe =   BCe ^((~BCi)&  BCo );
         Ebi =   BCi ^((~BCo)&  BCu );
         Ebo =   BCo ^((~BCu)&  BCa );
@@ -883,7 +905,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Esu ^= Du;
         BCu = ROL(Esu, 14);
         Aba =   BCa ^((~BCe)&  BCi );
-        Aba ^= (uint64_t)KeccakF_RoundConstants[laneCount+1];
+        Aba ^= vectorize(KeccakF_RoundConstants[laneCount+1]);
         Abe =   BCe ^((~BCi)&  BCo );
         Abi =   BCi ^((~BCo)&  BCu );
         Abo =   BCo ^((~BCu)&  BCa );
@@ -956,21 +978,21 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
 
     if (validate) {
         g_out += 4 * ((blockIdx.x * blockDim.x) + threadIdx.x);
-        g_out[3] = Abo;
-        g_out[2] = Abi;
-        g_out[1] = Abe;
-        g_out[0] = Aba;
+        g_out[3] = devectorize(Abo);
+        g_out[2] = devectorize(Abi);
+        g_out[1] = devectorize(Abe);
+        g_out[0] = devectorize(Aba);
     }
     
     // the likelyhood of meeting the hashing target is so low, that we're not guarding this
     // with atomic writes, locks or similar...
     uint64_t *g_good64 = (uint64_t*)g_good;
-    if (Abo <=  ptarget64[3]) {
-        if (Abo < g_good64[3]) {
-            g_good64[3] = Abo;
-            g_good64[2] = Abi;
-            g_good64[1] = Abe;
-            g_good64[0] = Aba;
+    if (devectorize(Abo) <=  ptarget64[3]) {
+        if (devectorize(Abo) < g_good64[3]) {
+            g_good64[3] = devectorize(Abo);
+            g_good64[2] = devectorize(Abi);
+            g_good64[1] = devectorize(Abe);
+            g_good64[0] = devectorize(Aba);
             g_good[8] = nonce + ((blockIdx.x * blockDim.x) + threadIdx.x);
         }
     }

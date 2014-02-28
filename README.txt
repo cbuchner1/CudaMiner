@@ -1,5 +1,5 @@
 
-CudaMiner release February 18th 2014 - Maxwell launch release
+CudaMiner release February 28th 2014 - Speedup release
 -------------------------------------------------------------
 
 ***************************************************************
@@ -288,7 +288,7 @@ prematurely. The keccak hashing feature is not complete and user friendly
 yet, but it should be good enough to get you instamining AT COIN LAUNCH
 with several dozen megahashes at least.
 
-GTX 780Ti devices have been reported to do 170 MHash/s. Yay!
+GTX 780 devices break 200 MHash/s. Yay!
 A GTX 660Ti can do nearly 100 MHash/s.
 
 The CudaMiner Windows binary release is made around 19:00 GMT on February 6th.
@@ -309,8 +309,8 @@ Compute 3.5 devices. Best to try. Launch configs should look somewhat like this
 (do not exceed the warp figures given here)
 
 -l F1000x16
--l K1000x32   << fastest on my GTX 780
--l T1000x24
+-l K1000x32
+-l T1000x24   << now fastest on my GTX 780
 
 Best to replace the 1000 blocks with the number of your card's CUDA
 cores, or even twice that value. It seems fastest that way,
@@ -318,26 +318,31 @@ cores, or even twice that value. It seems fastest that way,
 Pick a pool or solo-mine. Good luck!
 
 
-Example benchmarking session:
+Example session on GTX 780Ti:
 
-cudaminer.exe --algo=keccak -d gtx780 -l K1024x32 -L 128 --benchmark
+cudaminer.exe --algo=keccak -d gtx780 -i 0 -m 1 -l T2304x24 -o stratum+tcp://maxpool.1gh.com:17333 -u WALLETADDRESS -p x
 
-[2014-02-06 19:09:38] 1 miner threads started, using 'keccak' algorithm.
-[2014-02-06 19:09:44] GPU #0: GeForce GTX 780 with compute capability 3.5
-[2014-02-06 19:09:44] GPU #0: interactive: 1, tex-cache: 0 , single-alloc: 0
-[2014-02-06 19:09:44] GPU #0: 32 hashes / 0.0 MB per warp.
-[2014-02-06 19:09:45] GPU #0: using launch configuration K1024x32
-[2014-02-06 19:09:48] GPU #0: GeForce GTX 780, 130181 khash/s
-[2014-02-06 19:09:48] Total: 130181 khash/s
-[2014-02-06 19:09:53] GPU #0: GeForce GTX 780, 144760 khash/s
-[2014-02-06 19:09:53] Total: 144760 khash/s
-[2014-02-06 19:09:58] GPU #0: GeForce GTX 780, 138692 khash/s
-[2014-02-06 19:09:58] Total: 138692 khash/s
-[2014-02-06 19:10:03] GPU #0: GeForce GTX 780, 130204 khash/s
-[2014-02-06 19:10:03] Total: 130204 khash/s
-[2014-02-06 19:10:08] GPU #0: GeForce GTX 780, 142979 khash/s
-[2014-02-06 19:10:08] Total: 142979 khash/s
-
+           *** CudaMiner for nVidia GPUs by Christian Buchner ***
+                     This is version 2014-02-18 (beta)
+        based on pooler-cpuminer 2.3.2 (c) 2010 Jeff Garzik, 2012 pooler
+            Cuda additions Copyright 2013,2014 Christian Buchner
+          LTC donation address: LKS1WDKGED647msBQfLBHV3Ls8sveGncnm
+          BTC donation address: 16hJF5mceSojnTD3ZTUDqdRhDyPJzoRakM
+          YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4
+[2014-02-28 22:56:00] Starting Stratum on stratum+tcp://maxpool.1gh.com:17333
+[2014-02-28 22:56:00] 1 miner threads started, using 'keccak' algorithm.
+[2014-02-28 22:56:01] GPU #0: GeForce GTX 780 with compute capability 3.5
+[2014-02-28 22:56:01] GPU #0: interactive: 0, tex-cache: 0 , single-alloc: 1
+[2014-02-28 22:56:01] GPU #0: 32 hashes / 4.0 MB per warp.
+[2014-02-28 22:56:01] GPU #0: using launch configuration T2304x24
+[2014-02-28 22:56:02] GPU #0: GeForce GTX 780, 196998 khash/s
+[2014-02-28 22:56:02] accepted: 1/1 (100.00%), 196998 khash/s (yay!!!)
+[2014-02-28 22:56:04] GPU #0: GeForce GTX 780, 200200 khash/s
+...
+[2014-02-28 22:56:05] GPU #0: GeForce GTX 780, 202637 khash/s
+[2014-02-28 22:56:05] accepted: 4/4 (100.00%), 202637 khash/s (yay!!!)
+[2014-02-28 22:56:07] GPU #0: GeForce GTX 780, 203136 khash/s
+[2014-02-28 22:56:07] accepted: 5/5 (100.00%), 203136 khash/s (yay!!!)
 
 
 >>> Additional Notes <<<
@@ -368,6 +373,9 @@ best to re-tune your kernel configuration after every N-factor change.
 
 
 >>> RELEASE HISTORY <<<
+
+  The February 28th release adds speed increases on Yacoin (high N-factor
+  scrypt-jane) and on keccak for Kepler and Maxwell devices. That is all ;)
 
   The February 18th release fixes a crash when encountering newer
   compute capabilities such as 3.7 or 5.0. As 5.0 is reported by Maxwell
@@ -448,7 +456,8 @@ David Andersen (USA, Carnegie Mellon University): designed a low
 
 Alexey Panteleev (Moscow, nVidia): submitted a kernel with improved
                         memory access functions for Kepler devices 
-                        providing the fastest scrypt performance.
+                        providing the fastest scrypt performance
+                        and provided further patches for other kernels.
 
 and also many thanks to anyone else who contributed to the original
 cpuminer application (Jeff Garzik, pooler) !
