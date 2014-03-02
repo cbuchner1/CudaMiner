@@ -677,20 +677,9 @@ extern std::map<int, uint32_t *> context_hash[2];
 
 __constant__ uint64_t ptarget64[4];
 
-// ROL macro replaced with the inline assembly code below to work around a compiler issue
+// ROL macro replaced with the inline assembly code below to work around a performance issue
 //#define ROL(a, offset) ((((uint64_t)a) << ((offset) % 64)) ^ (((uint64_t)a) >> (64-((offset) % 64))))
-#define ROL_mult8(a, offset) ROL(a, offset)
-
-__inline__ __device__ uint64_t devectorize(uint2 v) { return __double_as_longlong(__hiloint2double(v.y, v.x)); }
-__inline__ __device__ uint2 vectorize(uint64_t v) { return make_uint2(__double2loint(__longlong_as_double(v)), __double2hiint(__longlong_as_double(v))); }
-
-__inline__ __device__ uint2 operator^ (uint2 a, uint2 b) { return make_uint2(a.x ^ b.x, a.y ^ b.y); }
-__inline__ __device__ uint2 operator& (uint2 a, uint2 b) { return make_uint2(a.x & b.x, a.y & b.y); }
-__inline__ __device__ uint2 operator| (uint2 a, uint2 b) { return make_uint2(a.x | b.x, a.y | b.y); }
-__inline__ __device__ uint2 operator~ (uint2 a) { return make_uint2(~a.x, ~a.y); }
-__inline__ __device__ void operator^= (uint2 &a, uint2 b) { a = a ^ b; }
-
-__inline__ __device__ uint2 ROL(uint2 a, int offset) {
+__inline__ __device__ uint2 ROL(const uint2 a, const int offset) {
     uint2 result;
     if(offset >= 32) {
         asm("shf.l.wrap.b32 %0, %1, %2, %3;" : "=r"(result.x) : "r"(a.x), "r"(a.y), "r"(offset));
@@ -701,6 +690,15 @@ __inline__ __device__ uint2 ROL(uint2 a, int offset) {
     }
     return result;
 }
+#define ROL_mult8(a, offset) ROL(a, offset)
+
+__inline__ __device__ uint64_t devectorize(uint2 v) { return __double_as_longlong(__hiloint2double(v.y, v.x)); }
+__inline__ __device__ uint2 vectorize(uint64_t v) { return make_uint2(__double2loint(__longlong_as_double(v)), __double2hiint(__longlong_as_double(v))); }
+__inline__ __device__ uint2 operator^ (uint2 a, uint2 b) { return make_uint2(a.x ^ b.x, a.y ^ b.y); }
+__inline__ __device__ uint2 operator& (uint2 a, uint2 b) { return make_uint2(a.x & b.x, a.y & b.y); }
+__inline__ __device__ uint2 operator| (uint2 a, uint2 b) { return make_uint2(a.x | b.x, a.y | b.y); }
+__inline__ __device__ uint2 operator~ (uint2 a) { return make_uint2(~a.x, ~a.y); }
+__inline__ __device__ void operator^= (uint2 &a, uint2 b) { a = a ^ b; }
 
 __constant__ uint64_t KeccakF_RoundConstants[24];
 
@@ -740,6 +738,9 @@ static __device__ uint32_t cuda_swab32(uint32_t x)
           | ((x >> 8) & 0x0000ff00u) | ((x >> 24) & 0x000000ffu));
 }
 
+// in this implementation the first and last iteration of the for() loop were explicitly
+// unrolled and redundant operations were removed (e.g. operations on zero inputs, and
+// computation of unnecessary outputs)
 __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_good, bool validate )
 {
     uint2 Aba, Abe, Abi, Abo, Abu;
@@ -755,35 +756,201 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
     uint2 Ema, Eme, Emi, Emo, Emu;
     uint2 Esa, Ese, Esi, Eso, Esu;
 
-    //copyFromState(A, state)
-    Aba = vectorize(pdata64[0]);
-    Abe = vectorize(pdata64[1]);
-    Abi = vectorize(pdata64[2]);
-    Abo = vectorize(pdata64[3]);
-    Abu = vectorize(pdata64[4]);
-    Aga = vectorize(pdata64[5]);
-    Age = vectorize(pdata64[6]);
-    Agi = vectorize(pdata64[7]);
-    Ago = vectorize(pdata64[8]);
+    // embed unique nonce into source data stream in pdata[]
     Agu = vectorize((pdata64[9] & 0x00000000FFFFFFFFULL) | (((uint64_t)cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x))) << 32));
-    Aka = vectorize(0x0000000000000001ULL);
-    Ake = vectorize(0);
-    Aki = vectorize(0);
-    Ako = vectorize(0);
-    Aku = vectorize(0);
-    Ama = vectorize(0);
-    Ame = vectorize(0x8000000000000000ULL);
-    Ami = vectorize(0);
-    Amo = vectorize(0);
-    Amu = vectorize(0);
-    Asa = vectorize(0);
-    Ase = vectorize(0);
-    Asi = vectorize(0);
-    Aso = vectorize(0);
-    Asu = vectorize(0);
 
-//#pragma unroll 12
-    for( int laneCount = 0; laneCount < 24; laneCount += 2 )
+    //    prepareTheta
+    BCa = vectorize(pdata64[0]^pdata64[5]^0x0000000000000001ULL);
+    BCe = vectorize(pdata64[1]^pdata64[6]^0x8000000000000000ULL);
+    BCi = vectorize(pdata64[2]^pdata64[7]);
+    BCo = vectorize(pdata64[3]^pdata64[8]);
+    BCu = vectorize(pdata64[4])^Agu;
+
+    //thetaRhoPiChiIotaPrepareTheta(round  , A, E)
+    Da = BCu^ROL(BCe, 1);
+    De = BCa^ROL(BCi, 1);
+    Di = BCe^ROL(BCo, 1);
+    Do = BCi^ROL(BCu, 1);
+    Du = BCo^ROL(BCa, 1);
+
+    Aba = vectorize(pdata64[0]) ^ Da;
+    BCa = Aba;
+    Age = vectorize(pdata64[6]) ^ De;
+    BCe = ROL(Age, 44);
+    Aki = Di;
+    BCi = ROL(Aki, 43);
+    Amo = Do;
+    BCo = ROL(Amo, 21);
+    Asu = Du;
+    BCu = ROL(Asu, 14);
+    Eba =   BCa ^((~BCe)&  BCi );
+    Eba ^= vectorize((uint64_t)KeccakF_RoundConstants[0]);
+    Ebe =   BCe ^((~BCi)&  BCo );
+    Ebi =   BCi ^((~BCo)&  BCu );
+    Ebo =   BCo ^((~BCu)&  BCa );
+    Ebu =   BCu ^((~BCa)&  BCe );
+
+    Abo = vectorize(pdata64[3]) ^ Do;
+    BCa = ROL(Abo, 28);
+    Agu ^= Du;
+    BCe = ROL(Agu, 20);
+    Aka = vectorize(0x0000000000000001ULL) ^ Da;
+    BCi = ROL(Aka,  3);
+    Ame = vectorize(0x8000000000000000ULL) ^ De;
+    BCo = ROL(Ame, 45);
+    Asi = Di;
+    BCu = ROL(Asi, 61);
+    Ega =   BCa ^((~BCe)&  BCi );
+    Ege =   BCe ^((~BCi)&  BCo );
+    Egi =   BCi ^((~BCo)&  BCu );
+    Ego =   BCo ^((~BCu)&  BCa );
+    Egu =   BCu ^((~BCa)&  BCe );
+
+    Abe = vectorize(pdata64[1]) ^ De;
+    BCa = ROL(Abe,  1);
+    Agi = vectorize(pdata64[7]) ^ Di;
+    BCe = ROL(Agi,  6);
+    Ako = Do;
+    BCi = ROL(Ako, 25);
+    Amu = Du;
+    BCo = ROL(Amu,  8);
+    Asa = Da;
+    BCu = ROL(Asa, 18);
+    Eka =   BCa ^((~BCe)&  BCi );
+    Eke =   BCe ^((~BCi)&  BCo );
+    Eki =   BCi ^((~BCo)&  BCu );
+    Eko =   BCo ^((~BCu)&  BCa );
+    Eku =   BCu ^((~BCa)&  BCe );
+
+    Abu = vectorize(pdata64[4]) ^ Du;
+    BCa = ROL(Abu, 27);
+    Aga = vectorize(pdata64[5]) ^ Da;
+    BCe = ROL(Aga, 36);
+    Ake = De;
+    BCi = ROL(Ake, 10);
+    Ami = Di;
+    BCo = ROL(Ami, 15);
+    Aso = Do;
+    BCu = ROL(Aso, 56);
+    Ema =   BCa ^((~BCe)&  BCi );
+    Eme =   BCe ^((~BCi)&  BCo );
+    Emi =   BCi ^((~BCo)&  BCu );
+    Emo =   BCo ^((~BCu)&  BCa );
+    Emu =   BCu ^((~BCa)&  BCe );
+
+    Abi = vectorize(pdata64[2]) ^ Di;
+    BCa = ROL(Abi, 62);
+    Ago = vectorize(pdata64[8]) ^ Do;
+    BCe = ROL(Ago, 55);
+    Aku = Du;
+    BCi = ROL(Aku, 39);
+    Ama = Da;
+    BCo = ROL(Ama, 41);
+    Ase = De;
+    BCu = ROL(Ase,  2);
+    Esa =   BCa ^((~BCe)&  BCi );
+    Ese =   BCe ^((~BCi)&  BCo );
+    Esi =   BCi ^((~BCo)&  BCu );
+    Eso =   BCo ^((~BCu)&  BCa );
+    Esu =   BCu ^((~BCa)&  BCe );
+
+    //    prepareTheta
+    BCa = Eba^Ega^Eka^Ema^Esa;
+    BCe = Ebe^Ege^Eke^Eme^Ese;
+    BCi = Ebi^Egi^Eki^Emi^Esi;
+    BCo = Ebo^Ego^Eko^Emo^Eso;
+    BCu = Ebu^Egu^Eku^Emu^Esu;
+
+    //thetaRhoPiChiIotaPrepareTheta(round+1, E, A)
+    Da = BCu^ROL(BCe, 1);
+    De = BCa^ROL(BCi, 1);
+    Di = BCe^ROL(BCo, 1);
+    Do = BCi^ROL(BCu, 1);
+    Du = BCo^ROL(BCa, 1);
+
+    Eba ^= Da;
+    BCa = Eba;
+    Ege ^= De;
+    BCe = ROL(Ege, 44);
+    Eki ^= Di;
+    BCi = ROL(Eki, 43);
+    Emo ^= Do;
+    BCo = ROL(Emo, 21);
+    Esu ^= Du;
+    BCu = ROL(Esu, 14);
+    Aba =   BCa ^((~BCe)&  BCi );
+    Aba ^= vectorize((uint64_t)KeccakF_RoundConstants[1]);
+    Abe =   BCe ^((~BCi)&  BCo );
+    Abi =   BCi ^((~BCo)&  BCu );
+    Abo =   BCo ^((~BCu)&  BCa );
+    Abu =   BCu ^((~BCa)&  BCe );
+
+    Ebo ^= Do;
+    BCa = ROL(Ebo, 28);
+    Egu ^= Du;
+    BCe = ROL(Egu, 20);
+    Eka ^= Da;
+    BCi = ROL(Eka, 3);
+    Eme ^= De;
+    BCo = ROL(Eme, 45);
+    Esi ^= Di;
+    BCu = ROL(Esi, 61);
+    Aga =   BCa ^((~BCe)&  BCi );
+    Age =   BCe ^((~BCi)&  BCo );
+    Agi =   BCi ^((~BCo)&  BCu );
+    Ago =   BCo ^((~BCu)&  BCa );
+    Agu =   BCu ^((~BCa)&  BCe );
+
+    Ebe ^= De;
+    BCa = ROL(Ebe, 1);
+    Egi ^= Di;
+    BCe = ROL(Egi, 6);
+    Eko ^= Do;
+    BCi = ROL(Eko, 25);
+    Emu ^= Du;
+    BCo = ROL(Emu, 8);
+    Esa ^= Da;
+    BCu = ROL(Esa, 18);
+    Aka =   BCa ^((~BCe)&  BCi );
+    Ake =   BCe ^((~BCi)&  BCo );
+    Aki =   BCi ^((~BCo)&  BCu );
+    Ako =   BCo ^((~BCu)&  BCa );
+    Aku =   BCu ^((~BCa)&  BCe );
+
+    Ebu ^= Du;
+    BCa = ROL(Ebu, 27);
+    Ega ^= Da;
+    BCe = ROL(Ega, 36);
+    Eke ^= De;
+    BCi = ROL(Eke, 10);
+    Emi ^= Di;
+    BCo = ROL(Emi, 15);
+    Eso ^= Do;
+    BCu = ROL(Eso, 56);
+    Ama =   BCa ^((~BCe)&  BCi );
+    Ame =   BCe ^((~BCi)&  BCo );
+    Ami =   BCi ^((~BCo)&  BCu );
+    Amo =   BCo ^((~BCu)&  BCa );
+    Amu =   BCu ^((~BCa)&  BCe );
+
+    Ebi ^= Di;
+    BCa = ROL(Ebi, 62);
+    Ego ^= Do;
+    BCe = ROL(Ego, 55);
+    Eku ^= Du;
+    BCi = ROL(Eku, 39);
+    Ema ^= Da;
+    BCo = ROL(Ema, 41);
+    Ese ^= De;
+    BCu = ROL(Ese, 2);
+    Asa =   BCa ^((~BCe)&  BCi );
+    Ase =   BCe ^((~BCi)&  BCo );
+    Asi =   BCi ^((~BCo)&  BCu );
+    Aso =   BCo ^((~BCu)&  BCa );
+    Asu =   BCu ^((~BCa)&  BCe );
+
+//#pragma unroll 10
+    for( int laneCount = 2; laneCount < 22; laneCount += 2 )
     {
         //    prepareTheta
         BCa = Aba^Aga^Aka^Ama^Asa;
@@ -810,7 +977,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Asu ^= Du;
         BCu = ROL(Asu, 14);
         Eba =   BCa ^((~BCe)&  BCi );
-        Eba ^= vectorize(KeccakF_RoundConstants[laneCount]);
+        Eba ^= vectorize((uint64_t)KeccakF_RoundConstants[laneCount]);
         Ebe =   BCe ^((~BCi)&  BCo );
         Ebi =   BCi ^((~BCo)&  BCu );
         Ebo =   BCo ^((~BCu)&  BCa );
@@ -839,7 +1006,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Ako ^= Do;
         BCi = ROL(Ako, 25);
         Amu ^= Du;
-        BCo = ROL_mult8(Amu,  8);
+        BCo = ROL(Amu,  8);
         Asa ^= Da;
         BCu = ROL(Asa, 18);
         Eka =   BCa ^((~BCe)&  BCi );
@@ -857,7 +1024,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Ami ^= Di;
         BCo = ROL(Ami, 15);
         Aso ^= Do;
-        BCu = ROL_mult8(Aso, 56);
+        BCu = ROL(Aso, 56);
         Ema =   BCa ^((~BCe)&  BCi );
         Eme =   BCe ^((~BCi)&  BCo );
         Emi =   BCi ^((~BCo)&  BCu );
@@ -905,7 +1072,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Esu ^= Du;
         BCu = ROL(Esu, 14);
         Aba =   BCa ^((~BCe)&  BCi );
-        Aba ^= vectorize(KeccakF_RoundConstants[laneCount+1]);
+        Aba ^= vectorize((uint64_t)KeccakF_RoundConstants[laneCount+1]);
         Abe =   BCe ^((~BCi)&  BCo );
         Abi =   BCi ^((~BCo)&  BCu );
         Abo =   BCo ^((~BCu)&  BCa );
@@ -934,7 +1101,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Eko ^= Do;
         BCi = ROL(Eko, 25);
         Emu ^= Du;
-        BCo = ROL_mult8(Emu, 8);
+        BCo = ROL(Emu, 8);
         Esa ^= Da;
         BCu = ROL(Esa, 18);
         Aka =   BCa ^((~BCe)&  BCi );
@@ -952,7 +1119,7 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Emi ^= Di;
         BCo = ROL(Emi, 15);
         Eso ^= Do;
-        BCu = ROL_mult8(Eso, 56);
+        BCu = ROL(Eso, 56);
         Ama =   BCa ^((~BCe)&  BCi );
         Ame =   BCe ^((~BCi)&  BCo );
         Ami =   BCi ^((~BCo)&  BCu );
@@ -975,6 +1142,131 @@ __global__ void titan_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_
         Aso =   BCo ^((~BCu)&  BCa );
         Asu =   BCu ^((~BCa)&  BCe );
     }
+
+    //    prepareTheta
+    BCa = Aba^Aga^Aka^Ama^Asa;
+    BCe = Abe^Age^Ake^Ame^Ase;
+    BCi = Abi^Agi^Aki^Ami^Asi;
+    BCo = Abo^Ago^Ako^Amo^Aso;
+    BCu = Abu^Agu^Aku^Amu^Asu;
+
+    //thetaRhoPiChiIotaPrepareTheta(round  , A, E)
+    Da = BCu^ROL(BCe, 1);
+    De = BCa^ROL(BCi, 1);
+    Di = BCe^ROL(BCo, 1);
+    Do = BCi^ROL(BCu, 1);
+    Du = BCo^ROL(BCa, 1);
+
+    Aba ^= Da;
+    BCa = Aba;
+    Age ^= De;
+    BCe = ROL(Age, 44);
+    Aki ^= Di;
+    BCi = ROL(Aki, 43);
+    Amo ^= Do;
+    BCo = ROL(Amo, 21);
+    Asu ^= Du;
+    BCu = ROL(Asu, 14);
+    Eba =   BCa ^((~BCe)&  BCi );
+    Eba ^= vectorize((uint64_t)KeccakF_RoundConstants[22]);
+    Ebe =   BCe ^((~BCi)&  BCo );
+    Ebi =   BCi ^((~BCo)&  BCu );
+    Ebo =   BCo ^((~BCu)&  BCa );
+    Ebu =   BCu ^((~BCa)&  BCe );
+
+    Abo ^= Do;
+    BCa = ROL(Abo, 28);
+    Agu ^= Du;
+    BCe = ROL(Agu, 20);
+    Aka ^= Da;
+    BCi = ROL(Aka,  3);
+    Ame ^= De;
+    BCo = ROL(Ame, 45);
+    Asi ^= Di;
+    BCu = ROL(Asi, 61);
+    Ega =   BCa ^((~BCe)&  BCi );
+    Ege =   BCe ^((~BCi)&  BCo );
+    Egi =   BCi ^((~BCo)&  BCu );
+    Ego =   BCo ^((~BCu)&  BCa );
+    Egu =   BCu ^((~BCa)&  BCe );
+
+    Abe ^= De;
+    BCa = ROL(Abe,  1);
+    Agi ^= Di;
+    BCe = ROL(Agi,  6);
+    Ako ^= Do;
+    BCi = ROL(Ako, 25);
+    Amu ^= Du;
+    BCo = ROL(Amu,  8);
+    Asa ^= Da;
+    BCu = ROL(Asa, 18);
+    Eka =   BCa ^((~BCe)&  BCi );
+    Eke =   BCe ^((~BCi)&  BCo );
+    Eki =   BCi ^((~BCo)&  BCu );
+    Eko =   BCo ^((~BCu)&  BCa );
+    Eku =   BCu ^((~BCa)&  BCe );
+
+    Abu ^= Du;
+    BCa = ROL(Abu, 27);
+    Aga ^= Da;
+    BCe = ROL(Aga, 36);
+    Ake ^= De;
+    BCi = ROL(Ake, 10);
+    Ami ^= Di;
+    BCo = ROL(Ami, 15);
+    Aso ^= Do;
+    BCu = ROL(Aso, 56);
+    Ema =   BCa ^((~BCe)&  BCi );
+    Eme =   BCe ^((~BCi)&  BCo );
+    Emi =   BCi ^((~BCo)&  BCu );
+    Emo =   BCo ^((~BCu)&  BCa );
+    Emu =   BCu ^((~BCa)&  BCe );
+
+    Abi ^= Di;
+    BCa = ROL(Abi, 62);
+    Ago ^= Do;
+    BCe = ROL(Ago, 55);
+    Aku ^= Du;
+    BCi = ROL(Aku, 39);
+    Ama ^= Da;
+    BCo = ROL(Ama, 41);
+    Ase ^= De;
+    BCu = ROL(Ase,  2);
+    Esa =   BCa ^((~BCe)&  BCi );
+    Ese =   BCe ^((~BCi)&  BCo );
+    Esi =   BCi ^((~BCo)&  BCu );
+    Eso =   BCo ^((~BCu)&  BCa );
+    Esu =   BCu ^((~BCa)&  BCe );
+
+    //    prepareTheta
+    BCa = Eba^Ega^Eka^Ema^Esa;
+    BCe = Ebe^Ege^Eke^Eme^Ese;
+    BCi = Ebi^Egi^Eki^Emi^Esi;
+    BCo = Ebo^Ego^Eko^Emo^Eso;
+    BCu = Ebu^Egu^Eku^Emu^Esu;
+
+    //thetaRhoPiChiIotaPrepareTheta(round+1, E, A)
+    Da = BCu^ROL(BCe, 1);
+    De = BCa^ROL(BCi, 1);
+    Di = BCe^ROL(BCo, 1);
+    Do = BCi^ROL(BCu, 1);
+    Du = BCo^ROL(BCa, 1);
+
+    Eba ^= Da;
+    BCa = Eba;
+    Ege ^= De;
+    BCe = ROL(Ege, 44);
+    Eki ^= Di;
+    BCi = ROL(Eki, 43);
+    Emo ^= Do;
+    BCo = ROL(Emo, 21);
+    Esu ^= Du;
+    BCu = ROL(Esu, 14);
+    Aba =   BCa ^((~BCe)&  BCi );
+    Aba ^= vectorize((uint64_t)KeccakF_RoundConstants[23]);
+    Abe =   BCe ^((~BCi)&  BCo );
+    Abi =   BCi ^((~BCo)&  BCu );
+    Abo =   BCo ^((~BCu)&  BCa );
 
     if (validate) {
         g_out += 4 * ((blockIdx.x * blockDim.x) + threadIdx.x);
