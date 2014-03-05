@@ -1328,12 +1328,13 @@ static void parse_arg (int key, char *arg)
 			char * pch = strtok (arg,",");
 			opt_n_threads = 0;
 			while (pch != NULL) {
-				if (pch[0] >= '0' && pch[0] <= '7' && pch[1] == '\0')
+				int deviceNum;
+				if (sscanf(pch, "%d", &deviceNum) == 1)
 				{
-					if (atoi(pch) < num_gpus)
-						device_map[opt_n_threads++] = atoi(pch);
+					if (deviceNum < num_gpus)
+						device_map[opt_n_threads++] = deviceNum;
 					else {
-						applog(LOG_ERR, "Non-existant CUDA device #%d specified in -d option", atoi(pch));
+						applog(LOG_ERR, "Non-existant CUDA device #%d specified in -d option", deviceNum);
 						exit(1);
 					}
 				} else {
