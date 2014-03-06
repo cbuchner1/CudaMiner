@@ -207,6 +207,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <CudaCompile Include="blake.cu" />
     <CudaCompile Include="fermi_kernel.cu">
       <MaxRegCount Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">64</MaxRegCount>
       <CodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">compute_10,sm_10</CodeGeneration>
@@ -310,6 +311,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="blakecoin.cpp" />
     <ClCompile Include="compat\getopt\getopt_long.c" />
     <ClCompile Include="compat\gettimeofday.c" />
     <ClCompile Include="compat\jansson\dump.c" />

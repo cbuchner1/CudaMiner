@@ -41,14 +41,19 @@ extern void cuda_scrypt_flush(int thr_id, int stream);
 extern void cuda_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]);
 extern bool cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h);
 
+extern void cuda_prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]);
+extern bool cuda_do_blake256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h);
+
 extern void computeGold(uint32_t *idata, uint32_t *reference, uint32_t *V);
 
 extern void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]);
+extern void default_prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]);
 
 #ifdef __NVCC__
 #include <cuda_runtime.h>
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
 extern bool default_do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h);
+extern bool default_do_blake256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h);
 
 #endif
 
@@ -90,6 +95,13 @@ public:
     }
     virtual bool do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h = false) {
         return default_do_keccak256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
+    }
+
+    virtual void prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8]) {
+        default_prepare_blake256(thr_id, host_pdata, ptarget);
+    }
+    virtual bool do_blake256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h = false) {
+        return default_do_blake256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
     }
 };
 

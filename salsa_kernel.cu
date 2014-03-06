@@ -55,7 +55,7 @@
 #undef checkCudaErrors
 
 #if WIN32
-#define DELIMITER '\\'
+#define DELIMITER '/'
 #else
 #define DELIMITER '/'
 #endif
@@ -140,7 +140,7 @@ extern "C" int cuda_finddevice(char *name)
 KernelInterface *Best_Kernel_Heuristics(cudaDeviceProp *props)
 {
     KernelInterface *kernel = NULL;
-    if (opt_algo == ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192) || opt_algo == ALGO_KECCAK)
+    if (opt_algo == ALGO_SCRYPT || (opt_algo == ALGO_SCRYPT_JANE && N <= 8192) || opt_algo == ALGO_KECCAK || opt_algo == ALGO_BLAKE)
     {
         // high register count kernels (scrypt, low N-factor scrypt-jane)
         if (props->major > 3 || (props->major == 3 && props->minor >= 5))
@@ -285,7 +285,7 @@ extern "C" int cuda_throughput(int thr_id)
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[0][thr_id] = tmp;
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[1][thr_id] = tmp;
         }
-        else if (opt_algo == ALGO_KECCAK)
+        else if (opt_algo == ALGO_KECCAK || opt_algo == ALGO_BLAKE)
         {
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[0][thr_id] = tmp;
             checkCudaErrors(cudaMalloc((void **) &tmp, state_size)); context_hash[1][thr_id] = tmp;
@@ -599,11 +599,14 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 for (unsigned int i=0; i < mem_size/sizeof(uint32_t); ++i) h_idata[i] = i*2654435761UL; // knuth's method
                 checkCudaErrors(cudaMemcpy(d_idata, h_idata, mem_size, cudaMemcpyHostToDevice));
                 free(h_idata);
-            } else if (opt_algo == ALGO_KECCAK)
-            {
+            } else if (opt_algo == ALGO_KECCAK) {
                 uint32_t pdata[20] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
                 uint32_t ptarget[8] = {0,0,0,0,0,0,0,0};
                 kernel->prepare_keccak256(thr_id, pdata, ptarget);
+            } else if (opt_algo == ALGO_BLAKE) {
+                uint32_t pdata[20] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
+                uint32_t ptarget[8] = {0,0,0,0,0,0,0,0};
+                kernel->prepare_blake256(thr_id, pdata, ptarget);
             }
 
             double best_hash_sec = 0.0;
@@ -621,7 +624,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                 int MAXB = MAXTW;
 
                 double tmin = 0.05;
-                if (opt_algo == ALGO_KECCAK) tmin = 0.01;
+                if (opt_algo == ALGO_KECCAK || opt_algo == ALGO_BLAKE) tmin = 0.01;
 
                 applog(LOG_INFO, "GPU #%d: maximum total warps (BxW): %d", device_map[thr_id], MAXTW);
 
@@ -652,6 +655,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                                     r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, LOOKUP_GAP, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 else if (opt_algo == ALGO_KECCAK)
                                     r=kernel->do_keccak256(grid, threads, thr_id, 0, NULL, rand(), WU_PER_LAUNCH, false);
+                                else if (opt_algo == ALGO_BLAKE)
+                                    r=kernel->do_blake256(grid, threads, thr_id, 0, NULL, rand(), WU_PER_LAUNCH, false);
                                 cudaDeviceSynchronize();
                                 if (!r || cudaPeekAtLastError() != cudaSuccess) break;
                                 ++repeat;
@@ -988,6 +993,24 @@ extern "C" bool cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32
     dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
     return context_kernel[thr_id]->do_keccak256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
+}
+
+extern "C" void cuda_prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8])
+{
+    context_kernel[thr_id]->prepare_blake256(thr_id, host_pdata, ptarget);
+}
+
+extern "C" bool cuda_do_blake256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+{
+    unsigned int GRID_BLOCKS = context_blocks[thr_id];
+    unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
+    unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
+
+    // setup execution parameters
+    dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
+    dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
+
+    return context_kernel[thr_id]->do_blake256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
 }
 
 extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)

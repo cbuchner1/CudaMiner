@@ -63,7 +63,7 @@ int scanhash_keccak(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 				be32enc(&endiandata[19], nonce[cur]+i); 
 				crypto_hash( (unsigned char*)hash64, (unsigned char*)&endiandata[0], 80 );
 	
-				if (memcmp(hash64, &cuda_hash64[8*i], 32))
+				if (memcmp(hash64, &cuda_hash64[cur][8*i], 32))
 					fprintf(stderr, "CPU and CUDA hashes (i=%d) differ!\n", i);
 			}
 		}

@@ -132,7 +132,7 @@ static const char *algo_names[] = {
 	"scrypt-jane",
 	"sha256d",
 	"keccak",
-	"blake256",
+	"blake",
 };
 
 bool opt_debug = false;
@@ -207,6 +207,7 @@ Options:\n\
                                        like above nFactor derived from Unix time.\n\
                           sha256d      SHA-256d (don't use this! No GPU acceleration)\n\
                           keccak       Keccak (SHA-3)\n\
+                          blake        Blake\n\
   -o, --url=URL         URL of mining server (default: " DEF_RPC_URL ")\n\
   -O, --userpass=U:P    username:password pair for mining server\n\
   -u, --user=USERNAME   username for mining server\n\
@@ -756,7 +757,7 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 
 	if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE)
 		diff_to_target(work->target, sctx->job.diff / 65536.0);
-	else if (opt_algo == ALGO_KECCAK)
+	else if (opt_algo == ALGO_KECCAK || opt_algo == ALGO_BLAKE)
 		diff_to_target(work->target, sctx->job.diff / 256.0);
 	else
 		diff_to_target(work->target, sctx->job.diff);
@@ -877,6 +878,11 @@ static void *miner_thread(void *userdata)
 		case ALGO_KECCAK:
 			rc = scanhash_keccak(thr_id, work.data, work.target,
 			                      max_nonce, &tv_start, &tv_end, &hashes_done);
+			break;
+
+		case ALGO_BLAKE:
+			rc = scanhash_blake(thr_id, work.data, work.target,
+			                    max_nonce, &tv_start, &tv_end, &hashes_done);
 			break;
 
 		default:

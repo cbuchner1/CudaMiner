@@ -1,13 +1,15 @@
 //
 //  =============== KECCAK part on nVidia GPU ======================
 //
+// The keccak512 (SHA-3) is used in the PBKDF2 for scrypt-jane coins
+// in place of the SHA2 based PBKDF2 used in scrypt coins.
+//
+// The keccak256 is used exclusively in Maxcoin and clones. This module
+// holds the generic "default" implementation when no architecture
+// specific implementation is available in the kernel.
+//
 // NOTE: compile this .cu module for compute_10,sm_10 with --maxrregcount=64
 //
-// TODO: the actual CUDA porting work is work in progress...
-//
-//       For good performance we have to get rid of most local memory spills
-//       TODO: make sure all loops have known trip counts at compile time
-//             and are adequately unrolled.
 
 #include <map>
 #include <stdint.h>
@@ -21,7 +23,7 @@
 #undef checkCudaErrors
 
 #if WIN32
-#define DELIMITER '\\'
+#define DELIMITER '/'
 #else
 #define DELIMITER '/'
 #endif
@@ -475,10 +477,10 @@ extern "C" void prepare_keccak512(int thr_id, const uint32_t host_pdata[20])
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
     {
-        cudaMemcpyToSymbol(c_keccak_round_constants, host_keccak_round_constants, sizeof(host_keccak_round_constants), 0, cudaMemcpyHostToDevice);
+        checkCudaErrors(cudaMemcpyToSymbol(c_keccak_round_constants, host_keccak_round_constants, sizeof(host_keccak_round_constants), 0, cudaMemcpyHostToDevice));
         init[thr_id] = true;
     }
-    cudaMemcpyToSymbol(pdata, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+    checkCudaErrors(cudaMemcpyToSymbol(pdata, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
 }
 
 extern "C" void pre_keccak512(int thr_id, int stream, uint32_t nonce, int throughput)
@@ -817,7 +819,7 @@ extern "C" void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
     {
-        cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice);
+        checkCudaErrors(cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice));
 
         // allocate pinned host memory for good hashes
         uint32_t *tmp;
@@ -826,8 +828,8 @@ extern "C" void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[
 
         init[thr_id] = true;
     }
-    cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+    checkCudaErrors(cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
 }
 
 extern "C" bool default_do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)

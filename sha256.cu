@@ -16,7 +16,7 @@
 #undef checkCudaErrors
 
 #if WIN32
-#define DELIMITER '\\'
+#define DELIMITER '/'
 #else
 #define DELIMITER '/'
 #endif
@@ -412,16 +412,16 @@ extern "C" void prepare_sha256(int thr_id, uint32_t host_pdata[20], uint32_t hos
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
     {
-        cudaMemcpyToSymbol(sha256_h, host_sha256_h, sizeof(host_sha256_h), 0, cudaMemcpyHostToDevice);
-        cudaMemcpyToSymbol(sha256_k, host_sha256_k, sizeof(host_sha256_k), 0, cudaMemcpyHostToDevice);
-        cudaMemcpyToSymbol(keypad, host_keypad, sizeof(host_keypad), 0, cudaMemcpyHostToDevice);
-        cudaMemcpyToSymbol(innerpad, host_innerpad, sizeof(host_innerpad), 0, cudaMemcpyHostToDevice);
-        cudaMemcpyToSymbol(outerpad, host_outerpad, sizeof(host_outerpad), 0, cudaMemcpyHostToDevice);
-        cudaMemcpyToSymbol(finalblk, host_finalblk, sizeof(host_finalblk), 0, cudaMemcpyHostToDevice);
+        checkCudaErrors(cudaMemcpyToSymbol(sha256_h, host_sha256_h, sizeof(host_sha256_h), 0, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpyToSymbol(sha256_k, host_sha256_k, sizeof(host_sha256_k), 0, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpyToSymbol(keypad, host_keypad, sizeof(host_keypad), 0, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpyToSymbol(innerpad, host_innerpad, sizeof(host_innerpad), 0, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpyToSymbol(outerpad, host_outerpad, sizeof(host_outerpad), 0, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpyToSymbol(finalblk, host_finalblk, sizeof(host_finalblk), 0, cudaMemcpyHostToDevice));
         init[thr_id] = true;
     }
-    cudaMemcpyToSymbol(pdata, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol(midstate, host_midstate, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+    checkCudaErrors(cudaMemcpyToSymbol(pdata, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpyToSymbol(midstate, host_midstate, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
 }
 
 extern "C" void pre_sha256(int thr_id, int stream, uint32_t nonce, int throughput)

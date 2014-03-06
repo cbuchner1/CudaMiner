@@ -1297,7 +1297,7 @@ void NV2Kernel::prepare_keccak256(int thr_id, const uint32_t host_pdata[20], con
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
     {
-        cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice);
+        checkCudaErrors(cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice));
 
         // allocate pinned host memory for good hashes
         uint32_t *tmp;
@@ -1306,8 +1306,8 @@ void NV2Kernel::prepare_keccak256(int thr_id, const uint32_t host_pdata[20], con
 
         init[thr_id] = true;
     }
-    cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+    checkCudaErrors(cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
 }
 
 bool NV2Kernel::do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)

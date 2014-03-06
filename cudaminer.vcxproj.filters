@@ -84,6 +84,9 @@
     <ClCompile Include="sha3.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="blakecoin.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="compat.h">
@@ -209,6 +212,9 @@
       <Filter>Source Files\CUDA</Filter>
     </CudaCompile>
     <CudaCompile Include="keccak.cu">
+      <Filter>Source Files\CUDA</Filter>
+    </CudaCompile>
+    <CudaCompile Include="blake.cu">
       <Filter>Source Files\CUDA</Filter>
     </CudaCompile>
   </ItemGroup>
