@@ -15,11 +15,18 @@
 #include "salsa_kernel.h"
 #include "miner.h"
 
-#if 1
-#include "sph_blake.h"
-#else
 typedef uint32_t sph_u32;
-#endif
+#define SPH_C32(x) ((sph_u32)(x))
+#define SPH_T32(x) ((x) & SPH_C32(0xFFFFFFFF))
+#define SPH_ROTL32(x, n)   SPH_T32(((x) << (n)) | ((x) >> (32 - (n))))
+#define SPH_ROTR32(x, n)   SPH_ROTL32(x, (32 - (n)))
+typedef struct {
+	unsigned char buf[64];    /* first field, for alignment */
+	size_t ptr;
+	sph_u32 H[8];
+	sph_u32 S[4];
+	sph_u32 T0, T1;
+} sph_blake_small_context;
 
 __constant__ uint64_t ptarget64[4];
 __constant__ uint32_t pdata[20];
