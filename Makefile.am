@@ -26,7 +26,7 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  salsa_kernel.cu salsa_kernel.h \
 			  sha256.cu sha256.h \
 			  keccak.cu keccak.h \
-			  blake.cu blake.h \
+			  blake.cu blake.h blake.c sph_blake.h sph_types.h \
 			  fermi_kernel.cu fermi_kernel.h \
 			  kepler_kernel.cu kepler_kernel.h \
 			  test_kernel.cu test_kernel.h \
