@@ -49,6 +49,8 @@ extern std::map<int, uint32_t *> context_odata[2];
 extern std::map<int, cudaStream_t> context_streams[2];
 extern std::map<int, uint32_t *> context_hash[2];
 
+// #define SPH_SMALL_FOOTPRINT_BLAKE 1
+
 #if SPH_SMALL_FOOTPRINT && !defined SPH_SMALL_FOOTPRINT_BLAKE
 #define SPH_SMALL_FOOTPRINT_BLAKE   1
 #endif
@@ -67,7 +69,6 @@ static __device__ sph_u32 cuda_sph_bswap32(sph_u32 x)
           | ((x >> 8) & 0x0000ff00u) | ((x >> 24) & 0x000000ffu));
 }
 
-
 /**
  * Encode a 32-bit value into the provided buffer (big endian convention).
  *
@@ -77,75 +78,19 @@ static __device__ sph_u32 cuda_sph_bswap32(sph_u32 x)
 static __device__ void
 cuda_sph_enc32be(void *dst, sph_u32 val)
 {
-#if defined SPH_UPTR
-#if SPH_UNALIGNED
-#if SPH_LITTLE_ENDIAN
-	val = cuda_sph_bswap32(val);
-#endif
-	*(sph_u32 *)dst = val;
-#else
-	if (((SPH_UPTR)dst & 3) == 0) {
-#if SPH_LITTLE_ENDIAN
-		val = cuda_sph_bswap32(val);
-#endif
-		*(sph_u32 *)dst = val;
-	} else {
-		((unsigned char *)dst)[0] = (val >> 24);
-		((unsigned char *)dst)[1] = (val >> 16);
-		((unsigned char *)dst)[2] = (val >> 8);
-		((unsigned char *)dst)[3] = val;
-	}
-#endif
-#else
-	((unsigned char *)dst)[0] = (val >> 24);
-	((unsigned char *)dst)[1] = (val >> 16);
-	((unsigned char *)dst)[2] = (val >> 8);
-	((unsigned char *)dst)[3] = val;
-#endif
-}
-
-/**
- * Encode a 32-bit value into the provided buffer (big endian convention).
- * The destination buffer must be properly aligned.
- *
- * @param dst   the destination buffer (32-bit aligned)
- * @param val   the value to encode
- */
-static __device__ void
-cuda_sph_enc32be_aligned(void *dst, sph_u32 val)
-{
-#if SPH_LITTLE_ENDIAN
 	*(sph_u32 *)dst = cuda_sph_bswap32(val);
-#elif SPH_BIG_ENDIAN
-	*(sph_u32 *)dst = val;
-#else
-	((unsigned char *)dst)[0] = (val >> 24);
-	((unsigned char *)dst)[1] = (val >> 16);
-	((unsigned char *)dst)[2] = (val >> 8);
-	((unsigned char *)dst)[3] = val;
-#endif
 }
 
 /**
  * Decode a 32-bit value from the provided buffer (big endian convention).
- * The source buffer must be properly aligned.
  *
  * @param src   the source buffer (32-bit aligned)
  * @return  the decoded value
  */
 static __device__ sph_u32
-cuda_sph_dec32be_aligned(const void *src)
+cuda_sph_dec32be(const void *src)
 {
-#if SPH_LITTLE_ENDIAN
 	return cuda_sph_bswap32(*(const sph_u32 *)src);
-#elif SPH_BIG_ENDIAN
-	return *(const sph_u32 *)src;
-#else
-	return ((sph_u32)(((const unsigned char *)src)[0]) << 24)
-		| ((sph_u32)(((const unsigned char *)src)[1]) << 16)
-		| ((sph_u32)(((const unsigned char *)src)[2]) << 8)
-		| (sph_u32)(((const unsigned char *)src)[3]);
-#endif
 }
 
 __constant__ sph_u32 IV256[8];
@@ -500,22 +445,22 @@ const sph_u32 host_CS[16] = {
 		VD = T0 ^ CS5; \
 		VE = T1 ^ CS6; \
 		VF = T1 ^ CS7; \
-		M[0x0] = cuda_sph_dec32be_aligned(buf +  0); \
-		M[0x1] = cuda_sph_dec32be_aligned(buf +  4); \
-		M[0x2] = cuda_sph_dec32be_aligned(buf +  8); \
-		M[0x3] = cuda_sph_dec32be_aligned(buf + 12); \
-		M[0x4] = cuda_sph_dec32be_aligned(buf + 16); \
-		M[0x5] = cuda_sph_dec32be_aligned(buf + 20); \
-		M[0x6] = cuda_sph_dec32be_aligned(buf + 24); \
-		M[0x7] = cuda_sph_dec32be_aligned(buf + 28); \
-		M[0x8] = cuda_sph_dec32be_aligned(buf + 32); \
-		M[0x9] = cuda_sph_dec32be_aligned(buf + 36); \
-		M[0xA] = cuda_sph_dec32be_aligned(buf + 40); \
-		M[0xB] = cuda_sph_dec32be_aligned(buf + 44); \
-		M[0xC] = cuda_sph_dec32be_aligned(buf + 48); \
-		M[0xD] = cuda_sph_dec32be_aligned(buf + 52); \
-		M[0xE] = cuda_sph_dec32be_aligned(buf + 56); \
-		M[0xF] = cuda_sph_dec32be_aligned(buf + 60); \
+		M[0x0] = cuda_sph_dec32be(buf +  0); \
+		M[0x1] = cuda_sph_dec32be(buf +  4); \
+		M[0x2] = cuda_sph_dec32be(buf +  8); \
+		M[0x3] = cuda_sph_dec32be(buf + 12); \
+		M[0x4] = cuda_sph_dec32be(buf + 16); \
+		M[0x5] = cuda_sph_dec32be(buf + 20); \
+		M[0x6] = cuda_sph_dec32be(buf + 24); \
+		M[0x7] = cuda_sph_dec32be(buf + 28); \
+		M[0x8] = cuda_sph_dec32be(buf + 32); \
+		M[0x9] = cuda_sph_dec32be(buf + 36); \
+		M[0xA] = cuda_sph_dec32be(buf + 40); \
+		M[0xB] = cuda_sph_dec32be(buf + 44); \
+		M[0xC] = cuda_sph_dec32be(buf + 48); \
+		M[0xD] = cuda_sph_dec32be(buf + 52); \
+		M[0xE] = cuda_sph_dec32be(buf + 56); \
+		M[0xF] = cuda_sph_dec32be(buf + 60); \
 		for (r = 0; r < 8; r ++) \
 			ROUND_S(r); \
 		H0 ^= S0 ^ V0 ^ V8; \
@@ -551,22 +496,22 @@ const sph_u32 host_CS[16] = {
 		VD = T0 ^ CS5; \
 		VE = T1 ^ CS6; \
 		VF = T1 ^ CS7; \
-		M0 = cuda_sph_dec32be_aligned(buf +  0); \
-		M1 = cuda_sph_dec32be_aligned(buf +  4); \
-		M2 = cuda_sph_dec32be_aligned(buf +  8); \
-		M3 = cuda_sph_dec32be_aligned(buf + 12); \
-		M4 = cuda_sph_dec32be_aligned(buf + 16); \
-		M5 = cuda_sph_dec32be_aligned(buf + 20); \
-		M6 = cuda_sph_dec32be_aligned(buf + 24); \
-		M7 = cuda_sph_dec32be_aligned(buf + 28); \
-		M8 = cuda_sph_dec32be_aligned(buf + 32); \
-		M9 = cuda_sph_dec32be_aligned(buf + 36); \
-		MA = cuda_sph_dec32be_aligned(buf + 40); \
-		MB = cuda_sph_dec32be_aligned(buf + 44); \
-		MC = cuda_sph_dec32be_aligned(buf + 48); \
-		MD = cuda_sph_dec32be_aligned(buf + 52); \
-		ME = cuda_sph_dec32be_aligned(buf + 56); \
-		MF = cuda_sph_dec32be_aligned(buf + 60); \
+		M0 = cuda_sph_dec32be(buf +  0); \
+		M1 = cuda_sph_dec32be(buf +  4); \
+		M2 = cuda_sph_dec32be(buf +  8); \
+		M3 = cuda_sph_dec32be(buf + 12); \
+		M4 = cuda_sph_dec32be(buf + 16); \
+		M5 = cuda_sph_dec32be(buf + 20); \
+		M6 = cuda_sph_dec32be(buf + 24); \
+		M7 = cuda_sph_dec32be(buf + 28); \
+		M8 = cuda_sph_dec32be(buf + 32); \
+		M9 = cuda_sph_dec32be(buf + 36); \
+		MA = cuda_sph_dec32be(buf + 40); \
+		MB = cuda_sph_dec32be(buf + 44); \
+		MC = cuda_sph_dec32be(buf + 48); \
+		MD = cuda_sph_dec32be(buf + 52); \
+		ME = cuda_sph_dec32be(buf + 56); \
+		MF = cuda_sph_dec32be(buf + 60); \
 		ROUND_S(0); \
 		ROUND_S(1); \
 		ROUND_S(2); \
@@ -672,8 +617,8 @@ cuda_blake32_close(sph_blake_small_context *sc,
 		memset(u.buf + ptr + 1, 0, 55 - ptr);
 		if (out_size_w32 == 8)
 			u.buf[55] |= 1;
-		cuda_sph_enc32be_aligned(u.buf + 56, th);
-		cuda_sph_enc32be_aligned(u.buf + 60, tl);
+		cuda_sph_enc32be(u.buf + 56, th);
+		cuda_sph_enc32be(u.buf + 60, tl);
 		cuda_blake32(sc, u.buf + ptr, 64 - ptr);
 	} else {
 		memset(u.buf + ptr + 1, 0, 63 - ptr);
@@ -683,49 +628,13 @@ cuda_blake32_close(sph_blake_small_context *sc,
 		memset(u.buf, 0, 56);
 		if (out_size_w32 == 8)
 			u.buf[55] = 1;
-		cuda_sph_enc32be_aligned(u.buf + 56, th);
-		cuda_sph_enc32be_aligned(u.buf + 60, tl);
+		cuda_sph_enc32be(u.buf + 56, th);
+		cuda_sph_enc32be(u.buf + 60, tl);
 		cuda_blake32(sc, u.buf, 64);
 	}
 	out = (unsigned char*)dst;
 	for (k = 0; k < out_size_w32; k ++)
 		cuda_sph_enc32be(out + (k << 2), sc->H[k]);
-}
-
-/* see sph_blake.h */
-__device__ void
-cuda_sph_blake256_init(void *cc)
-{
-	cuda_blake32_init((sph_blake_small_context *)cc, IV256, salt_zero_small);
-}
-
-/* see sph_blake.h */
-__device__ void
-cuda_sph_blake256(void *cc, const void *data, size_t len)
-{
-	cuda_blake32((sph_blake_small_context *)cc, data, len);
-}
-
-/* see sph_blake.h */
-__device__ void
-cuda_sph_blake256_addbits_and_close(void *cc, unsigned ub, unsigned n, void *dst)
-{
-	cuda_blake32_close((sph_blake_small_context *)cc, ub, n, dst, 8);
-	cuda_sph_blake256_init(cc);
-}
-
-/* see sph_blake.h */
-__device__ void
-cuda_sph_blake256_close(void *cc, void *dst)
-{
-	cuda_sph_blake256_addbits_and_close((sph_blake_small_context *)cc, 0, 0, dst);
-}
-
-__device__ void cuda_blake256_hash( uint8_t *out, const uint8_t *input, size_t inlen ) {
-    sph_blake256_context ctx;
-    cuda_sph_blake256_init(&ctx);
-    cuda_sph_blake256 (&ctx, input, inlen);
-    cuda_sph_blake256_close (&ctx, out);
 }
 
 
@@ -744,7 +653,10 @@ __global__ void cuda_blake256_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g
     for (int i=0; i < 19; ++i) data[i] = pdata[i];
     data[19] = cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x));
 
-    cuda_blake256_hash( (uint8_t*)out, (const uint8_t*)data, 80 );
+    sph_blake_small_context ctx;
+    cuda_blake32_init(&ctx, IV256, salt_zero_small);
+    cuda_blake32(&ctx, data, 80);
+    cuda_blake32_close(&ctx, 0, 0, out, 8);
 
     if (validate)
     {
