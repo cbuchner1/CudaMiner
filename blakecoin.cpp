@@ -33,7 +33,8 @@ int scanhash_blake(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 	for (int kk=0; kk < 20; kk++)
 		be32enc(&endiandata[kk], pdata[kk]);
 
-	cuda_prepare_blake256(thr_id, endiandata, ptarget);
+	// passing the original pdata array to CUDA here, not endiandata
+	cuda_prepare_blake256(thr_id, pdata, ptarget);
 
 	uint32_t *cuda_hash64[2] = { (uint32_t *)cuda_hashbuffer(thr_id, 0), (uint32_t *)cuda_hashbuffer(thr_id, 1) };
 	memset(cuda_hash64[0], 0xff, throughput * 8 * sizeof(uint32_t));

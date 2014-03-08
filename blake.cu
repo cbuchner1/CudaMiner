@@ -71,15 +71,6 @@ cuda_sph_enc32be(void *dst, sph_u32 val)
     *(sph_u32 *)dst = cuda_sph_bswap32(val);
 }
 
-__constant__ sph_u32 IV256[8];
-
-const sph_u32 host_IV256[8] = {
-    SPH_C32(0x6A09E667), SPH_C32(0xBB67AE85),
-    SPH_C32(0x3C6EF372), SPH_C32(0xA54FF53A),
-    SPH_C32(0x510E527F), SPH_C32(0x9B05688C),
-    SPH_C32(0x1F83D9AB), SPH_C32(0x5BE0CD19)
-};
-
 #define Z00   0
 #define Z01   1
 #define Z02   2
@@ -318,22 +309,22 @@ const sph_u32 host_IV256[8] = {
         VD = T0 ^ CS5; \
         VE = T1 ^ CS6; \
         VF = T1 ^ CS7; \
-        M0 = cuda_sph_bswap32(input[0]); \
-        M1 = cuda_sph_bswap32(input[1]); \
-        M2 = cuda_sph_bswap32(input[2]); \
-        M3 = cuda_sph_bswap32(input[3]); \
-        M4 = cuda_sph_bswap32(input[4]); \
-        M5 = cuda_sph_bswap32(input[5]); \
-        M6 = cuda_sph_bswap32(input[6]); \
-        M7 = cuda_sph_bswap32(input[7]); \
-        M8 = cuda_sph_bswap32(input[8]); \
-        M9 = cuda_sph_bswap32(input[9]); \
-        MA = cuda_sph_bswap32(input[10]); \
-        MB = cuda_sph_bswap32(input[11]); \
-        MC = cuda_sph_bswap32(input[12]); \
-        MD = cuda_sph_bswap32(input[13]); \
-        ME = cuda_sph_bswap32(input[14]); \
-        MF = cuda_sph_bswap32(input[15]); \
+        M0 = input[0]; \
+        M1 = input[1]; \
+        M2 = input[2]; \
+        M3 = input[3]; \
+        M4 = input[4]; \
+        M5 = input[5]; \
+        M6 = input[6]; \
+        M7 = input[7]; \
+        M8 = input[8]; \
+        M9 = input[9]; \
+        MA = input[10]; \
+        MB = input[11]; \
+        MC = input[12]; \
+        MD = input[13]; \
+        ME = input[14]; \
+        MF = input[15]; \
         ROUND_S(0); \
         ROUND_S(1); \
         ROUND_S(2); \
@@ -352,16 +343,6 @@ const sph_u32 host_IV256[8] = {
         H7 ^= S3 ^ V7 ^ VF; \
     } while (0)
 
-__constant__ sph_u32 salt_zero_small[4];
-
-const sph_u32 host_salt_zero_small[4] = { 0, 0, 0, 0 };
-
-static __device__ uint32_t cuda_swab32(uint32_t x)
-{
-    return (((x << 24) & 0xff000000u) | ((x << 8) & 0x00ff0000u)
-          | ((x >> 8) & 0x0000ff00u) | ((x >> 24) & 0x000000ffu));
-}
-
 __global__ void cuda_blake256_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_good, bool validate )
 {
     uint32_t input[16];
@@ -370,18 +351,18 @@ __global__ void cuda_blake256_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g
 #pragma unroll 16
     for (int i=0; i < 16; ++i) input[i] = pdata[i];
 
-    sph_u32 H0 = IV256[0];
-    sph_u32 H1 = IV256[1];
-    sph_u32 H2 = IV256[2];
-    sph_u32 H3 = IV256[3];
-    sph_u32 H4 = IV256[4];
-    sph_u32 H5 = IV256[5];
-    sph_u32 H6 = IV256[6];
-    sph_u32 H7 = IV256[7];
-    sph_u32 S0 = salt_zero_small[0];
-    sph_u32 S1 = salt_zero_small[1];
-    sph_u32 S2 = salt_zero_small[2];
-    sph_u32 S3 = salt_zero_small[3];
+    sph_u32 H0 = 0x6A09E667;
+    sph_u32 H1 = 0xBB67AE85;
+    sph_u32 H2 = 0x3C6EF372;
+    sph_u32 H3 = 0xA54FF53A;
+    sph_u32 H4 = 0x510E527F;
+    sph_u32 H5 = 0x9B05688C;
+    sph_u32 H6 = 0x1F83D9AB;
+    sph_u32 H7 = 0x5BE0CD19;
+    sph_u32 S0 = 0;
+    sph_u32 S1 = 0;
+    sph_u32 S2 = 0;
+    sph_u32 S3 = 0;
     sph_u32 T0 = 0;
     sph_u32 T1 = 0;
     T0 = SPH_T32(T0 + 512);
@@ -389,13 +370,13 @@ __global__ void cuda_blake256_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g
 
 #pragma unroll 3
     for (int i=0; i < 3; ++i) input[i] = pdata[16+i];
-    input[3] = cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x));
-    input[4] = 0x00000080;
+    input[3] = nonce + ((blockIdx.x * blockDim.x) + threadIdx.x);
+    input[4] = 0x80000000;
 #pragma unroll 8
     for (int i=5; i < 13; ++i) input[i] = 0;
-    input[13] = 0x01000000;
-    input[14] = cuda_swab32(T1);
-    input[15] = cuda_swab32(T0 + 128);
+    input[13] = 0x00000001;
+    input[14] = T1;
+    input[15] = T0 + 128;
 
     T0 = SPH_T32(T0 + 128);
     COMPRESS32;
@@ -439,9 +420,6 @@ extern "C" void default_prepare_blake256(int thr_id, const uint32_t host_pdata[2
     static bool init[8] = {false, false, false, false, false, false, false, false};
     if (!init[thr_id])
     {
-        checkCudaErrors(cudaMemcpyToSymbol(IV256, host_IV256, sizeof(host_IV256), 0, cudaMemcpyHostToDevice));
-        checkCudaErrors(cudaMemcpyToSymbol(salt_zero_small, host_salt_zero_small, sizeof(host_salt_zero_small), 0, cudaMemcpyHostToDevice));
-    
         // allocate pinned host memory for good hashes
         uint32_t *tmp;
         checkCudaErrors(cudaMalloc((void **) &tmp, 9*sizeof(uint32_t))); context_good[0][thr_id] = tmp;
