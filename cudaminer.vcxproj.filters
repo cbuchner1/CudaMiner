@@ -87,6 +87,9 @@
     <ClCompile Include="blakecoin.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="blake.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="compat.h">
@@ -183,6 +186,12 @@
       <Filter>Header Files\CUDA</Filter>
     </ClInclude>
     <ClInclude Include="sha3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sph_blake.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sph_types.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

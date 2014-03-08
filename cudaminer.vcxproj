@@ -311,6 +311,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="blake.c" />
     <ClCompile Include="blakecoin.cpp" />
     <ClCompile Include="compat\getopt\getopt_long.c" />
     <ClCompile Include="compat\gettimeofday.c" />
@@ -374,6 +375,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="scrypt-jane.h" />
     <ClInclude Include="sha256.h" />
     <ClInclude Include="sha3.h" />
+    <ClInclude Include="sph_blake.h" />
+    <ClInclude Include="sph_types.h" />
     <ClInclude Include="test_kernel.h" />
     <ClInclude Include="titan_kernel.h" />
   </ItemGroup>
