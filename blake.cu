@@ -20,13 +20,6 @@ typedef uint32_t sph_u32;
 #define SPH_T32(x) ((x) & SPH_C32(0xFFFFFFFF))
 #define SPH_ROTL32(x, n)   SPH_T32(((x) << (n)) | ((x) >> (32 - (n))))
 #define SPH_ROTR32(x, n)   SPH_ROTL32(x, (32 - (n)))
-typedef struct {
-    unsigned char buf[64];    /* first field, for alignment */
-    size_t ptr;
-    sph_u32 H[8];
-    sph_u32 S[4];
-    sph_u32 T0, T1;
-} sph_blake_small_context;
 
 __constant__ uint64_t ptarget64[4];
 __constant__ uint32_t pdata[20];
@@ -391,44 +384,6 @@ const sph_u32 host_CS[16] = {
 
 #endif
 
-#define DECL_STATE32 \
-    sph_u32 H0, H1, H2, H3, H4, H5, H6, H7; \
-    sph_u32 S0, S1, S2, S3, T0, T1;
-
-#define READ_STATE32(state)   do { \
-        H0 = (state)->H[0]; \
-        H1 = (state)->H[1]; \
-        H2 = (state)->H[2]; \
-        H3 = (state)->H[3]; \
-        H4 = (state)->H[4]; \
-        H5 = (state)->H[5]; \
-        H6 = (state)->H[6]; \
-        H7 = (state)->H[7]; \
-        S0 = (state)->S[0]; \
-        S1 = (state)->S[1]; \
-        S2 = (state)->S[2]; \
-        S3 = (state)->S[3]; \
-        T0 = (state)->T0; \
-        T1 = (state)->T1; \
-    } while (0)
-
-#define WRITE_STATE32(state)   do { \
-        (state)->H[0] = H0; \
-        (state)->H[1] = H1; \
-        (state)->H[2] = H2; \
-        (state)->H[3] = H3; \
-        (state)->H[4] = H4; \
-        (state)->H[5] = H5; \
-        (state)->H[6] = H6; \
-        (state)->H[7] = H7; \
-        (state)->S[0] = S0; \
-        (state)->S[1] = S1; \
-        (state)->S[2] = S2; \
-        (state)->S[3] = S3; \
-        (state)->T0 = T0; \
-        (state)->T1 = T1; \
-    } while (0)
-
 #if SPH_COMPACT_BLAKE_32
 
 #define COMPRESS32   do { \
@@ -558,53 +513,48 @@ __global__ void cuda_blake256_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g
     for (int i=0; i < 19; ++i) input[i] = pdata[i];
     input[19] = cuda_swab32(nonce + ((blockIdx.x * blockDim.x) + threadIdx.x));
 
-    sph_blake_small_context sc;
+    unsigned char __align__(4) buf[64];
 
-    memcpy(sc.H, IV256, 8 * sizeof(sph_u32));
-    memcpy(sc.S, salt_zero_small, 4 * sizeof(sph_u32));
-    sc.T0 = sc.T1 = 0;
-    sc.ptr = 0;
-
-    const unsigned char *data = (const unsigned char*)input;
-    unsigned char *buf;
-    DECL_STATE32
-
-    buf = sc.buf;
-
-    READ_STATE32(&sc);
-
-    memcpy(buf, data, 64);
-    data = (const unsigned char *)data + 64;
+    sph_u32 H0 = IV256[0];
+    sph_u32 H1 = IV256[1];
+    sph_u32 H2 = IV256[2];
+    sph_u32 H3 = IV256[3];
+    sph_u32 H4 = IV256[4];
+    sph_u32 H5 = IV256[5];
+    sph_u32 H6 = IV256[6];
+    sph_u32 H7 = IV256[7];
+    sph_u32 S0 = salt_zero_small[0];
+    sph_u32 S1 = salt_zero_small[1];
+    sph_u32 S2 = salt_zero_small[2];
+    sph_u32 S3 = salt_zero_small[3];
+    sph_u32 T0 = 0;
+    sph_u32 T1 = 0;
+    memcpy(buf, input, 64);
     if ((T0 = SPH_T32(T0 + 512)) < 512)
         T1 = SPH_T32(T1 + 1);
     COMPRESS32;
 
-    memcpy(buf, data, 16);
+    memcpy(buf, input+16, 16);
+    buf[16] = 0x80;
+    memset(buf + 17, 0, 39);
+    buf[55] |= 1;
+    cuda_sph_enc32be(buf + 56, T1);
+    cuda_sph_enc32be(buf + 60, T0 + 128);
 
-    WRITE_STATE32(&sc);
-    sc.ptr = 16;
+    T0 -= 384;
 
-    void *dst = output;
-    unsigned char *out;
-
-    sc.buf[16] = 0x80;
-    memset(sc.buf + 17, 0, 39);
-    sc.buf[55] |= 1;
-    cuda_sph_enc32be(sc.buf + 56, sc.T1);
-    cuda_sph_enc32be(sc.buf + 60, sc.T0 + 128);
-
-    sc.T0 -= 384;
-
-    READ_STATE32(&sc);
     if ((T0 = SPH_T32(T0 + 512)) < 512)
         T1 = SPH_T32(T1 + 1);
     COMPRESS32;
-    WRITE_STATE32(&sc);
 
-    out = (unsigned char*)dst;
-    for (int k = 0; k < 8; k ++)
-        cuda_sph_enc32be(out + 4*k, sc.H[k]);
-
+    cuda_sph_enc32be((unsigned char*)output + 4*0, H0);
+    cuda_sph_enc32be((unsigned char*)output + 4*1, H1);
+    cuda_sph_enc32be((unsigned char*)output + 4*2, H2);
+    cuda_sph_enc32be((unsigned char*)output + 4*3, H3);
+    cuda_sph_enc32be((unsigned char*)output + 4*4, H4);
+    cuda_sph_enc32be((unsigned char*)output + 4*5, H5);
+    cuda_sph_enc32be((unsigned char*)output + 4*6, H6);
+    cuda_sph_enc32be((unsigned char*)output + 4*7, H7);
 
     if (validate)
     {
