@@ -1334,7 +1334,7 @@ static void parse_arg (int key, char *arg)
 			char * pch = strtok (arg,",");
 			opt_n_threads = 0;
 			while (pch != NULL) {
-				if (pch[0] >= '0' && pch[0] <= '7' && pch[1] == '\0')
+				if (pch[0] >= '0' && pch[0] <= '9' && pch[1] == '\0')
 				{
 					if (atoi(pch) < num_gpus)
 						device_map[opt_n_threads++] = atoi(pch);
