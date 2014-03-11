@@ -722,7 +722,7 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 	memcpy(work->xnonce2, sctx->job.xnonce2, sctx->xnonce2_size);
 
 	/* Generate merkle root */
-	if (opt_algo != ALGO_KECCAK) // CB: fix for stratum pools with MaxCoin
+	if (opt_algo != ALGO_KECCAK && opt_algo != ALGO_BLAKE) // CB: fix for stratum pools with MaxCoin and Blake
 		sha256d(merkle_root, sctx->job.coinbase, (int)sctx->job.coinbase_size);
 	else
 		SHA256((unsigned char*)sctx->job.coinbase, sctx->job.coinbase_size, (unsigned char*)merkle_root);
