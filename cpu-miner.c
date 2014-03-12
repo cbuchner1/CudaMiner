@@ -40,6 +40,11 @@
 #include "miner.h"
 #include "salsa_kernel.h"
 
+#ifdef WIN32
+#include <Mmsystem.h>
+#pragma comment(lib, "winmm.lib")
+#endif
+
 bool abort_flag = false; // CB
 bool autotune = true;
 int device_map[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -1568,6 +1573,9 @@ int main(int argc, char *argv[])
 
 	pthread_mutex_init(&applog_lock, NULL);
 
+#ifdef WIN32
+	timeBeginPeriod(1); // enable multimedia timers
+#endif
 	num_gpus = cuda_num_devices(); // CB
 	if (num_gpus == 0) {
 		applog(LOG_ERR, "There are no CUDA devices in your system!");
