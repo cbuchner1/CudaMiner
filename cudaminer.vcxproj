@@ -309,6 +309,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Xptxas -v,-abi=no %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
+    <CudaCompile Include="wrapnvml.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="blake.c" />
@@ -379,6 +380,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="sph_types.h" />
     <ClInclude Include="test_kernel.h" />
     <ClInclude Include="titan_kernel.h" />
+    <ClInclude Include="wrapnvml.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

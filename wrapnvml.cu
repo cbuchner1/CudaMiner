@@ -64,22 +64,28 @@ wrap_nvml_handle * wrap_nvml_create() {
    */
 #if defined(_WIN64)
   /* 64-bit Windows */
-  const char *libnvidia_ml = "c:/Program Files/NVIDIA Corporation/NVSMI/nvml.dll";
+#define  libnvidia_ml "%PROGRAMFILES%/NVIDIA Corporation/NVSMI/nvml.dll"
 #elif defined(_WIN32) || defined(_MSC_VER)
   /* 32-bit Windows */
-  const char *libnvidia_ml = "c:/Program Files (x86)/NVIDIA Corporation/NVSMI/nvml.dll";
+#define  libnvidia_ml "%PROGRAMFILES%/NVIDIA Corporation/NVSMI/nvml.dll"
 #elif defined(__linux) && (defined(__i386__) || defined(__ARM_ARCH_7A__))
   /* 32-bit linux assumed */
-  const char *libnvidia_ml = "/usr/lib32/libnvidia-ml.so";
+#define  libnvidia_ml "/usr/lib32/libnvidia-ml.so"
 #elif defined(__linux)
   /* 64-bit linux assumed */
-  const char *libnvidia_ml = "/usr/lib/libnvidia-ml.so";
+#define  libnvidia_ml "/usr/lib/libnvidia-ml.so"
 #else
 #error "Unrecognized platform: need NVML DLL path for this platform..."
 #endif
 
+#if WIN32
+  char tmp[512];
+  ExpandEnvironmentStringsA(libnvidia_ml, tmp, sizeof(tmp)); 
+#else
+  char tmp[512] = libnvidia_ml;
+#endif
 
-  void *nvml_dll = wrap_dlopen(libnvidia_ml);
+  void *nvml_dll = wrap_dlopen(tmp);
   if (nvml_dll == NULL)
     return NULL;
 

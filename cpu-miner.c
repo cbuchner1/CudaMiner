@@ -923,30 +923,30 @@ static void *miner_thread(void *userdata)
 			sprintf(s, thr_hashrates[thr_id] >= 1e6 ? "%.0f" : "%.2f",
 				1e-3 * thr_hashrates[thr_id]);
 #if defined(USE_WRAPNVML)
-                        if (nvmlh != NULL) {
-                          unsigned int tempC=0, fanpcnt=0, mwatts=0;
-                          char gputempbuf[64], gpufanbuf[64], gpupowbuf[64]; 
-                          strcpy(gputempbuf, " N/A");
-                          strcpy(gpufanbuf, " N/A");
-                          strcpy(gpupowbuf, " N/A");
+		if (nvmlh != NULL) {
+			unsigned int tempC=0, fanpcnt=0, mwatts=0;
+			char gputempbuf[64], gpufanbuf[64], gpupowbuf[64]; 
+			strcpy(gputempbuf, " N/A");
+			strcpy(gpufanbuf, " N/A");
+			strcpy(gpupowbuf, " N/A");
 
 #if 1
-                          if (wrap_nvml_get_tempC(nvmlh, device_map[thr_id], &tempC) == 0)
-                            sprintf(gputempbuf, "%3dC", tempC);
+			if (wrap_nvml_get_tempC(nvmlh, device_map[thr_id], &tempC) == 0)
+				sprintf(gputempbuf, "%3dC", tempC);
 
-                          if (wrap_nvml_get_fanpcnt(nvmlh, device_map[thr_id], &fanpcnt) == 0)
-                            sprintf(gpufanbuf, "%3d%%", fanpcnt);
+			if (wrap_nvml_get_fanpcnt(nvmlh, device_map[thr_id], &fanpcnt) == 0)
+				sprintf(gpufanbuf, "%3d%%", fanpcnt);
 
-                          if (wrap_nvml_get_power_usage(nvmlh, device_map[thr_id], &mwatts) == 0)
-                            sprintf(gpupowbuf, "%dW", (mwatts / 1000));
+			if (wrap_nvml_get_power_usage(nvmlh, device_map[thr_id], &mwatts) == 0)
+				sprintf(gpupowbuf, "%dW", (mwatts / 1000));
 #endif
 
-                          applog(LOG_INFO, "GPU #%d: %s, %s khash/s",
-                                 device_map[thr_id], device_name[thr_id], s);
-                          applog(LOG_INFO, "        Temp: %s  Fan speed: %s  Power: %s",
-                                 gputempbuf, gpufanbuf, gpupowbuf);
-                        } 
-                        else
+			applog(LOG_INFO, "GPU #%d: %s, %s khash/s",
+				device_map[thr_id], device_name[thr_id], s);
+			applog(LOG_INFO, "        Temp: %s  Fan speed: %s  Power: %s",
+				gputempbuf, gpufanbuf, gpupowbuf);
+			} 
+			else
 #endif
 			applog(LOG_INFO, "GPU #%d: %s, %s khash/s",
 				device_map[thr_id], device_name[thr_id], s);
@@ -1747,12 +1747,12 @@ int main(int argc, char *argv[])
 	}
 
 #if defined(USE_WRAPNVML)
-        nvmlh = wrap_nvml_create();
-        if (nvmlh == NULL) {
-          applog(LOG_INFO, "NVML GPU monitoring is not available.");
-        } else {
-          applog(LOG_INFO, "NVML GPU temperature, fan, power monitoring enabled.");
-        }
+	nvmlh = wrap_nvml_create();
+	if (nvmlh == NULL) {
+		applog(LOG_INFO, "NVML GPU monitoring is not available.");
+	} else {
+		applog(LOG_INFO, "NVML GPU temperature, fan, power monitoring enabled.");
+	}
 #endif
 	/* start mining threads */
 	for (i = 0; i < opt_n_threads; i++) {
@@ -1774,18 +1774,25 @@ int main(int argc, char *argv[])
 		opt_n_threads,
 		algo_names[opt_algo]);
 
+#ifdef WIN32
+	timeBeginPeriod(1); // enable high timer precision (similar to Google Chrome Trick)
+#endif
+
 	/* main loop - simply wait for stratum / workio thread to exit */
 	if (want_stratum)
 		pthread_join(thr_info[stratum_thr_id].pth, NULL);
 	else
 		pthread_join(thr_info[work_thr_id].pth, NULL);
 
+#ifdef WIN32
+	timeEndPeriod(1); // be nice and forego high timer precision
+#endif
+
 #if defined(USE_WRAPNVML)
-        if (nvmlh != NULL) {
-          wrap_nvml_destroy(nvmlh);
-          applog(LOG_INFO, "Closing down NVML GPU monitoring.");
-         
-        }
+	if (nvmlh != NULL) {
+		wrap_nvml_destroy(nvmlh);
+		applog(LOG_INFO, "Closing down NVML GPU monitoring.");
+	}
 #endif
 	applog(LOG_INFO, "workio thread dead, waiting for workers..."); // CB
 
