@@ -45,6 +45,11 @@
 #pragma comment(lib, "winmm.lib")
 #endif
 
+#if 1 || defined(USE_WRAPNVML)
+#define USE_WRAPNVML 1
+#include "wrapnvml.h"
+#endif
+
 bool abort_flag = false; // CB
 bool autotune = true;
 int device_map[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -60,6 +65,10 @@ int device_texturecache[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int device_singlememory[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 char *device_config[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 char *device_name[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
+
+#if defined(USE_WRAPNVML)
+wrap_nvml_handle *nvmlh = NULL;
+#endif
 
 #define PROGRAM_NAME		"cudaminer"
 #define PROGRAM_VERSION		"2014-02-28"
@@ -913,6 +922,32 @@ static void *miner_thread(void *userdata)
 		if (!opt_quiet && !abort_flag) { // CB
 			sprintf(s, thr_hashrates[thr_id] >= 1e6 ? "%.0f" : "%.2f",
 				1e-3 * thr_hashrates[thr_id]);
+#if defined(USE_WRAPNVML)
+                        if (nvmlh != NULL) {
+                          unsigned int tempC=0, fanpcnt=0, mwatts=0;
+                          char gputempbuf[64], gpufanbuf[64], gpupowbuf[64]; 
+                          strcpy(gputempbuf, " N/A");
+                          strcpy(gpufanbuf, " N/A");
+                          strcpy(gpupowbuf, " N/A");
+
+#if 1
+                          if (wrap_nvml_get_tempC(nvmlh, device_map[thr_id], &tempC) == 0)
+                            sprintf(gputempbuf, "%3dC", tempC);
+
+                          if (wrap_nvml_get_fanpcnt(nvmlh, device_map[thr_id], &fanpcnt) == 0)
+                            sprintf(gpufanbuf, "%3d%%", fanpcnt);
+
+                          if (wrap_nvml_get_power_usage(nvmlh, device_map[thr_id], &mwatts) == 0)
+                            sprintf(gpupowbuf, "%dW", (mwatts / 1000));
+#endif
+
+                          applog(LOG_INFO, "GPU #%d: %s, %s khash/s",
+                                 device_map[thr_id], device_name[thr_id], s);
+                          applog(LOG_INFO, "        Temp: %s  Fan speed: %s  Power: %s",
+                                 gputempbuf, gpufanbuf, gpupowbuf);
+                        } 
+                        else
+#endif
 			applog(LOG_INFO, "GPU #%d: %s, %s khash/s",
 				device_map[thr_id], device_name[thr_id], s);
 		}
@@ -1711,6 +1746,14 @@ int main(int argc, char *argv[])
 			tq_push(thr_info[stratum_thr_id].q, strdup(rpc_url));
 	}
 
+#if defined(USE_WRAPNVML)
+        nvmlh = wrap_nvml_create();
+        if (nvmlh == NULL) {
+          applog(LOG_INFO, "NVML GPU monitoring is not available.");
+        } else {
+          applog(LOG_INFO, "NVML GPU temperature, fan, power monitoring enabled.");
+        }
+#endif
 	/* start mining threads */
 	for (i = 0; i < opt_n_threads; i++) {
 		thr = &thr_info[i];
@@ -1737,6 +1780,13 @@ int main(int argc, char *argv[])
 	else
 		pthread_join(thr_info[work_thr_id].pth, NULL);
 
+#if defined(USE_WRAPNVML)
+        if (nvmlh != NULL) {
+          wrap_nvml_destroy(nvmlh);
+          applog(LOG_INFO, "Closing down NVML GPU monitoring.");
+         
+        }
+#endif
 	applog(LOG_INFO, "workio thread dead, waiting for workers..."); // CB
 
 	// CB

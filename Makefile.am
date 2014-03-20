@@ -17,6 +17,7 @@ cudaminer_SOURCES	= elist.h miner.h compat.h \
 			  compat/inttypes.h compat/stdbool.h compat/unistd.h \
 			  compat/sys/time.h compat/getopt/getopt.h \
 			  cpu-miner.c util.c \
+			  wrapnvml.cu wrapnvml.h \
 			  sha2.c \
 			  scrypt.cpp \
 			  maxcoin.cpp \
