@@ -1683,7 +1683,7 @@ int main(int argc, char *argv[])
 
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog)
-		openlog("cpuminer", LOG_PID, LOG_USER);
+		openlog("cudaminer", LOG_PID, LOG_USER);
 #endif
 
 	work_restart = (struct work_restart *)calloc(opt_n_threads, sizeof(*work_restart));
