@@ -415,9 +415,9 @@ __global__ void cuda_blake256_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g
 
 static std::map<int, uint32_t *> context_good[2];
 
-extern "C" void default_prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
+extern "C" bool default_prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
 {
-    static bool init[8] = {false, false, false, false, false, false, false, false};
+    static bool init[MAX_DEVICES] = {false};
     if (!init[thr_id])
     {
         // allocate pinned host memory for good hashes
@@ -429,12 +429,12 @@ extern "C" void default_prepare_blake256(int thr_id, const uint32_t host_pdata[2
     }
     checkCudaErrors(cudaMemcpyToSymbol(pdata, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
+
+    return context_good[0][thr_id] && context_good[1][thr_id];
 }
 
-extern "C" bool default_do_blake256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
-{
-    bool success = true;
-  
+extern "C" void default_do_blake256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+{ 
     checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t), context_streams[stream][thr_id]));
 
     cuda_blake256_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
@@ -450,9 +450,4 @@ extern "C" bool default_do_blake256(dim3 grid, dim3 threads, int thr_id, int str
         checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t),
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
-
-        // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
-    return success;
 }

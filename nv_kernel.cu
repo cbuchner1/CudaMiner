@@ -103,27 +103,24 @@ bool NVKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_
 {
     bool success = true;
 
-    // clear CUDA's error variable
-    cudaGetLastError();
-
     // make some constants available to kernel, update only initially and when changing
-    static int prev_N[8] = {0,0,0,0,0,0,0,0};
+    static int prev_N[MAX_DEVICES] = {0};
     if (N != prev_N[thr_id]) {
         uint32_t h_N = N;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_N_1 = N-1;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_spacing = (N+LOOKUP_GAP-1)/LOOKUP_GAP;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_spacing, &h_spacing, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+
+        cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+        cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+        cudaMemcpyToSymbolAsync(c_spacing, &h_spacing, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+
         prev_N[thr_id] = N;
     }
 
     // First phase: Sequential writes to scratchpad.
     const int batch = device_batchsize[thr_id];
-    const int sleeptime = 100;
     unsigned int pos = 0;
-    int situation = 0;
-
+    
     do 
     {
         if (LOOKUP_GAP == 1)
@@ -136,11 +133,6 @@ bool NVKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_
                 case ALGO_SCRYPT:      nv_scrypt_core_kernelA_LG<ALGO_SCRYPT>     <<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
                 case ALGO_SCRYPT_JANE: nv_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
             }
-        
-        if (!benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
-            usleep(sleeptime);
-        }
 
         pos += batch;
     } while (pos < N);
@@ -149,11 +141,6 @@ bool NVKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_
     pos = 0;
     do
     {
-        if (pos > 0 && !benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
-            usleep(sleeptime);
-        }
-
         if (LOOKUP_GAP == 1) {
             if (texture_cache == 0) switch(opt_algo) {
                 case ALGO_SCRYPT:      nv_scrypt_core_kernelB<ALGO_SCRYPT     ,0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
@@ -184,9 +171,6 @@ bool NVKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int thr_
 
         pos += batch;
     } while (pos < N);
-
-    // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
 
     return success;
 }
@@ -1046,9 +1030,9 @@ __global__ void kepler_crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g
 
 static std::map<int, uint32_t *> context_good[2];
 
-void NVKernel::prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
+bool NVKernel::prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
 {
-    static bool init[8] = {false, false, false, false, false, false, false, false};
+    static bool init[MAX_DEVICES] = {false};
     if (!init[thr_id])
     {
         checkCudaErrors(cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice));
@@ -1062,12 +1046,12 @@ void NVKernel::prepare_keccak256(int thr_id, const uint32_t host_pdata[20], cons
     }
     checkCudaErrors(cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
+
+    return context_good[0][thr_id] && context_good[1][thr_id];
 }
 
-bool NVKernel::do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+void NVKernel::do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
-    bool success = true;
-  
     checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t), context_streams[stream][thr_id]));
 
     kepler_crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
@@ -1083,11 +1067,6 @@ bool NVKernel::do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uin
         checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t),
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
-
-        // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
-    return success;
 }
 
 
@@ -1474,9 +1453,9 @@ __global__ void kepler_blake256_hash( uint64_t *g_out, uint32_t nonce, uint32_t 
     }
 }
 
-void NVKernel::prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
+bool NVKernel::prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
 {
-    static bool init[8] = {false, false, false, false, false, false, false, false};
+    static bool init[MAX_DEVICES] = {false};
     if (!init[thr_id])
     {
         // allocate pinned host memory for good hashes
@@ -1488,12 +1467,12 @@ void NVKernel::prepare_blake256(int thr_id, const uint32_t host_pdata[20], const
     }
     checkCudaErrors(cudaMemcpyToSymbol(pdata, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
+
+    return context_good[0][thr_id] && context_good[1][thr_id];
 }
 
-bool NVKernel::do_blake256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+void NVKernel::do_blake256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
-    bool success = true;
-  
     checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t), context_streams[stream][thr_id]));
 
     kepler_blake256_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
@@ -1509,9 +1488,4 @@ bool NVKernel::do_blake256(dim3 grid, dim3 threads, int thr_id, int stream, uint
         checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t),
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
-
-        // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
-    return success;
 }

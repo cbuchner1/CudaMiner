@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <LocalDebuggerCommandArguments>-H 0 --algo=scrypt-jane -d 3 -l T7x1 -C 0 -i 0 -m 0 -o 192.168.2.2:9088 -O cbuchner1.1:x</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-q --algo=blake -d 0,1,2,3 -L 256 -l T1000x32  -o stratum+tcp://eu1.blakecoin.com:3334 -O cbuchner1.1:x</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -9,7 +9,7 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-s 10 -H 0 --algo=scrypt-jane -d 0 -L 2 -l T -D -b 1024 -C 0 -i 1 -m 1 -o 192.168.2.2:9088 -O cbuchner1.1:x</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-s 3 -d gtx780,gt640,gtx750ti,gtx750ti#2 -l T12x24,T4x24,T5x24,T5x24 -C 0 -i 0 -m 1 -H 2 -o stratum+tcp://p2pool.crunchpool.com:12347 -u AG5jBuUtVfv11LmEniZuNJ4p7S2hgJeLG3 -p x</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerWorkingDirectory>$(ProjectDir)\x64</LocalDebuggerWorkingDirectory>
   </PropertyGroup>

@@ -71,10 +71,10 @@
 }
 
 // some globals containing pointers to device memory (for chunked allocation)
-// [8] indexes up to 8 threads (0...7)
-int       MAXWARPS[8];
-uint32_t* h_V[8][TOTAL_WARP_LIMIT*64];          // NOTE: the *64 prevents buffer overflow for --keccak
-uint32_t  h_V_extra[8][TOTAL_WARP_LIMIT*64];    //       with really large kernel launch configurations
+// [MAX_DEVICES] indexes up to MAX_DEVICES threads (0...MAX_DEVICES-1)
+int       MAXWARPS[MAX_DEVICES];
+uint32_t* h_V[MAX_DEVICES][TOTAL_WARP_LIMIT*64];          // NOTE: the *64 prevents buffer overflow for --keccak
+uint32_t  h_V_extra[MAX_DEVICES][TOTAL_WARP_LIMIT*64];    //       with really large kernel launch configurations
 
 extern "C" int cuda_num_devices()
 {
@@ -83,14 +83,14 @@ extern "C" int cuda_num_devices()
     if (err != cudaSuccess)
     {
         applog(LOG_ERR, "Unable to query CUDA driver version! Is an nVidia driver installed?");
-        exit(1);
+        return -1;
     }
 
     int maj = version / 1000, min = version % 100; // same as in deviceQuery sample
     if (maj < DMAJ || (maj == DMAJ && min < DMIN))
     {
         applog(LOG_ERR, "Driver does not support CUDA %d.%d API! Update your nVidia driver!", DMAJ, DMIN);
-        exit(1);
+        return -1;
     }
 
     int GPU_N;
@@ -98,7 +98,7 @@ extern "C" int cuda_num_devices()
     if (err != cudaSuccess)
     {
         applog(LOG_ERR, "Unable to query number of CUDA devices! Is an nVidia driver installed?");
-        exit(1);
+        return -1;
     }
     return GPU_N;
 }
@@ -220,9 +220,9 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
 extern "C" void cuda_shutdown(int thr_id)
 {
-    checkCudaErrors(cudaStreamSynchronize(context_streams[0][thr_id]));
-    checkCudaErrors(cudaStreamSynchronize(context_streams[1][thr_id]));
-    checkCudaErrors(cudaThreadExit());
+    cudaDeviceSynchronize();
+    cudaDeviceReset();
+    cudaThreadExit();
 }
 
 extern "C" int cuda_throughput(int thr_id)
@@ -241,7 +241,12 @@ extern "C" int cuda_throughput(int thr_id)
 #endif
 
         KernelInterface *kernel;
-        bool concurrent; GRID_BLOCKS = find_optimal_blockcount(thr_id, kernel, concurrent, WARPS_PER_BLOCK);
+        bool concurrent; 
+        GRID_BLOCKS = find_optimal_blockcount(thr_id, kernel, concurrent, WARPS_PER_BLOCK);
+
+        if(GRID_BLOCKS == 0)
+            return 0;
+
         unsigned int THREADS_PER_WU = kernel->threads_per_wu();
         unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
         unsigned int state_size = WU_PER_LAUNCH * sizeof(uint32_t) * 8;
@@ -471,7 +476,7 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         else {
             // compute no. of warps to allocate the largest number producing a single memory block
             // PROBLEM: one some devices, ALL allocations will fail if the first one failed. This sucks.
-            size_t MEM_LIMIT = (unsigned long long)min((unsigned long long)MAXMEM, (unsigned long long)props.totalGlobalMem);
+            size_t MEM_LIMIT = (size_t)min((unsigned long long)MAXMEM, (unsigned long long)props.totalGlobalMem);
             int warpmax = (int)min((unsigned long long)TOTAL_WARP_LIMIT, (unsigned long long)MEM_LIMIT / (SCRATCH * WU_PER_WARP * sizeof(uint32_t)));
 
             // run a bisection algorithm for memory allocation (way more reliable than the previous approach)
@@ -573,10 +578,16 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     if (validate_config(device_config[thr_id], optimal_blocks, WARPS_PER_BLOCK))
     {
         if (optimal_blocks * WARPS_PER_BLOCK > MAXWARPS[thr_id])
+        {
             applog(LOG_ERR, "GPU #%d: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
+            return 0;
+        }
 
         if (WARPS_PER_BLOCK > kernel->max_warps_per_block())
+        {
             applog(LOG_ERR, "GPU #%d: Given launch config '%s' exceeds warp limit for '%c' kernel.", device_map[thr_id], device_config[thr_id], kernel->get_identifier());
+            return 0;
+        }
     }
     else
     {
@@ -647,23 +658,21 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
                             checkCudaErrors(cudaDeviceSynchronize());
                             gettimeofday(&tv_start, NULL);
                             int repeat = 0;
-                            bool r = false;
                             do  // average several measurements for better exactness
                             {
-                                uint32_t hash;
                                 if (opt_algo == ALGO_SCRYPT || opt_algo == ALGO_SCRYPT_JANE)
-                                    r=kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, LOOKUP_GAP, device_interactive[thr_id], true, device_texturecache[thr_id]);
+                                    kernel->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, NULL, d_idata, d_odata, N, LOOKUP_GAP, device_interactive[thr_id], true, device_texturecache[thr_id]);
                                 else if (opt_algo == ALGO_KECCAK)
-                                    r=kernel->do_keccak256(grid, threads, thr_id, 0, NULL, rand(), WU_PER_LAUNCH, false);
+                                    kernel->do_keccak256(grid, threads, thr_id, 0, NULL, rand(), WU_PER_LAUNCH, false);
                                 else if (opt_algo == ALGO_BLAKE)
-                                    r=kernel->do_blake256(grid, threads, thr_id, 0, NULL, rand(), WU_PER_LAUNCH, false);
-                                cudaDeviceSynchronize();
-                                if (!r || cudaPeekAtLastError() != cudaSuccess) break;
+                                    kernel->do_blake256(grid, threads, thr_id, 0, NULL, rand(), WU_PER_LAUNCH, false);
+                                if(cudaDeviceSynchronize() != cudaSuccess)
+                                    break;
                                 ++repeat;
                                 gettimeofday(&tv_end, NULL);
                                 // for a better result averaging, measure for at least 50ms (10ms for Keccak)
                             } while ((tdelta=(1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec))) < tmin);
-                            if (cudaGetLastError() != cudaSuccess || !r) continue;
+                            if (cudaGetLastError() != cudaSuccess) continue;
 
                             tdelta /= repeat; // BUGFIX: this averaging over multiple measurements was missing
 
@@ -885,52 +894,6 @@ skip:           ;
     return optimal_blocks;
 }
 
-typedef struct { double value[8]; } tsumarray;
-    
-cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id)
-{
-    cudaError_t result = cudaSuccess;
-    if (situation >= 0)
-    {   
-        static std::map<int, tsumarray> tsum;
-
-        double a = 0.95, b = 0.05;
-        if (tsum.find(situation) == tsum.end()) { a = 0.5; b = 0.5; } // faster initial convergence
-
-        double tsync = 0.0;
-        double tsleep = 0.95 * tsum[situation].value[thr_id];
-        if (cudaStreamQuery(stream) == cudaErrorNotReady)
-        {
-            usleep((useconds_t)(1e6*tsleep));
-            struct timeval tv_start, tv_end;
-            gettimeofday(&tv_start, NULL);
-            checkCudaErrors(result = cudaStreamSynchronize(stream));
-            gettimeofday(&tv_end, NULL);
-            tsync = 1e-6 * (tv_end.tv_usec-tv_start.tv_usec) + (tv_end.tv_sec-tv_start.tv_sec);
-        }
-        if (tsync >= 0) tsum[situation].value[thr_id] = a * tsum[situation].value[thr_id] + b * (tsleep+tsync);
-
-#if 0
-        static int calls = 0;
-        if (++calls == 50) {
-            static std::map<int, tsumarray>::iterator it;
-            for (it = tsum.begin(); it != tsum.end() ; ++it)
-            {
-                const int &sit = (*it).first;
-                const tsumarray &ts = (*it).second;
-                fprintf(stderr, "%d: %f\n", sit, ts.value[thr_id]);
-            }
-            calls = 0;
-        }
-#endif
-    }
-    else
-    {
-        checkCudaErrors(result = cudaStreamSynchronize(stream));
-    }
-    return result;
-}
-
 extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream)
 {
     unsigned int GRID_BLOCKS = context_blocks[thr_id];
@@ -939,28 +902,27 @@ extern "C" void cuda_scrypt_HtoD(int thr_id, uint32_t *X, int stream)
     unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
 
     // copy host memory to device
-    checkCudaErrors(cudaMemcpyAsync(context_idata[stream][thr_id], X, mem_size,
-                                    cudaMemcpyHostToDevice, context_streams[stream][thr_id]));
+    cudaMemcpyAsync(context_idata[stream][thr_id], X, mem_size, cudaMemcpyHostToDevice, context_streams[stream][thr_id]);
 }
 
 extern "C" void cuda_scrypt_serialize(int thr_id, int stream)
 {
     // if the device can concurrently execute multiple kernels, then we must
     // wait for the serialization event recorded by the other stream
-    if (context_concurrent[thr_id] || device_interactive[thr_id])
-        checkCudaErrors(cudaStreamWaitEvent(context_streams[stream][thr_id], context_serialize[(stream+1)&1][thr_id], 0));
+    //if (context_concurrent[thr_id] || device_interactive[thr_id])
+        cudaStreamWaitEvent(context_streams[stream][thr_id], context_serialize[(stream+1)&1][thr_id], 0);
 }
 
 extern "C" void cuda_scrypt_done(int thr_id, int stream)
 {
     // record the serialization event in the current stream
-    checkCudaErrors(cudaEventRecord(context_serialize[stream][thr_id], context_streams[stream][thr_id]));
+    cudaEventRecord(context_serialize[stream][thr_id], context_streams[stream][thr_id]);
 }
 
 extern "C" void cuda_scrypt_flush(int thr_id, int stream)
 {
     // flush the work queue (required for WDDM drivers)
-    checkCudaErrors(cudaStreamQuery(context_streams[stream][thr_id]));
+    cudaStreamQuery(context_streams[stream][thr_id]);
 }
 
 extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
@@ -977,12 +939,12 @@ extern "C" void cuda_scrypt_core(int thr_id, int stream, unsigned int N)
     context_kernel[thr_id]->run_kernel(grid, threads, WARPS_PER_BLOCK, thr_id, context_streams[stream][thr_id], context_idata[stream][thr_id], context_odata[stream][thr_id], N, LOOKUP_GAP, device_interactive[thr_id], opt_benchmark, device_texturecache[thr_id]);
 }
 
-extern "C" void cuda_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8])
+extern "C" bool cuda_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8])
 {
-    context_kernel[thr_id]->prepare_keccak256(thr_id, host_pdata, ptarget);
+    return context_kernel[thr_id]->prepare_keccak256(thr_id, host_pdata, ptarget);
 }
 
-extern "C" bool cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+extern "C" void cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
     unsigned int GRID_BLOCKS = context_blocks[thr_id];
     unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
@@ -992,15 +954,15 @@ extern "C" bool cuda_do_keccak256(int thr_id, int stream, uint32_t *hash, uint32
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
-    return context_kernel[thr_id]->do_keccak256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
+    context_kernel[thr_id]->do_keccak256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
 }
 
-extern "C" void cuda_prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8])
+extern "C" bool cuda_prepare_blake256(int thr_id, const uint32_t host_pdata[20], const uint32_t ptarget[8])
 {
-    context_kernel[thr_id]->prepare_blake256(thr_id, host_pdata, ptarget);
+    return context_kernel[thr_id]->prepare_blake256(thr_id, host_pdata, ptarget);
 }
 
-extern "C" bool cuda_do_blake256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+extern "C" void cuda_do_blake256(int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
     unsigned int GRID_BLOCKS = context_blocks[thr_id];
     unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
@@ -1010,24 +972,51 @@ extern "C" bool cuda_do_blake256(int thr_id, int stream, uint32_t *hash, uint32_
     dim3  grid(WU_PER_LAUNCH/WU_PER_BLOCK, 1, 1);
     dim3  threads(THREADS_PER_WU*WU_PER_BLOCK, 1, 1);
 
-    return context_kernel[thr_id]->do_blake256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
+    context_kernel[thr_id]->do_blake256(grid, threads, thr_id, stream, hash, nonce, throughput, do_d2h);
 }
 
-extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream)
+extern "C" void cuda_scrypt_DtoH(int thr_id, uint32_t *X, int stream, bool postSHA)
 {
     unsigned int GRID_BLOCKS = context_blocks[thr_id];
     unsigned int WARPS_PER_BLOCK = context_wpb[thr_id];
     unsigned int THREADS_PER_WU = context_kernel[thr_id]->threads_per_wu();
-    unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * 32;
+    unsigned int mem_size = WU_PER_LAUNCH * sizeof(uint32_t) * (postSHA ? 8 : 32);
 
     // copy result from device to host (asynchronously)
-    checkCudaErrors(cudaMemcpyAsync(X, context_odata[stream][thr_id], mem_size,
-                                    cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
+    checkCudaErrors(cudaMemcpyAsync(X, postSHA ? context_hash[stream][thr_id] : context_odata[stream][thr_id], mem_size, cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
 }
 
-extern "C" void cuda_scrypt_sync(int thr_id, int stream)
+extern "C" bool cuda_scrypt_sync(int thr_id, int stream)
 {
-    MyStreamSynchronize(context_streams[stream][thr_id], 0, thr_id);
+    cudaError_t err;
+    
+    if(device_interactive[thr_id] && !opt_benchmark)
+    {
+        // For devices that also do desktop rendering or compositing, we want to free up some time slots.
+        // That requires making a pause in work submission when there is no active task on the GPU,
+        // and Device Synchronize ensures that.
+
+        err = cudaDeviceSynchronize();
+
+        // Use the regular sleep function on Win32 to free up CPU resources.
+#ifdef WIN32
+        Sleep(1);
+#else
+        usleep(100);
+#endif
+    }
+    else
+    {
+        err = cudaStreamSynchronize(context_streams[stream][thr_id]);
+    }
+
+    if(err != cudaSuccess)
+    {
+        applog(LOG_ERR, "GPU #%d: CUDA error `%s` while executing the kernel.", device_map[thr_id], cudaGetErrorString(err));
+        return false;
+    }
+
+    return true;
 }
 
 extern "C" uint32_t* cuda_transferbuffer(int thr_id, int stream)

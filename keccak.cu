@@ -474,7 +474,7 @@ __global__ __launch_bounds__(128) void cuda_post_keccak512(uint32_t *g_odata, ui
 
 extern "C" void prepare_keccak512(int thr_id, const uint32_t host_pdata[20])
 {
-    static bool init[8] = {false, false, false, false, false, false, false, false};
+    static bool init[MAX_DEVICES] = {false};
     if (!init[thr_id])
     {
         checkCudaErrors(cudaMemcpyToSymbol(c_keccak_round_constants, host_keccak_round_constants, sizeof(host_keccak_round_constants), 0, cudaMemcpyHostToDevice));
@@ -491,18 +491,12 @@ extern "C" void pre_keccak512(int thr_id, int stream, uint32_t nonce, int throug
     cuda_pre_keccak512<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_idata[stream][thr_id], nonce);
 }
 
-extern "C" void post_keccak512(int thr_id, int stream, uint32_t nonce, uint32_t hash[8], int throughput)
+extern "C" void post_keccak512(int thr_id, int stream, uint32_t nonce, int throughput)
 {
     dim3 block(128);
     dim3 grid((throughput+127)/128);
 
     cuda_post_keccak512<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_odata[stream][thr_id], context_hash[stream][thr_id], nonce);
-
-    unsigned int mem_size = throughput * sizeof(uint32_t) * 8;
-
-    // copy device memory to host
-    checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
-                    cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
 }
 
 
@@ -814,9 +808,9 @@ __global__ void crypto_hash( uint64_t *g_out, uint32_t nonce, uint32_t *g_good, 
 
 static std::map<int, uint32_t *> context_good[2];
 
-extern "C" void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
+extern "C" bool default_prepare_keccak256(int thr_id, const uint32_t host_pdata[20], const uint32_t host_ptarget[8])
 {
-    static bool init[8] = {false, false, false, false, false, false, false, false};
+    static bool init[MAX_DEVICES] = {false};
     if (!init[thr_id])
     {
         checkCudaErrors(cudaMemcpyToSymbol(KeccakF_RoundConstants, host_KeccakF_RoundConstants, sizeof(host_KeccakF_RoundConstants), 0, cudaMemcpyHostToDevice));
@@ -830,12 +824,12 @@ extern "C" void default_prepare_keccak256(int thr_id, const uint32_t host_pdata[
     }
     checkCudaErrors(cudaMemcpyToSymbol(pdata64, host_pdata, 20*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpyToSymbol(ptarget64, host_ptarget, 8*sizeof(uint32_t), 0, cudaMemcpyHostToDevice));
+
+    return context_good[0][thr_id] && context_good[1][thr_id];
 }
 
-extern "C" bool default_do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
+extern "C" void default_do_keccak256(dim3 grid, dim3 threads, int thr_id, int stream, uint32_t *hash, uint32_t nonce, int throughput, bool do_d2h)
 {
-    bool success = true;
-  
     checkCudaErrors(cudaMemsetAsync(context_good[stream][thr_id], 0xff, 9 * sizeof(uint32_t), context_streams[stream][thr_id]));
 
     crypto_hash<<<grid, threads, 0, context_streams[stream][thr_id]>>>((uint64_t*)context_hash[stream][thr_id], nonce, context_good[stream][thr_id], do_d2h);
@@ -851,9 +845,4 @@ extern "C" bool default_do_keccak256(dim3 grid, dim3 threads, int thr_id, int st
         checkCudaErrors(cudaMemcpyAsync(hash, context_good[stream][thr_id]+8, sizeof(uint32_t),
                         cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
     }
-
-        // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
-    return success;
 }

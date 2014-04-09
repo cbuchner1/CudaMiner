@@ -468,13 +468,15 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 
 	int throughput = cuda_throughput(thr_id);
 	
+    if(throughput == 0)
+        return -1;
+
 	gettimeofday(tv_start, NULL);
 
 	uint32_t *data[2] = { new uint32_t[20*throughput], new uint32_t[20*throughput] };
 	uint32_t* hash[2]   = { cuda_hashbuffer(thr_id,0), cuda_hashbuffer(thr_id,1) };
 
-	uint32_t n = pdata[19] - 1;
-//	int i;
+	uint32_t n = pdata[19];
 	
 	/* byte swap pdata into data[0]/[1] arrays */
 	for (int k=0; k<2; ++k) {
@@ -495,143 +497,135 @@ int scanhash_scrypt_jane(int thr_id, uint32_t *pdata,
 #endif
 
 	int cur = 0, nxt = 1;
-
-	nonce[cur] = n+1;
-
-	for(int i=0;i<throughput;++i) {
-		uint32_t tmp_nonce = ++n;
-		data[cur][20*i + 19] = bswap_32x4(tmp_nonce);
-	}
-
-	if (parallel < 2) {
-		/* 1: X = PBKDF2(password, salt) */
-		for(int i=0;i<throughput;++i)
-		scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, (unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128);
-	} else {
-		pre_keccak512(thr_id, cur, nonce[cur], throughput);
-	}
-
-	/* 2: X = ROMix(X) in CUDA */
-	if (parallel < 2) {
-		memcpy(cuda_X[cur], Xbuf[cur].ptr, 128 * throughput);
-		cuda_scrypt_HtoD(thr_id, cuda_X[cur], cur);
-	}
-	cuda_scrypt_serialize(thr_id, cur);
-	cuda_scrypt_core(thr_id, cur, N);
-	cuda_scrypt_done(thr_id, cur);
-	if (parallel < 2) {
-		cuda_scrypt_DtoH(thr_id, cuda_X[cur], cur);
-	}
-	cuda_scrypt_flush(thr_id, cur);
+    int iteration = 0;
 
 	do {
-		nonce[nxt] = n+1;
+		nonce[nxt] = n;
 
-		for(int i=0;i<throughput;++i) {
-			uint32_t tmp_nonce = ++n;
-			data[nxt][20*i + 19] = bswap_32x4(tmp_nonce);
-		}
+		if (parallel < 2) 
+        {
+		    for(int i=0;i<throughput;++i) {
+			    uint32_t tmp_nonce = n++;
+			    data[nxt][20*i + 19] = bswap_32x4(tmp_nonce);
+		    }
 
-		if (parallel < 2) {
-			/* 1: X = PBKDF2(password, salt) */
 			for(int i=0;i<throughput;++i)
 				scrypt_pbkdf2_1((unsigned char *)&data[nxt][20*i], 80, (unsigned char *)&data[nxt][20*i], 80, Xbuf[nxt].ptr + 128 * i, 128);
-		} else {
-			pre_keccak512(thr_id, nxt, nonce[nxt], throughput);
-		}
-
-		/* 2: X = ROMix(X) in CUDA */
-		if (parallel < 2) {
+            
 			memcpy(cuda_X[nxt], Xbuf[nxt].ptr, 128 * throughput);
+		    cuda_scrypt_serialize(thr_id, nxt);
 			cuda_scrypt_HtoD(thr_id, cuda_X[nxt], nxt);
-		}
-		cuda_scrypt_serialize(thr_id, nxt);
-		cuda_scrypt_core(thr_id, nxt, N);
-		cuda_scrypt_done(thr_id, nxt);
-		if (parallel < 2) {
-			cuda_scrypt_DtoH(thr_id, cuda_X[nxt], nxt);
-		}
-		cuda_scrypt_flush(thr_id, nxt);
+            cuda_scrypt_core(thr_id, nxt, N);
+		    cuda_scrypt_done(thr_id, nxt);
 
-#define VERIFY_ALL 0
-#if VERIFY_ALL
-		{
-			/* 2: X = ROMix(X) */
-			for(int i=0;i<throughput;++i)
-				scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf[cur].ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
+			cuda_scrypt_DtoH(thr_id, cuda_X[nxt], nxt, false);
+            
+		    cuda_scrypt_flush(thr_id, nxt);
 
-			unsigned int err = 0;
-			for(int i=0;i<throughput;++i) {
-				unsigned char *ref = (Xbuf[cur].ptr + 128 * i);
-				unsigned char *dat = (unsigned char*)(cuda_X[cur] + 32 * i);
-				if (memcmp(ref, dat, 128) != 0)
-				{
-					err++;
-#if 0
-					uint32_t *ref32 = (uint32_t*) ref;
-					uint32_t *dat32 = (uint32_t*) dat;
-					for (int j=0; j<32; ++j) {
-						if (ref32[j] != dat32[j])
-						fprintf(stderr, "ref32[i=%d][j=%d] = $%08x / $%08x\n", i, j, ref32[j], dat32[j]);
-					}
-#endif
-				}
-			}
-			if (err > 0) fprintf(stderr, "%d out of %d hashes differ.\n", err, throughput);
-		}
-#endif
+            if(!cuda_scrypt_sync(thr_id, cur))
+            {
+                return -1;
+            }
 
-		/* 3: Out = PBKDF2(password, X) */
-		if (parallel < 2) {
-			cuda_scrypt_sync(thr_id, cur);
 			memcpy(Xbuf[cur].ptr, cuda_X[cur], 128 * throughput);
 			for(int i=0;i<throughput;++i)
 				scrypt_pbkdf2_1((unsigned char *)&data[cur][20*i], 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)(&hash[cur][8*i]), 32);
+  
+#define VERIFY_ALL 0
+#if VERIFY_ALL
+		    {
+			    /* 2: X = ROMix(X) */
+			    for(int i=0;i<throughput;++i)
+				    scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf[cur].ptr + 128 * i), (scrypt_mix_word_t *)Ybuf.ptr, (scrypt_mix_word_t *)Vbuf.ptr, N);
+
+			    unsigned int err = 0;
+			    for(int i=0;i<throughput;++i) {
+				    unsigned char *ref = (Xbuf[cur].ptr + 128 * i);
+				    unsigned char *dat = (unsigned char*)(cuda_X[cur] + 32 * i);
+				    if (memcmp(ref, dat, 128) != 0)
+				    {
+					    err++;
+#if 0
+					    uint32_t *ref32 = (uint32_t*) ref;
+					    uint32_t *dat32 = (uint32_t*) dat;
+					    for (int j=0; j<32; ++j) {
+						    if (ref32[j] != dat32[j])
+						    fprintf(stderr, "ref32[i=%d][j=%d] = $%08x / $%08x\n", i, j, ref32[j], dat32[j]);
+					    }
+#endif
+				    }
+			    }
+			    if (err > 0) fprintf(stderr, "%d out of %d hashes differ.\n", err, throughput);
+		    }
+#endif
 		} else {
-			post_keccak512(thr_id, cur, nonce[cur], &hash[cur][0], throughput);
-			cuda_scrypt_sync(thr_id, cur);
+            n += throughput;
+
+		    cuda_scrypt_serialize(thr_id, nxt);
+			pre_keccak512(thr_id, nxt, nonce[nxt], throughput);
+            cuda_scrypt_core(thr_id, nxt, N);
+
+            cuda_scrypt_flush(thr_id, nxt);
+		    
+			post_keccak512(thr_id, nxt, nonce[nxt], throughput);
+    	    cuda_scrypt_done(thr_id, nxt);
+
+			cuda_scrypt_DtoH(thr_id, hash[nxt], nxt, true);
+    	    
+            if(!cuda_scrypt_sync(thr_id, cur))
+            {
+                return -1;
+            }
 		}
 
-		for(int i=0;i<throughput;++i) {
-			volatile unsigned char *hashc = (unsigned char *)(&hash[cur][8*i]);
+        if(iteration > 0)
+        {
+		    for(int i=0;i<throughput;++i) {
+			    volatile unsigned char *hashc = (unsigned char *)(&hash[cur][8*i]);
 
-			if (hash[cur][8*i+7] <= Htarg && fulltest(&hash[cur][8*i], ptarget)) {
+			    if (hash[cur][8*i+7] <= Htarg && fulltest(&hash[cur][8*i], ptarget)) {
 
-				uint32_t tmp_nonce = nonce[cur]+i;
+				    uint32_t tmp_nonce = nonce[cur]+i;
 					
-				uint32_t thash[8], tdata[20];
-				for(int z=0;z<20;z++) tdata[z] = bswap_32x4(pdata[z]);
-				tdata[19] = bswap_32x4(tmp_nonce);
-				scrypt_pbkdf2_1((unsigned char *)tdata, 80, (unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128);
-				scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf[cur].ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr), (scrypt_mix_word_t *)(Vbuf.ptr), N);
-				scrypt_pbkdf2_1((unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)thash, 32);
-				if (memcmp(thash, &hash[cur][8*i], 32) == 0)
-				{
-					*hashes_done = (n-throughput) - pdata[19] + 1;
-					pdata[19] = tmp_nonce;
-					scrypt_free(&Vbuf);
-					scrypt_free(&Ybuf);
-					scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
-					delete[] data[0]; delete[] data[1];
-					gettimeofday(tv_end, NULL);
-					return 1;
-				}
-				else
-				{
-					applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], i, cur);
-				}
-			}
-		}
-		cur = (cur+1)&1; nxt = (nxt+1)&1;
-	} while ((n-throughput) < max_nonce && !work_restart[thr_id].restart);
+				    uint32_t thash[8], tdata[20];
+				    for(int z=0;z<20;z++) tdata[z] = bswap_32x4(pdata[z]);
+				    tdata[19] = bswap_32x4(tmp_nonce);
+				    scrypt_pbkdf2_1((unsigned char *)tdata, 80, (unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128);
+				    scrypt_ROMix_1((scrypt_mix_word_t *)(Xbuf[cur].ptr + 128 * i), (scrypt_mix_word_t *)(Ybuf.ptr), (scrypt_mix_word_t *)(Vbuf.ptr), N);
+				    scrypt_pbkdf2_1((unsigned char *)tdata, 80, Xbuf[cur].ptr + 128 * i, 128, (unsigned char *)thash, 32);
+				    if (memcmp(thash, &hash[cur][8*i], 32) == 0)
+				    {
+					    //applog(LOG_INFO, "GPU #%d: %s result validates on CPU.", device_map[thr_id], device_name[thr_id]);
+
+					    *hashes_done = n - pdata[19];
+					    pdata[19] = tmp_nonce;
+					    scrypt_free(&Vbuf);
+					    scrypt_free(&Ybuf);
+					    scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
+					    delete[] data[0]; delete[] data[1];
+					    gettimeofday(tv_end, NULL);
+					    return 1;
+				    }
+				    else
+				    {
+					    applog(LOG_INFO, "GPU #%d: %s result does not validate on CPU (i=%d, s=%d)!", device_map[thr_id], device_name[thr_id], i, cur);
+				    }
+			    }
+		    }
+        }
+
+		cur = (cur+1)&1; 
+        nxt = (nxt+1)&1;
+        ++iteration;
+	} while (n <= max_nonce && !work_restart[thr_id].restart);
 	
 	scrypt_free(&Vbuf);
 	scrypt_free(&Ybuf);
 	scrypt_free(&Xbuf[0]); scrypt_free(&Xbuf[1]);
 	delete[] data[0]; delete[] data[1];
 	
-	*hashes_done = (n-throughput) - pdata[19] + 1;
-	pdata[19] = (n-throughput);
+	*hashes_done = n - pdata[19];
+	pdata[19] = n;
 	gettimeofday(tv_end, NULL);
 	return 0;
 }

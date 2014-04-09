@@ -179,6 +179,8 @@ enum sha256_algos {
 	ALGO_BLAKE,			/* Blake256 (8/10) */
 };
 
+struct pool_params;
+
 extern int num_processors; // CB
 extern bool abort_flag;    // CB
 extern int parallel;       // CB
@@ -190,9 +192,7 @@ extern bool opt_debug;
 extern bool opt_protocol;
 extern int opt_timeout;
 extern bool want_longpoll;
-extern bool have_longpoll;
 extern bool want_stratum;
-extern bool have_stratum;
 extern char *opt_cert;
 extern char *opt_proxy;
 extern long opt_proxy_type;
@@ -200,11 +200,10 @@ extern bool use_syslog;
 extern pthread_mutex_t applog_lock;
 extern struct thr_info *thr_info;
 extern int longpoll_thr_id;
-extern int stratum_thr_id;
 extern struct work_restart *work_restart;
 
 extern void applog(int prio, const char *fmt, ...);
-extern json_t *json_rpc_call(CURL *curl, const char *url, const char *userpass,
+extern json_t *json_rpc_call(pool_params* pool, CURL *curl, const char *url, const char *userpass,
 	const char *rpc_req, bool, bool, int *);
 extern char *bin2hex(const unsigned char *p, size_t len);
 extern bool hex2bin(unsigned char *p, const char *hexstr, size_t len);
@@ -247,6 +246,28 @@ struct stratum_ctx {
 	size_t xnonce2_size;
 	struct stratum_job job;
 	pthread_mutex_t work_lock;
+};
+
+struct work {
+	uint32_t data[32];
+	uint32_t target[8];
+
+	char job_id[128];
+	size_t xnonce2_len;
+	unsigned char xnonce2[32];
+};
+
+struct pool_params {
+    char* rpc_url;
+    char* userpass;
+    char* user;
+    char* pass;
+    char* longpoll_url;
+    bool have_longpoll;
+    bool have_stratum;
+    struct stratum_ctx stratum;
+    struct work g_work;
+    time_t g_work_time;
 };
 
 bool stratum_socket_full(struct stratum_ctx *sctx, int timeout);

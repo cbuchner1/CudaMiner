@@ -19,6 +19,9 @@ int scanhash_blake(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 	uint32_t max_nonce, struct timeval *tv_start, struct timeval *tv_end, unsigned long *hashes_done)
 {
 	int throughput = cuda_throughput(thr_id);
+    
+    if(throughput == 0)
+        return -1;
 
 	gettimeofday(tv_start, NULL);
 
@@ -58,7 +61,7 @@ int scanhash_blake(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 		}
 
 		// synchronize current stream and get the "winning" nonce index, if any
-		cuda_scrypt_sync(thr_id, cur);
+		if(!cuda_scrypt_sync(thr_id, cur)) return -1;
 		uint32_t result =  *cuda_hash64[cur];
 
 		// optional full CPU based validation (see validate flag)

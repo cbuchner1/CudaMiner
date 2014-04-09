@@ -691,22 +691,21 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
 {
     bool success = true;
 
-    // clear CUDA's error variable
-    cudaGetLastError();
-
     // make some constants available to kernel, update only initially and when changing
-    static int prev_N[8] = {0,0,0,0,0,0,0,0};
+    static int prev_N[MAX_DEVICES] = {0};
     if (N != prev_N[thr_id]) {
         uint32_t h_N = N;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_N_1 = N-1;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH = SCRATCH;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH, &h_SCRATCH, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH_WU_PER_WARP = (SCRATCH * WU_PER_WARP);
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
         uint32_t h_SCRATCH_WU_PER_WARP_1 = (SCRATCH * WU_PER_WARP) - 1;
-        checkCudaErrors(cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream));
+
+        cudaMemcpyToSymbolAsync(c_N, &h_N, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+        cudaMemcpyToSymbolAsync(c_N_1, &h_N_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+        cudaMemcpyToSymbolAsync(c_SCRATCH, &h_SCRATCH, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+        cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP, &h_SCRATCH_WU_PER_WARP, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+        cudaMemcpyToSymbolAsync(c_SCRATCH_WU_PER_WARP_1, &h_SCRATCH_WU_PER_WARP_1, sizeof(uint32_t), 0, cudaMemcpyHostToDevice, stream);
+
         prev_N[thr_id] = N;
     }
 
@@ -715,13 +714,6 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     int batch = device_batchsize[thr_id];
     int num_sleeps = 2* ((N + (batch-1)) / batch);
     int sleeptime = 100;
-    int situation = 0;
-
-    // Optional sleep in between kernels
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
-        usleep(sleeptime);
-    }
 
     unsigned int pos = 0;
     do 
@@ -734,12 +726,6 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
             case ALGO_SCRYPT_JANE: kepler_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE, SIMPLE  ><<< grid, threads, 0, stream >>>(d_idata, pos, min(pos+batch, N), LOOKUP_GAP); break;
         } 
 
-        // Optional sleep in between kernels
-        if (!benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
-            usleep(sleeptime);
-        }
-
         pos += batch;
     } while (pos < N);
 
@@ -748,12 +734,6 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
     pos = 0;
     do
     {
-        // Optional sleep in between kernels
-        if (pos > 0 && !benchmark && interactive) {
-            checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
-            usleep(sleeptime);
-        }
-
         if (LOOKUP_GAP == 1) {
             if (texture_cache == 0) switch(opt_algo) {
                     case ALGO_SCRYPT:      kepler_scrypt_core_kernelB<ALGO_SCRYPT     ,ANDERSEN, 0><<< grid, threads, 0, stream >>>(d_odata, pos, min(pos+batch, N)); break;
@@ -778,9 +758,6 @@ bool KeplerKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int 
 
         pos += batch;
     } while (pos < N);
-
-    // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
-
+    
     return success;
 }

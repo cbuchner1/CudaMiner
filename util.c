@@ -294,7 +294,7 @@ static int sockopt_keepalive_cb(void *userdata, curl_socket_t fd,
 }
 #endif
 
-json_t *json_rpc_call(CURL *curl, const char *url,
+json_t *json_rpc_call(pool_params* pool, CURL *curl, const char *url,
 		      const char *userpass, const char *rpc_req,
 		      bool longpoll_scan, bool longpoll, int *curl_err)
 {
@@ -308,7 +308,6 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 	char curl_err_str[CURL_ERROR_SIZE];
 	long timeout = longpoll ? opt_timeout : 30;
 	struct header_info hi = {0};
-	bool lp_scanning = longpoll_scan && !have_longpoll;
 
 	/* it is assumed that 'curl' is freshly [re]initialized at this pt */
 
@@ -375,22 +374,22 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 		goto err_out;
 	}
 
-	/* If X-Stratum was found, activate Stratum */
-	if (want_stratum && hi.stratum_url &&
+    /* If X-Stratum was found, activate Stratum */
+	if (want_stratum && !pool->have_stratum && !pool->stratum.url && hi.stratum_url &&
 	    !strncasecmp(hi.stratum_url, "stratum+tcp://", 14)) {
-		have_stratum = true;
-		tq_push(thr_info[stratum_thr_id].q, hi.stratum_url);
+		pool->have_stratum = true;
+        pool->stratum.url = hi.stratum_url;
 		hi.stratum_url = NULL;
 	}
 
 	/* If X-Long-Polling was found, activate long polling */
-	if (lp_scanning && hi.lp_path && !have_stratum) {
-		have_longpoll = true;
-		tq_push(thr_info[longpoll_thr_id].q, hi.lp_path);
+	if (longpoll_scan && !pool->have_longpoll && !pool->longpoll_url && hi.lp_path) {
+		pool->have_longpoll = true;
+        pool->longpoll_url = hi.lp_path;
 		hi.lp_path = NULL;
 	}
 
-	if (!all_data.buf) {
+    if (!all_data.buf) {
 		applog(LOG_ERR, "Empty data received in json_rpc_call.");
 		goto err_out;
 	}

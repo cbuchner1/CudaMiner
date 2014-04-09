@@ -432,16 +432,10 @@ extern "C" void pre_sha256(int thr_id, int stream, uint32_t nonce, int throughpu
     cuda_pre_sha256<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_idata[stream][thr_id], context_tstate[stream][thr_id], context_ostate[stream][thr_id], nonce);
 }
 
-extern "C" void post_sha256(int thr_id, int stream, uint32_t hash[8], int throughput)
+extern "C" void post_sha256(int thr_id, int stream, int throughput)
 {
     dim3 block(128);
     dim3 grid((throughput+127)/128);
 
     cuda_post_sha256<<<grid, block, 0, context_streams[stream][thr_id]>>>(context_hash[stream][thr_id], context_tstate[stream][thr_id], context_ostate[stream][thr_id], context_odata[stream][thr_id]);
-
-    unsigned int mem_size = throughput * sizeof(uint32_t) * 8;
-
-    // copy device memory to host
-    checkCudaErrors(cudaMemcpyAsync(hash, context_hash[stream][thr_id], mem_size,
-                    cudaMemcpyDeviceToHost, context_streams[stream][thr_id]));
 }

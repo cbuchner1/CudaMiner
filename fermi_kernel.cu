@@ -107,19 +107,9 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
 {
     bool success = true;
 
-    // clear CUDA's error variable
-    cudaGetLastError();
-
     int shared = WARPS_PER_BLOCK * WU_PER_WARP * (16+4) * sizeof(uint32_t);
 
     int sleeptime = 100;
-    int situation = 0;
-
-    // Optional sleep in between kernels
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
-        usleep(sleeptime);
-    }
 
     // First phase: Sequential writes to scratchpad.
 
@@ -133,12 +123,6 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
           case ALGO_SCRYPT:      fermi_scrypt_core_kernelA_LG<ALGO_SCRYPT><<< grid, threads, shared, stream >>>(d_idata, N, LOOKUP_GAP); break;
           case ALGO_SCRYPT_JANE: fermi_scrypt_core_kernelA_LG<ALGO_SCRYPT_JANE><<< grid, threads, shared, stream >>>(d_idata, N, LOOKUP_GAP); break;
         }
-
-    // Optional sleep in between kernels
-    if (!benchmark && interactive) {
-        checkCudaErrors(MyStreamSynchronize(stream, ++situation, thr_id));
-        usleep(sleeptime);
-    }
 
     // Second phase: Random read access from scratchpad.
 
@@ -181,9 +165,6 @@ bool FermiKernel::run_kernel(dim3 grid, dim3 threads, int WARPS_PER_BLOCK, int t
             }
         }
     }
-
-    // catch any kernel launch failures
-    if (cudaPeekAtLastError() != cudaSuccess) success = false;
 
     return success;
 }
