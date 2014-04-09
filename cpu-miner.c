@@ -195,8 +195,8 @@ struct work_restart *work_restart = NULL;
 static int app_exit_code = EXIT_CODE_OK;
 int num_pools = 1;
 int current_pool_index = 0;
-pool_params pools[MAX_POOLS];
-pool_params* current_pool = &(pools[0]);
+struct pool_params pools[MAX_POOLS];
+struct pool_params* current_pool = &(pools[0]);
 bool opt_loop_pools = false;
 
 pthread_mutex_t applog_lock;
@@ -427,7 +427,7 @@ static void share_result(int result, const char *reason)
 		applog(LOG_DEBUG, "DEBUG: reject reason: %s", reason);
 }
 
-static bool submit_upstream_work(pool_params* pool, CURL *curl, struct work *work)
+static bool submit_upstream_work(struct pool_params* pool, CURL *curl, struct work *work)
 {
 	char *str = NULL;
 	json_t *val, *res, *reason;
@@ -503,7 +503,7 @@ out:
 static const char *rpc_req =
 	"{\"method\": \"getwork\", \"params\": [], \"id\":0}\r\n";
 
-static bool get_upstream_work(pool_params* pool, CURL *curl, struct work *work)
+static bool get_upstream_work(struct pool_params* pool, CURL *curl, struct work *work)
 {
 	json_t *val;
 	bool rc;
@@ -553,7 +553,7 @@ static void workio_cmd_free(struct workio_cmd *wc)
 	free(wc);
 }
 
-static bool workio_get_work(pool_params* pool, struct workio_cmd *wc, CURL *curl)
+static bool workio_get_work(struct pool_params* pool, struct workio_cmd *wc, CURL *curl)
 {
 	struct work *ret_work;
 	int failures = 0;
@@ -584,7 +584,7 @@ static bool workio_get_work(pool_params* pool, struct workio_cmd *wc, CURL *curl
 	return true;
 }
 
-static bool workio_submit_work(pool_params* pool, struct workio_cmd *wc, CURL *curl)
+static bool workio_submit_work(struct pool_params* pool, struct workio_cmd *wc, CURL *curl)
 {
 	int failures = 0;
 
@@ -830,7 +830,7 @@ static void *miner_thread(void *userdata)
 		struct timeval tv_start, tv_end, diff;
 		int64_t max64;
 		int rc;
-        pool_params* pool = current_pool;
+        struct pool_params* pool = current_pool;
 
 		if (pool->have_stratum) {
 			while (!abort_flag && !work_restart[thr_id].restart && (!*pool->g_work.job_id || time(NULL) >= pool->g_work_time + 120))
@@ -1113,12 +1113,12 @@ static void *longpoll_thread(void *userdata)
 	}
 
 	int failures = 0;
-    pool_params* prev_pool = NULL;
+    struct pool_params* prev_pool = NULL;
     int prev_mode = 0;
 
 	while (!abort_flag) { // CB
         // save the current pool for use during this loop iteration
-        pool_params* pool = current_pool;
+        struct pool_params* pool = current_pool;
         
         if(pool->have_stratum && pool->stratum.url) {
 
@@ -1249,7 +1249,7 @@ static void show_version_and_exit(void)
 	exit(EXIT_CODE_OK);
 }
 
-static void show_usage_and_exit(bool error = true)
+static void show_usage_and_exit(bool error)
 {
 	if (error)
 		fprintf(stderr, "Try `" PROGRAM_NAME " --help' for more information.\n");
@@ -1259,7 +1259,7 @@ static void show_usage_and_exit(bool error = true)
     exit(error ? EXIT_CODE_USAGE : EXIT_CODE_OK);
 }
 
-static void finalize_pool_params(pool_params* pool, pool_params* prev_pool)
+static void finalize_pool_params(struct pool_params* pool, struct pool_params* prev_pool)
 {
     if (!pool->rpc_url)
     {
@@ -1318,7 +1318,7 @@ static void parse_arg (int key, char *arg)
 				jane_params = strdup(&arg[strlen(algo_names[ALGO_SCRYPT_JANE])+1]);
 				opt_algo = ALGO_SCRYPT_JANE;
 			}
-			else show_usage_and_exit();
+			else show_usage_and_exit(true);
 		}
 		break;
 	case 'B':
@@ -1355,31 +1355,31 @@ static void parse_arg (int key, char *arg)
 	case 'r':
 		v = atoi(arg);
 		if (v < -1 || v > 9999)	/* sanity check */
-			show_usage_and_exit();
+			show_usage_and_exit(true);
 		opt_retries = v;
 		break;
 	case 'R':
 		v = atoi(arg);
 		if (v < 1 || v > 9999)	/* sanity check */
-			show_usage_and_exit();
+			show_usage_and_exit(true);
 		opt_fail_pause = v;
 		break;
 	case 's':
 		v = atoi(arg);
 		if (v < 1 || v > 9999)	/* sanity check */
-			show_usage_and_exit();
+			show_usage_and_exit(true);
 		opt_scantime = v;
 		break;
 	case 'T':
 		v = atoi(arg);
 		if (v < 1 || v > 99999)	/* sanity check */
-			show_usage_and_exit();
+			show_usage_and_exit(true);
 		opt_timeout = v;
 		break;
 	case 't':
 		v = atoi(arg);
 		if (v < 1 || v > 9999)	/* sanity check */
-			show_usage_and_exit();
+			show_usage_and_exit(true);
 		if (v > num_gpus)
 		{
 			applog(LOG_ERR, "Threads in -t option (%d) > no. of CUDA devices (%d)!", v, num_gpus);
@@ -1396,7 +1396,7 @@ static void parse_arg (int key, char *arg)
             if(num_pools == MAX_POOLS)
             {
                 applog(LOG_ERR, "No more than %d pools can be specified!", MAX_POOLS);
-                show_usage_and_exit();
+                show_usage_and_exit(true);
             }
 
             current_pool++;
@@ -1406,12 +1406,12 @@ static void parse_arg (int key, char *arg)
 		if (p) {
 			if (strncasecmp(arg, "http://", 7) && strncasecmp(arg, "https://", 8) &&
 					strncasecmp(arg, "stratum+tcp://", 14))
-				show_usage_and_exit();
+				show_usage_and_exit(true);
 			
 			current_pool->rpc_url = strdup(arg);
 		} else {
 			if (!strlen(arg) || *arg == '/')
-				show_usage_and_exit();
+				show_usage_and_exit(true);
 
 			current_pool->rpc_url = (char*)malloc(strlen(arg) + 8);
 			sprintf(current_pool->rpc_url, "http://%s", arg);
@@ -1437,7 +1437,7 @@ static void parse_arg (int key, char *arg)
 	case 'O':			/* --userpass */
 		p = strchr(arg, ':');
 		if (!p)
-			show_usage_and_exit();
+			show_usage_and_exit(true);
         if(current_pool->userpass) free(current_pool->userpass);
         if(current_pool->user) free(current_pool->user);
         if(current_pool->pass) free(current_pool->pass);
@@ -1592,7 +1592,7 @@ static void parse_arg (int key, char *arg)
 	case 'h':
 		show_usage_and_exit(false);
 	default:
-		show_usage_and_exit();
+		show_usage_and_exit(true);
 	}
 }
 
@@ -1646,7 +1646,7 @@ static void parse_cmdline(int argc, char *argv[])
 	if (optind < argc) {
 		fprintf(stderr, "%s: unsupported non-option argument '%s'\n",
 			argv[0], argv[optind]);
-		show_usage_and_exit();
+		show_usage_and_exit(true);
 	}
 
 	parse_config();

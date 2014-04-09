@@ -294,7 +294,7 @@ static int sockopt_keepalive_cb(void *userdata, curl_socket_t fd,
 }
 #endif
 
-json_t *json_rpc_call(pool_params* pool, CURL *curl, const char *url,
+json_t *json_rpc_call(struct pool_params* pool, CURL *curl, const char *url,
 		      const char *userpass, const char *rpc_req,
 		      bool longpoll_scan, bool longpoll, int *curl_err)
 {
