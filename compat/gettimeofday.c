@@ -51,7 +51,11 @@ void usleep(__int64 waitTime)
 { 
     if (waitTime > 0)
     {
-        if (waitTime > 100)
+        if (waitTime >= 1000)
+        {
+            Sleep(waitTime / 1000);
+        }
+        else if (waitTime > 100)
         {
             // use a waitable timer for larger intervals > 0.1ms
 

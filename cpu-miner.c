@@ -52,19 +52,15 @@
 
 bool abort_flag = false; // CB
 bool autotune = true;
-int device_map[MAX_DEVICES] = { 0 };
-int device_interactive[MAX_DEVICES] = { -1 };
-int device_batchsize[MAX_DEVICES] = { 1024 };
-#if WIN32
-int device_backoff[MAX_DEVICES] = { 12 };
-#else
-int device_backoff[MAX_DEVICES] = { 2 };
-#endif
-int device_lookup_gap[MAX_DEVICES] = { 1 };
-int device_texturecache[MAX_DEVICES] = { -1 };
-int device_singlememory[MAX_DEVICES] = { -1 };
-char *device_config[MAX_DEVICES] = { NULL };
-char *device_name[MAX_DEVICES] = { NULL };
+int device_map[MAX_DEVICES];
+int device_interactive[MAX_DEVICES];
+int device_batchsize[MAX_DEVICES];
+int device_backoff[MAX_DEVICES];
+int device_lookup_gap[MAX_DEVICES];
+int device_texturecache[MAX_DEVICES];
+int device_singlememory[MAX_DEVICES];
+char *device_config[MAX_DEVICES];
+char *device_name[MAX_DEVICES];
 
 #if defined(USE_WRAPNVML)
 wrap_nvml_handle *nvmlh = NULL;
@@ -1518,7 +1514,7 @@ static void parse_arg (int key, char *arg)
 				device_config[tmp_n_threads++] = last = strdup(pch);
 				pch = strtok (NULL, ",");
 			}
-			while (tmp_n_threads < 8) device_config[tmp_n_threads++] = last;
+			while (tmp_n_threads < MAX_DEVICES) device_config[tmp_n_threads++] = last;
 		}
 		break;
 	case 'i':
@@ -1529,7 +1525,7 @@ static void parse_arg (int key, char *arg)
 				device_interactive[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
-			while (tmp_n_threads < 8) device_interactive[tmp_n_threads++] = last;
+			while (tmp_n_threads < MAX_DEVICES) device_interactive[tmp_n_threads++] = last;
 		}
 		break;
 	case 'b':
@@ -1540,7 +1536,7 @@ static void parse_arg (int key, char *arg)
 				device_batchsize[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
-			while (tmp_n_threads < 8) device_batchsize[tmp_n_threads++] = last;
+			while (tmp_n_threads < MAX_DEVICES) device_batchsize[tmp_n_threads++] = last;
 		}
 		break;
 	case 'C':
@@ -1551,7 +1547,7 @@ static void parse_arg (int key, char *arg)
 				device_texturecache[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
-			while (tmp_n_threads < 8) device_texturecache[tmp_n_threads++] = last;
+			while (tmp_n_threads < MAX_DEVICES) device_texturecache[tmp_n_threads++] = last;
 		}
 		break;
 	case 'm':
@@ -1562,7 +1558,7 @@ static void parse_arg (int key, char *arg)
 				device_singlememory[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
-			while (tmp_n_threads < 8) device_singlememory[tmp_n_threads++] = last;
+			while (tmp_n_threads < MAX_DEVICES) device_singlememory[tmp_n_threads++] = last;
 		}
 		break;
 	case 'H':
@@ -1578,7 +1574,7 @@ static void parse_arg (int key, char *arg)
 				device_lookup_gap[tmp_n_threads++] = last = atoi(pch);
 				pch = strtok (NULL, ",");
 			}
-			while (tmp_n_threads < 8) device_lookup_gap[tmp_n_threads++] = last;
+			while (tmp_n_threads < MAX_DEVICES) device_lookup_gap[tmp_n_threads++] = last;
 		}
 		break;
 	case 1008:
@@ -1725,7 +1721,21 @@ int main(int argc, char *argv[])
 	printf("\t  YAC donation address: Y87sptDEcpLkLeAuex6qZioDbvy1qXZEj4\n");
 
 	for(int thr_id = 0; thr_id < MAX_DEVICES; thr_id++)
+    {
         device_map[thr_id] = thr_id;
+        device_interactive[thr_id] = -1;
+        device_batchsize[thr_id] = 1024;
+        #if WIN32
+        device_backoff[thr_id] = 12;
+        #else
+        device_backoff[thr_id] = 2;
+        #endif
+        device_lookup_gap[thr_id] = 1;
+        device_texturecache[thr_id] = -1;
+        device_singlememory[thr_id] = -1;
+        device_config[thr_id] = NULL;
+        device_name[thr_id] = NULL;
+    }
 
     memset(pools, 0, sizeof(pools));
 

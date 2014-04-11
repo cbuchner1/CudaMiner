@@ -82,14 +82,14 @@ extern "C" int cuda_num_devices()
     cudaError_t err = cudaDriverGetVersion(&version);
     if (err != cudaSuccess)
     {
-        applog(LOG_ERR, "Unable to query CUDA driver version! Is an nVidia driver installed?");
+        applog(LOG_ERR, "FATAL: Unable to query CUDA driver version! Is an nVidia driver installed?");
         return -1;
     }
 
     int maj = version / 1000, min = version % 100; // same as in deviceQuery sample
     if (maj < DMAJ || (maj == DMAJ && min < DMIN))
     {
-        applog(LOG_ERR, "Driver does not support CUDA %d.%d API! Update your nVidia driver!", DMAJ, DMIN);
+        applog(LOG_ERR, "FATAL: Driver does not support CUDA %d.%d API! Update your nVidia driver!", DMAJ, DMIN);
         return -1;
     }
 
@@ -97,7 +97,7 @@ extern "C" int cuda_num_devices()
     err = cudaGetDeviceCount(&GPU_N);
     if (err != cudaSuccess)
     {
-        applog(LOG_ERR, "Unable to query number of CUDA devices! Is an nVidia driver installed?");
+        applog(LOG_ERR, "FATAL: Unable to query number of CUDA devices! Is an nVidia driver installed?");
         return -1;
     }
     return GPU_N;
@@ -421,7 +421,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
 
     if (kernel->get_major_version() > props.major || kernel->get_major_version() == props.major && kernel->get_minor_version() > props.minor)
     {
-        applog(LOG_ERR, "GPU #%d: the '%c' kernel requires %d.%d capability!", device_map[thr_id], kernel->get_identifier(), kernel->get_major_version(), kernel->get_minor_version());
+        applog(LOG_ERR, "GPU #%d: FATAL: the '%c' kernel requires %d.%d capability!", device_map[thr_id], kernel->get_identifier(), kernel->get_major_version(), kernel->get_minor_version());
+        return 0;
     }
 
     // set whatever cache configuration and shared memory bank mode the kernel prefers
@@ -539,7 +540,8 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
         }
         else
         {
-            applog(LOG_ERR, "GPU #%d: Launch config '%s' requires too much memory!", device_map[thr_id], device_config[thr_id]);
+            applog(LOG_ERR, "GPU #%d: FATAL: Launch config '%s' requires too much memory!", device_map[thr_id], device_config[thr_id]);
+            return 0;
         }
     }
     else
@@ -579,13 +581,13 @@ int find_optimal_blockcount(int thr_id, KernelInterface* &kernel, bool &concurre
     {
         if (optimal_blocks * WARPS_PER_BLOCK > MAXWARPS[thr_id])
         {
-            applog(LOG_ERR, "GPU #%d: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
+            applog(LOG_ERR, "GPU #%d: FATAL: Given launch config '%s' requires too much memory.", device_map[thr_id], device_config[thr_id]);
             return 0;
         }
 
         if (WARPS_PER_BLOCK > kernel->max_warps_per_block())
         {
-            applog(LOG_ERR, "GPU #%d: Given launch config '%s' exceeds warp limit for '%c' kernel.", device_map[thr_id], device_config[thr_id], kernel->get_identifier());
+            applog(LOG_ERR, "GPU #%d: FATAL: Given launch config '%s' exceeds warp limit for '%c' kernel.", device_map[thr_id], device_config[thr_id], kernel->get_identifier());
             return 0;
         }
     }
@@ -990,24 +992,28 @@ extern "C" bool cuda_scrypt_sync(int thr_id, int stream)
 {
     cudaError_t err;
     
-    if(device_interactive[thr_id] && !opt_benchmark)
+    if(device_interactive[thr_id])// && !opt_benchmark)
     {
         // For devices that also do desktop rendering or compositing, we want to free up some time slots.
         // That requires making a pause in work submission when there is no active task on the GPU,
         // and Device Synchronize ensures that.
 
-        err = cudaDeviceSynchronize();
+        // this call was replaced by the loop below to workaround the high CPU usage issue
+        //err = cudaDeviceSynchronize();
 
-        // Use the regular sleep function on Win32 to free up CPU resources.
-#ifdef WIN32
-        Sleep(1);
-#else
-        usleep(100);
-#endif
+        while((err = cudaStreamQuery(context_streams[0][thr_id])) == cudaErrorNotReady || 
+              (err == cudaSuccess && (err = cudaStreamQuery(context_streams[1][thr_id])) == cudaErrorNotReady)) 
+            usleep(1000);
+
+        usleep(1000);
     }
     else
     {
-        err = cudaStreamSynchronize(context_streams[stream][thr_id]);
+        // this call was replaced by the loop below to workaround the high CPU usage issue
+        //err = cudaStreamSynchronize(context_streams[stream][thr_id]);
+
+        while((err = cudaStreamQuery(context_streams[stream][thr_id])) == cudaErrorNotReady)
+            usleep(1000);
     }
 
     if(err != cudaSuccess)
