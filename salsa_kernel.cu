@@ -1,4 +1,3 @@
-
 //
 // Contains the autotuning logic and some utility functions.
 // Note that all CUDA kernels have been moved to other .cu files
@@ -992,7 +991,7 @@ extern "C" bool cuda_scrypt_sync(int thr_id, int stream)
 {
     cudaError_t err;
     
-    if(device_interactive[thr_id]) && !opt_benchmark)
+    if((device_interactive[thr_id]) && !opt_benchmark)
     {
         // For devices that also do desktop rendering or compositing, we want to free up some time slots.
         // That requires making a pause in work submission when there is no active task on the GPU,
