@@ -6,7 +6,9 @@
 
 #include <string.h>
 #include <stdio.h>
-#include <malloc.h>
+#ifndef __APPLE__
+  #include <malloc.h>
+#endif
 
 #include "sha3.h"
 
