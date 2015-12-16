@@ -131,11 +131,14 @@ AC_CONFIG_FILES([
 
 dnl find out what version we are running
 ARCH=`uname -m`
-if [[ $ARCH == "x86_64" ]];
+OS=`uname -s`
+SUFFIX=""
+if [[ $ARCH == "x86_64" && $OS != "Darwin" ]];
 then
   SUFFIX="64"
-else
-  SUFFIX=""
+elif [[ $OS == "Darwin" ]];
+then
+  CXXFLAGS="$CXXFLAGS -lc++"
 fi
 
 dnl Setup CUDA paths
@@ -154,6 +157,16 @@ else
    CUDA_LDFLAGS="-L/usr/local/cuda/lib$SUFFIX"
    NVCC="nvcc"
 fi
+
+dnl Setup OpenSSL path
+AC_ARG_WITH([openssl],
+   [  --with-openssl=PATH     prefix where openssl is isntalled])
+
+if test -n "$with_openssl"
+then
+  CFLAGS="$CFLAGS -I$with_openssl/include"
+fi
+
 AC_SUBST(CUDA_CFLAGS)
 AC_SUBST(CUDA_LIBS)
 AC_SUBST(CUDA_LDFLAGS)

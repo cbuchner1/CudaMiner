@@ -74,6 +74,8 @@ wrap_nvml_handle * wrap_nvml_create() {
 #elif defined(__linux)
   /* 64-bit linux assumed */
 #define  libnvidia_ml "/usr/lib/libnvidia-ml.so"
+#elif defined(__APPLE__)
+#define  libnvidia_ml ""
 #else
 #error "Unrecognized platform: need NVML DLL path for this platform..."
 #endif
