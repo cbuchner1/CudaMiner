@@ -1,0 +1,12 @@
+.deps/
+autom4te.cache/
+*.o
+*.a
+*.log
+*.status
+*.in
+*.m4
+configure
+Makefile
+cpuminer-config.h
+cudaminer
